@@ -17,12 +17,13 @@ from typing import Any, Dict, List, Optional
 import pandas as pd
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app import repository as repo
 from app.db import commit, get_session
-from app.auth_routes import require_capability
-from app.db_models import EnvironmentProfile
+from app.auth_routes import require_capability, require_user
+from app.db_models import Artefact, CryptoKey, Dataset, EnvironmentProfile
 
 router = APIRouter(prefix="/api/environments", tags=["environments"])
 
@@ -32,7 +33,7 @@ ALL_MODULES = ["schema", "computed", "data", "report", "yaml", "flows", "edi",
 
 TEMPLATES: Dict[str, dict] = {
     "complet": {
-        "label": "Complet",
+        "label": "Complet (tous les modules)",
         "description": "Tous les modules, configuration libre — le profil de l'équipe data.",
         "modules": list(ALL_MODULES),
         "config_locked": False,
@@ -184,6 +185,75 @@ def reset_profile(name: str, s: Session = Depends(get_session)):
         s.delete(p)
         commit(s)
     return {"reset": name}
+
+
+@router.get("/{name}/content")
+def environment_content(name: str, s: Session = Depends(get_session),
+        _cap=Depends(require_capability("env.profile"))):
+    """What this environment owns, by name — the inventory an admin needs
+    before choosing what to migrate ahead of a deletion."""
+    artefacts = [{"id": a.id, "kind": a.kind, "name": a.name, "archived": a.archived}
+                for a in s.scalars(select(Artefact).where(Artefact.environment == name))]
+    datasets = [{"id": d.id, "name": d.name, "archived": d.archived}
+               for d in s.scalars(select(Dataset).where(Dataset.environment == name))]
+    keys = [{"id": k.id, "name": k.name, "active": k.active}
+           for k in s.scalars(select(CryptoKey).where(CryptoKey.environment == name))]
+    return {"artefacts": artefacts, "datasets": datasets, "keys": keys}
+
+
+class DeleteEnvIn(BaseModel):
+    migrate_artefact_ids: List[str] = Field(default_factory=list)
+    migrate_dataset_ids: List[str] = Field(default_factory=list)
+    migrate_key_ids: List[str] = Field(default_factory=list)
+    target_environment: str = "default"
+    mode: str = "profile_only"      # "profile_only" | "cascade"
+    confirm_name: str = ""          # required, and must match `name`, in cascade mode
+
+
+@router.delete("/{name}")
+def delete_environment(name: str, req: DeleteEnvIn,
+                       user=Depends(require_user), s: Session = Depends(get_session)):
+    """
+    Remove an environment. Chosen artefacts/datasets/keys are migrated to
+    `target_environment` first; whatever is left is either just detached
+    (`profile_only` — the environment becomes orphaned, its data untouched)
+    or hard-deleted (`cascade`).
+
+    This crosses environments — it writes into another one and can destroy
+    data no single environment's admin owns alone — so it needs a superadmin
+    rather than the `env.profile` capability used everywhere else in this file.
+    """
+    if getattr(user, "id", "") and not user.is_superadmin:
+        raise HTTPException(403, "Seul un administrateur général peut supprimer un environnement.")
+    if name == repo.DEFAULT_ENV:
+        raise HTTPException(422, "L'environnement « default » ne peut pas être supprimé.")
+    if req.mode not in ("profile_only", "cascade"):
+        raise HTTPException(422, "mode doit être 'profile_only' ou 'cascade'.")
+    if req.mode == "cascade" and req.confirm_name != name:
+        raise HTTPException(
+            422, "Tapez le nom de l'environnement pour confirmer la suppression en cascade.")
+
+    try:
+        for aid in req.migrate_artefact_ids:
+            repo.move_artefact_to_environment(s, aid, name, req.target_environment)
+        for did in req.migrate_dataset_ids:
+            repo.move_dataset_to_environment(s, did, name, req.target_environment)
+        for kid in req.migrate_key_ids:
+            repo.move_crypto_key_to_environment(s, kid, name, req.target_environment)
+    except repo.NotFound as e:
+        raise HTTPException(404, str(e))
+    except repo.Conflict as e:
+        raise HTTPException(409, str(e))
+
+    try:
+        if req.mode == "cascade":
+            repo.delete_environment_cascade(s, name)
+        else:
+            repo.delete_environment_profile_only(s, name)
+    except repo.Conflict as e:
+        raise HTTPException(409, str(e))
+    commit(s)
+    return {"deleted": name, "mode": req.mode}
 
 
 # ══════════════════════════════════════════════════════════════════════

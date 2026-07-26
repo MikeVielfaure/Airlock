@@ -1097,7 +1097,7 @@ async def run_full_pipeline(
     """
     One-shot automation endpoint. Delegates to PipelineEngine (shared with
     /api/flows/{id}/run) and returns the staged result:
-      config -> load -> structure -> strict_header -> tco -> validation -> done.
+      config -> load -> structure -> strict_header/min_header -> tco -> validation -> done.
     """
     # -- parse config (route-level stage) --------------------------
     try:
@@ -1142,21 +1142,25 @@ def drop(sid: str):
 
 @app.post("/api/config/export", response_model=ExportResponse)
 def export_yaml(req: ExportRequest):
-    file_config = _config.build_file_config(
-        file_type=req.type,
-        encoding=req.encoding,
-        delimiter=req.delimiter,
-        header_config=req.header,
-        field_configs=req.fields,
-        visible_cols=req.visible_cols,
-        sheet=req.sheet,
-        filters=req.filters,
-        strict_header=req.strict_header,
-        variables=req.variables,
-        table_marker=req.table_marker,
-        table_index=req.table_index,
-        table_header_mode=req.table_header_mode,
-    )
+    try:
+        file_config = _config.build_file_config(
+            file_type=req.type,
+            encoding=req.encoding,
+            delimiter=req.delimiter,
+            header_config=req.header,
+            field_configs=req.fields,
+            visible_cols=req.visible_cols,
+            sheet=req.sheet,
+            filters=req.filters,
+            strict_header=req.strict_header,
+            min_header=req.min_header,
+            variables=req.variables,
+            table_marker=req.table_marker,
+            table_index=req.table_index,
+            table_header_mode=req.table_header_mode,
+        )
+    except ValueError as e:
+        raise HTTPException(422, str(e))
     return ExportResponse(yaml=_config.to_yaml(file_config))
 
 

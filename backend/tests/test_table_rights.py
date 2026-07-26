@@ -141,6 +141,27 @@ def test_a_grant_can_target_a_role_so_it_scales(team):
     assert r.status_code == 200, r.text
 
 
+def test_a_grant_can_target_a_whole_other_environment(team):
+    """Sharing a table with an environment, not just a person or a role in it."""
+    made = _make_table(team["editor1"], "inter-env", managed=False).json()
+    dsid = made["dataset"]["id"]
+
+    client.post("/api/admin/quick-user",
+                json={"email": "sat@y.fr", "memberships": {"satellite": "viewer"}},
+                headers=_h(team["chef"]))
+    sat = client.post("/api/auth/login",
+                      json={"email": "sat@y.fr", "password": "motdepasse1"}).json()["token"]
+
+    ko = client.post(f"/api/datasets/{dsid}/open?env=satellite", headers=_h(sat))
+    assert ko.status_code == 403
+
+    client.post(f"/api/datasets/{dsid}/grants",
+                json={"environment": "satellite", "permission": "read"},
+                headers=_h(team["editor1"]))
+    ok = client.post(f"/api/datasets/{dsid}/open?env=satellite", headers=_h(sat))
+    assert ok.status_code == 200, ok.text
+
+
 def test_sharing_is_itself_a_permission(team):
     """Otherwise anyone with write could widen access indefinitely."""
     made = _make_table(team["editor1"], "verrou", managed=True).json()

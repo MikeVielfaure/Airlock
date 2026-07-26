@@ -24,6 +24,8 @@ interface Props {
   assignConfigField: (col: string, field: FieldConfig) => void;
   strictHeader: boolean;
   setStrictHeader: (v: boolean) => void;
+  minHeader: boolean;
+  setMinHeader: (v: boolean) => void;
   hasConfig: boolean;
 }
 
@@ -102,13 +104,22 @@ export function SchemaPanel(p: Props) {
             </span>
           </label>
         )}
-        {p.strictHeader && p.hasConfig && (p.unmatchedConfig.length > 0 || p.unmapped.length > 0) && (
+        {p.hasConfig && (
+          <label className="check" style={{ marginTop: 4 }}>
+            <input type="checkbox" checked={p.minHeader} onChange={(e) => p.setMinHeader(e.target.checked)} />
+            <span className="ctxt">Minimum header
+              <div className="csub">The file must contain at least the config's columns — extra columns are tolerated and ignored.</div>
+            </span>
+          </label>
+        )}
+        {((p.strictHeader && (p.unmatchedConfig.length > 0 || p.unmapped.length > 0)) ||
+          (p.minHeader && p.unmatchedConfig.length > 0)) && p.hasConfig && (
           <div className="banner err" style={{ marginTop: 8 }}>
             <span>
-              <strong>Strict header mismatch.</strong>{" "}
+              <strong>{p.strictHeader ? "Strict header mismatch." : "Minimum header mismatch."}</strong>{" "}
               {p.unmatchedConfig.length > 0 && `${p.unmatchedConfig.length} config field(s) missing from the file. `}
-              {p.unmapped.length > 0 && `${p.unmapped.length} file column(s) not in the config. `}
-              Resolve below, or uncheck strict header.
+              {p.strictHeader && p.unmapped.length > 0 && `${p.unmapped.length} file column(s) not in the config. `}
+              Resolve below{p.strictHeader ? ", or uncheck strict header." : ", or uncheck minimum header."}
             </span>
           </div>
         )}

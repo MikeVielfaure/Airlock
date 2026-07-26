@@ -624,3 +624,30 @@ class DatasetGrant(Base):
 
     __table_args__ = (UniqueConstraint("dataset_id", "subject_kind", "subject",
                                        name="uq_dataset_grant"),)
+
+
+class ArtefactGrant(Base):
+    """
+    An environment reading an artefact it does not own.
+
+    Ownership (Artefact.environment) stays the one and only source of who may
+    create a new version — grants only ever add read access, never write:
+    handing out write here would split "who may version this" across two
+    tables. v1 keeps `subject_kind` to "environment" (an artefact has no
+    individual owner the way a dataset can) and `permission` to "read", but
+    both columns stay free text rather than a SQL enum so a future kind
+    doesn't need a migration to exist.
+    """
+    __tablename__ = "artefact_grants"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_uuid)
+    artefact_id: Mapped[str] = mapped_column(
+        ForeignKey("artefacts.id", ondelete="CASCADE"), index=True)
+    subject_kind: Mapped[str] = mapped_column(String(8), default="environment")
+    subject: Mapped[str] = mapped_column(String(64), index=True)
+    permission: Mapped[str] = mapped_column(String(8), default="read")
+    granted_by: Mapped[str] = mapped_column(String(32), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+    __table_args__ = (UniqueConstraint("artefact_id", "subject_kind", "subject",
+                                       name="uq_artefact_grant"),)

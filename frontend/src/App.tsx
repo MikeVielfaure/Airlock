@@ -49,7 +49,17 @@ export default function App() {
   const [sheet, setSheet] = useState<string | null>(null);     // chosen Excel sheet
   const [sheets, setSheets] = useState<string[]>([]);          // available Excel sheets
   const [tableFilters, setTableFilters] = useState<Record<string, string>>({});  // per-column filters (by displayed name)
-  const [strictHeader, setStrictHeader] = useState(false);     // require exact header match vs config
+  const [strictHeader, setStrictHeaderRaw] = useState(false);  // require exact header match vs config
+  const [minHeader, setMinHeaderRaw] = useState(false);        // require at least config's columns, extra tolerated
+  // mutually exclusive: the two modes express contradictory intents
+  const setStrictHeader = useCallback((v: boolean) => {
+    setStrictHeaderRaw(v);
+    if (v) setMinHeaderRaw(false);
+  }, []);
+  const setMinHeader = useCallback((v: boolean) => {
+    setMinHeaderRaw(v);
+    if (v) setStrictHeaderRaw(false);
+  }, []);
   const [configVariables, setConfigVariables] = useState<Record<string, string>>({});  // named values for expressions
   const [tableMarker, setTableMarker] = useState("");          // Excel multi-table: row marker
   const [tableIndex, setTableIndex] = useState(0);             // which table (0-based)
@@ -113,6 +123,7 @@ export default function App() {
       if (fc.encoding) setEncoding(fc.encoding);
       setTableFilters(fc.filters ?? {});       // restore saved filters
       setStrictHeader(Boolean(fc.strict_header));
+      setMinHeader(Boolean(fc.min_header));
       setConfigVariables(fc.variables ?? {});
       setTableMarker(fc.table_marker ?? "");
       setTableIndex(fc.table_index ?? 0);
@@ -174,6 +185,7 @@ export default function App() {
       setTableFilters({});
       setConfigVariables({});
       setStrictHeader(false);
+      setMinHeader(false);
       setFields(Object.fromEntries(cols.map((c) => [c, defaultField(c)])));
       setResult(null);
       setTab("schema");
@@ -209,6 +221,7 @@ export default function App() {
     setUnmapped([]); setConfigFields({}); setUnmatchedConfig([]);
     setComputed([]); setTableFilters({}); setConfigVariables({});
     setStrictHeader(false);
+    setMinHeader(false);
     // A session seeded from a config carries its rules; otherwise start plain.
     setFields(res.seeded_fields && Object.keys(res.seeded_fields).length
       ? Object.fromEntries(cols.map((c) => [c, res.seeded_fields![c] ?? defaultField(c)]))
@@ -358,7 +371,7 @@ export default function App() {
     setFields({}); setComputed([]); setResult(null);
     setTco(null); setConfigYaml(null); setConfigFields({}); setUnmatchedConfig([]);
     setTableFilters({}); setHeader(defaultHeader()); setTab("schema");
-    setConfigVariables({}); setStrictHeader(false);
+    setConfigVariables({}); setStrictHeader(false); setMinHeader(false);
     setTableMarker(""); setTableIndex(0); setTableHeaderMode("local"); setTableCount(0);
     toast("Reset — everything cleared.", "ok");
   }, [toast]);
@@ -374,6 +387,7 @@ export default function App() {
       delimiter: delim ?? ";",
       sheet: sheet ?? null,
       strict_header: strictHeader,
+      min_header: minHeader,
       variables: configVariables,
       table_marker: tableMarker || null,
       table_index: tableIndex,
@@ -384,7 +398,7 @@ export default function App() {
       filters: tableFilters,
     }).then((r) => setYaml(r.yaml)).catch((e) => toast(String((e as Error).message), "err"))
       .finally(() => setYamlGen(false));
-  }, [tab, fileType, encoding, delimiterKey, header, fields, visible, presets, sheet, tableFilters, strictHeader, configVariables, tableMarker, tableIndex, tableHeaderMode, toast]);
+  }, [tab, fileType, encoding, delimiterKey, header, fields, visible, presets, sheet, tableFilters, strictHeader, minHeader, configVariables, tableMarker, tableIndex, tableHeaderMode, toast]);
 
   const copyYaml = useCallback(() => {
     navigator.clipboard.writeText(yaml).then(() => toast("YAML copied.", "ok"));
@@ -773,7 +787,9 @@ export default function App() {
                     presets={presets} tcoLabels={tco?.labels ?? []} stats={result?.stats ?? null}
                     configFields={configFields}
                     unmatchedConfig={unmatchedConfig} assignConfigField={assignConfigField}
-                    strictHeader={strictHeader} setStrictHeader={setStrictHeader} hasConfig={Boolean(configYaml)}
+                    strictHeader={strictHeader} setStrictHeader={setStrictHeader}
+                    minHeader={minHeader} setMinHeader={setMinHeader}
+                    hasConfig={Boolean(configYaml)}
                   />
                 )}
                 {tab === "computed" && (

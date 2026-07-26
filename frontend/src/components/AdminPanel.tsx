@@ -20,7 +20,8 @@ interface Member { user_id: string; email: string; display_name: string;
                    role: string; from_sso: boolean }
 interface UserRow { id: string; email: string; display_name: string;
                     is_superadmin: boolean; active: boolean;
-                    environments: Record<string, string>; sso: string[] }
+                    environments: Record<string, string>; sso: string[];
+                    last_login_at?: string }
 
 /**
  * Administration, and a sandbox for trying a role design out.
@@ -247,6 +248,12 @@ function Users({ envs, notify }: { envs: string[]; notify: Props["notify"] }) {
 }
 
 /* ── environments, profiles, module list ─────────────────────────── */
+interface EnvContent {
+  artefacts: { id: string; kind: string; name: string; archived: boolean }[];
+  datasets: { id: string; name: string; archived: boolean }[];
+  keys: { id: string; name: string; active: boolean }[];
+}
+
 function Envs({ envs, notify, refreshEnvs }: {
   envs: string[]; notify: Props["notify"]; refreshEnvs: () => Promise<void>;
 }) {
@@ -259,14 +266,49 @@ function Envs({ envs, notify, refreshEnvs }: {
   const [newName, setNewName] = useState("");
   const [tpl, setTpl] = useState("complet");
 
+  // deletion
+  const [content, setContent] = useState<EnvContent | null>(null);
+  const [migrateArt, setMigrateArt] = useState<Set<string>>(new Set());
+  const [migrateDs, setMigrateDs] = useState<Set<string>>(new Set());
+  const [migrateKey, setMigrateKey] = useState<Set<string>>(new Set());
+  const [targetEnv, setTargetEnv] = useState("default");
+  const [mode, setMode] = useState<"profile_only" | "cascade">("profile_only");
+  const [confirmName, setConfirmName] = useState("");
+
+  // grants
+  const [grantSrc, setGrantSrc] = useState("default");
+  const [srcContent, setSrcContent] = useState<EnvContent | null>(null);
+  const [picked, setPicked] = useState<{ kind: string; id: string; name: string } | null>(null);
+  const [pickedGrants, setPickedGrants] = useState<
+    { environment: string; permission: string }[]>([]);
+  const [grantTarget, setGrantTarget] = useState("");
+
   useEffect(() => {
     api.envTemplates().then((r) => { setTemplates(r.templates); setAllModules(r.modules); })
       .catch(() => {});
   }, []);
   useEffect(() => {
-    if (!sel) { setProfile(null); return; }
+    if (!sel) { setProfile(null); setContent(null); return; }
     api.envProfile(sel).then(setProfile).catch(() => setProfile(null));
+    api.environmentContent(sel).then(setContent).catch(() => setContent(null));
+    setMigrateArt(new Set()); setMigrateDs(new Set()); setMigrateKey(new Set());
+    setConfirmName(""); setMode("profile_only");
   }, [sel]);
+  useEffect(() => {
+    api.environmentContent(grantSrc).then(setSrcContent).catch(() => setSrcContent(null));
+    setPicked(null); setPickedGrants([]);
+  }, [grantSrc]);
+
+  const toggleIn = (set: Set<string>, setSet: (s: Set<string>) => void, id: string) => {
+    const next = new Set(set);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    setSet(next);
+  };
+
+  const refreshPickedGrants = async (kind: string, id: string) => {
+    try { setPickedGrants((await api.listArtefactGrants(kind, id)).grants); }
+    catch (e) { notify(e instanceof Error ? e.message : String(e), "err"); }
+  };
 
   const toggle = (m: string) => {
     if (!profile) return;
@@ -282,6 +324,7 @@ function Envs({ envs, notify, refreshEnvs }: {
       <div className="ad-form">
         <input value={newName} onChange={(e) => setNewName(e.target.value)}
                placeholder="nom (rh, adv, bac-a-sable…)" />
+        <label className="ad-note" style={{ marginLeft: 4 }}>Modèle de départ</label>
         <select value={tpl} onChange={(e) => setTpl(e.target.value)}>
           {templates.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
         </select>
@@ -345,6 +388,157 @@ function Envs({ envs, notify, refreshEnvs }: {
                 notify("Profil remis à zéro — tout s'affiche à nouveau.", "ok");
               } catch (e) { notify(e instanceof Error ? e.message : String(e), "err"); }
             }}><IconReset size={12} /> Tout réafficher</button>
+          </div>
+        </>
+      )}
+
+      {sel && content && (
+        <>
+          <h4><IconWarn size={13} /> Supprimer « {sel} »</h4>
+          <p className="ad-note">
+            Cochez ce qui doit être migré vers un autre environnement avant la
+            suppression. Ce qui reste est soit détaché (l'environnement devient
+            orphelin, ses données restent intactes), soit supprimé pour de bon.
+          </p>
+          {content.artefacts.length === 0 && content.datasets.length === 0
+            && content.keys.length === 0 && (
+            <p className="ad-note">Cet environnement ne possède aucune donnée.</p>
+          )}
+          {content.artefacts.length > 0 && (
+            <div className="ad-chips">
+              {content.artefacts.map((a) => (
+                <label key={a.id} className="ad-check">
+                  <input type="checkbox" checked={migrateArt.has(a.id)}
+                         onChange={() => toggleIn(migrateArt, setMigrateArt, a.id)} />
+                  <code>{a.kind}</code> {a.name}
+                </label>
+              ))}
+            </div>
+          )}
+          {content.datasets.length > 0 && (
+            <div className="ad-chips">
+              {content.datasets.map((d) => (
+                <label key={d.id} className="ad-check">
+                  <input type="checkbox" checked={migrateDs.has(d.id)}
+                         onChange={() => toggleIn(migrateDs, setMigrateDs, d.id)} />
+                  <IconTable size={11} /> {d.name}
+                </label>
+              ))}
+            </div>
+          )}
+          {content.keys.length > 0 && (
+            <div className="ad-chips">
+              {content.keys.map((k) => (
+                <label key={k.id} className="ad-check">
+                  <input type="checkbox" checked={migrateKey.has(k.id)}
+                         onChange={() => toggleIn(migrateKey, setMigrateKey, k.id)} />
+                  clé « {k.name} »
+                </label>
+              ))}
+            </div>
+          )}
+          <div className="ad-form">
+            <label className="ad-note">Migrer la sélection vers</label>
+            <input value={targetEnv} onChange={(e) => setTargetEnv(e.target.value)}
+                   placeholder="default" style={{ width: 120 }} />
+            <label className="ad-check">
+              <input type="radio" name="del-mode" checked={mode === "profile_only"}
+                     onChange={() => setMode("profile_only")} />
+              détacher seulement (le reste survit, orphelin)
+            </label>
+            <label className="ad-check">
+              <input type="radio" name="del-mode" checked={mode === "cascade"}
+                     onChange={() => setMode("cascade")} />
+              supprimer en cascade (irréversible)
+            </label>
+          </div>
+          {mode === "cascade" && (
+            <div className="ad-form">
+              <label className="ad-note">
+                Tapez « {sel} » pour confirmer la suppression en cascade
+              </label>
+              <input value={confirmName} onChange={(e) => setConfirmName(e.target.value)} />
+            </div>
+          )}
+          <div className="ad-form">
+            <button className="btn sm danger"
+                    disabled={mode === "cascade" && confirmName !== sel}
+                    onClick={async () => {
+              try {
+                const res = await api.deleteEnvironment(sel, {
+                  migrate_artefact_ids: [...migrateArt],
+                  migrate_dataset_ids: [...migrateDs],
+                  migrate_key_ids: [...migrateKey],
+                  target_environment: targetEnv || "default",
+                  mode, confirm_name: confirmName,
+                });
+                notify(`Environnement « ${res.deleted} » ${
+                  res.mode === "cascade" ? "supprimé" : "détaché"}.`, "ok");
+                setSel(""); setProfile(null); setContent(null);
+                await refreshEnvs();
+              } catch (e) { notify(e instanceof Error ? e.message : String(e), "err"); }
+            }}><IconWarn size={12} /> Supprimer l'environnement</button>
+          </div>
+        </>
+      )}
+
+      <h4><IconLayers size={13} /> Droits d'accès accordés</h4>
+      <p className="ad-note">
+        Partager un artefact d'un environnement avec un autre, en lecture, sans
+        en changer le propriétaire. Seul un administrateur de l'environnement
+        propriétaire peut le faire.
+      </p>
+      <div className="ad-form">
+        <label className="ad-note">Environnement source</label>
+        <input value={grantSrc} onChange={(e) => setGrantSrc(e.target.value)}
+               placeholder="default" style={{ width: 120 }} />
+      </div>
+      {srcContent && (
+        <div className="ad-chips">
+          {srcContent.artefacts.map((a) => (
+            <button key={a.id} className={`btn sm ${picked?.id === a.id ? "active" : ""}`}
+                    onClick={() => { setPicked({ kind: a.kind, id: a.id, name: a.name });
+                                     refreshPickedGrants(a.kind, a.id); }}>
+              <code>{a.kind}</code> {a.name}
+            </button>
+          ))}
+          {srcContent.artefacts.length === 0 && (
+            <em className="ad-note">« {grantSrc} » ne possède aucun artefact.</em>
+          )}
+        </div>
+      )}
+      {picked && (
+        <>
+          <p className="ad-note">
+            Accès accordés pour « {picked.name} » :
+          </p>
+          <div className="ad-chips">
+            {pickedGrants.map((g) => (
+              <code key={g.environment}>
+                {g.environment}
+                <button className="btn sm" onClick={async () => {
+                  try {
+                    await api.removeArtefactGrant(picked.kind, picked.id, g.environment);
+                    await refreshPickedGrants(picked.kind, picked.id);
+                    notify(`Accès de « ${g.environment} » révoqué.`, "ok");
+                  } catch (e) { notify(e instanceof Error ? e.message : String(e), "err"); }
+                }}>×</button>
+              </code>
+            ))}
+            {pickedGrants.length === 0 && <em className="ad-note">aucun</em>}
+          </div>
+          <div className="ad-form">
+            <select value={grantTarget} onChange={(e) => setGrantTarget(e.target.value)}>
+              <option value="">— accorder à —</option>
+              {envs.filter((e) => e !== grantSrc).map((e) => <option key={e} value={e}>{e}</option>)}
+            </select>
+            <button className="btn sm" disabled={!grantTarget} onClick={async () => {
+              try {
+                await api.setArtefactGrant(picked.kind, picked.id, grantTarget);
+                await refreshPickedGrants(picked.kind, picked.id);
+                notify(`« ${picked.name} » partagé en lecture avec « ${grantTarget} ».`, "ok");
+              } catch (e) { notify(e instanceof Error ? e.message : String(e), "err"); }
+            }}><IconSave size={12} /> Accorder</button>
           </div>
         </>
       )}
@@ -441,7 +635,8 @@ function Sso({ envs, notify }: { envs: string[]; notify: Props["notify"] }) {
 interface EnvRow {
   name: string; label: string; has_profile: boolean; modules: string[];
   modules_restricted: boolean; config_locked: boolean; tco_editable: boolean;
-  actions: number; members: { email: string; role: string; from_sso: boolean }[];
+  actions: number;
+  members: { email: string; role: string; from_sso: boolean; last_login_at?: string }[];
   roles: Record<string, number>; artefacts: Record<string, number>;
   tables: number; keys: number; runs_error: number; url: string;
 }
@@ -543,17 +738,23 @@ function Overview({ notify }: { notify: Props["notify"] }) {
                       ))}
                     </div>
                     <table className="ad-table">
-                      <thead><tr><th>Membre</th><th>Rôle</th><th>Origine</th></tr></thead>
+                      <thead><tr><th>Membre</th><th>Rôle</th><th>Origine</th>
+                                 <th>Dernière connexion</th></tr></thead>
                       <tbody>
                         {e.members.map((m) => (
                           <tr key={m.email}>
                             <td>{m.email}</td>
                             <td><span className="ad-badge">{m.role}</span></td>
                             <td className="ad-note">{m.from_sso ? "annuaire" : "manuel"}</td>
+                            <td className="ad-note">
+                              {m.last_login_at
+                                ? m.last_login_at.replace("T", " ").slice(0, 16)
+                                : "jamais"}
+                            </td>
                           </tr>
                         ))}
                         {e.members.length === 0 && (
-                          <tr><td colSpan={3} className="ad-note">
+                          <tr><td colSpan={4} className="ad-note">
                             Aucun membre — personne ne peut y entrer.
                           </td></tr>
                         )}
@@ -606,10 +807,7 @@ function Overview({ notify }: { notify: Props["notify"] }) {
               </td>
               <td className="ad-note">{u.sso.join(", ") || "—"}</td>
               <td className="ad-note">
-                {(u as UserRow & { last_login_at?: string }).last_login_at
-                  ? String((u as UserRow & { last_login_at?: string }).last_login_at)
-                      .replace("T", " ").slice(0, 16)
-                  : "jamais"}
+                {u.last_login_at ? u.last_login_at.replace("T", " ").slice(0, 16) : "jamais"}
               </td>
             </tr>
           ))}

@@ -67,6 +67,7 @@ class FileConfig(BaseModel):
     table_index: int = 0                    # which table to keep (0-based)
     table_header_mode: str = "local"        # "local" (per-table) or "global" (shared)
     strict_header: bool = False             # require the file header to match the config exactly
+    min_header: bool = False                # require at least the config's columns; extra tolerated
     variables: Dict[str, str] = Field(default_factory=dict)   # named values usable in expressions
     delete_char_delimiter: Optional[bool] = False
     header: Optional[HeaderConfig] = None
@@ -105,6 +106,7 @@ class ExportRequest(BaseModel):
     table_index: int = 0
     table_header_mode: str = "local"
     strict_header: bool = False
+    min_header: bool = False
     variables: Dict[str, str] = Field(default_factory=dict)
     header: HeaderConfig = Field(default_factory=HeaderConfig)
     fields: Dict[str, FieldConfig] = Field(default_factory=dict)

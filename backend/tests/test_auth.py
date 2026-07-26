@@ -329,6 +329,20 @@ def test_the_overview_assembles_the_whole_picture():
     assert body["totals"]["users"] >= 3
 
 
+def test_the_environment_detail_reports_each_members_last_login():
+    _signup("chef@boite.fr")
+    chef, _ = _login("chef@boite.fr")
+    client.post("/api/admin/quick-user",
+                json={"email": "marie@rh.fr", "memberships": {"apercu-rh": "operator"}},
+                headers=_h(chef))
+    marie, _ = _login("marie@rh.fr")
+
+    rh = [e for e in client.get("/api/admin/overview", headers=_h(chef)).json()["environments"]
+          if e["name"] == "apercu-rh"][0]
+    marie_row = [m for m in rh["members"] if m["email"] == "marie@rh.fr"][0]
+    assert marie_row["last_login_at"]
+
+
 def test_an_environment_nobody_joined_still_appears():
     """That is exactly the one worth seeing in a console."""
     _signup("chef@boite.fr")

@@ -198,7 +198,7 @@ def list_datasets(include_archived: bool = False, env: str = "",
     role = _auth.role_in(s, user, scope) if getattr(user, "id", "") else "admin"
     out = []
     for d in repo.list_datasets(s, include_archived, environment=scope):
-        perm = repo.dataset_permission(s, d, user, role)
+        perm = repo.dataset_permission(s, d, user, role, environment=scope)
         if not repo.can_on_dataset(perm, "read"):
             continue
         info = _info(d)
@@ -288,7 +288,8 @@ def write_dataset(sid: str, req: WriteRequest, env: str = "",
     # environment role: business tables and personal ones cannot share one rule.
     if target is not None and getattr(user, "id", ""):
         scope = env or getattr(target, "environment", "") or repo.DEFAULT_ENV
-        perm = repo.dataset_permission(s, target, user, _auth.role_in(s, user, scope))
+        perm = repo.dataset_permission(s, target, user, _auth.role_in(s, user, scope),
+                                       environment=scope)
         if not repo.can_on_dataset(perm, "write"):
             raise HTTPException(
                 403, f"Vous n'avez pas le droit d'écriture sur la table "
@@ -456,7 +457,7 @@ def open_dataset(dataset_id: str, limit: int = 50_000, env: str = "",
         raise HTTPException(404, str(e))
 
     scope = env or d.environment or repo.DEFAULT_ENV
-    perm = repo.dataset_permission(s, d, user, _auth.role_in(s, user, scope))
+    perm = repo.dataset_permission(s, d, user, _auth.role_in(s, user, scope), environment=scope)
     if not repo.can_on_dataset(perm, "read"):
         raise HTTPException(403, f"Aucun accès en lecture à la table « {d.name} ».")
 
@@ -498,7 +499,8 @@ def open_dataset(dataset_id: str, limit: int = 50_000, env: str = "",
 # ══════════════════════════════════════════════════════════════════════
 class GrantIn(BaseModel):
     email: str = ""                       # grant to one person…
-    role: str = ""                        # …or to everyone holding a role here
+    role: str = ""                        # …or to everyone holding a role here…
+    environment: str = ""                 # …or to a whole other environment (read only)
     permission: str = "read"              # read | write | manage
 
 
@@ -511,7 +513,7 @@ def list_dataset_grants(dataset_id: str, env: str = "", user=Depends(require_use
     except repo.NotFound as e:
         raise HTTPException(404, str(e))
     scope = env or d.environment or repo.DEFAULT_ENV
-    mine = repo.dataset_permission(s, d, user, _auth.role_in(s, user, scope))
+    mine = repo.dataset_permission(s, d, user, _auth.role_in(s, user, scope), environment=scope)
     if not repo.can_on_dataset(mine, "read"):
         raise HTTPException(403, f"Aucun accès à la table « {d.name} ».")
     out = []
@@ -539,7 +541,7 @@ def set_dataset_grant(dataset_id: str, req: GrantIn, env: str = "",
     except repo.NotFound as e:
         raise HTTPException(404, str(e))
     scope = env or d.environment or repo.DEFAULT_ENV
-    mine = repo.dataset_permission(s, d, user, _auth.role_in(s, user, scope))
+    mine = repo.dataset_permission(s, d, user, _auth.role_in(s, user, scope), environment=scope)
     if not repo.can_on_dataset(mine, "manage"):
         raise HTTPException(403, f"Seul un gestionnaire de « {d.name} » peut la partager.")
 
@@ -552,8 +554,10 @@ def set_dataset_grant(dataset_id: str, req: GrantIn, env: str = "",
         if req.role not in _auth.ROLES:
             raise HTTPException(422, f"Rôle inconnu '{req.role}'.")
         subject, kind = req.role, "role"
+    elif req.environment:
+        subject, kind = req.environment, "environment"
     else:
-        raise HTTPException(422, "Indiquez un email ou un rôle.")
+        raise HTTPException(422, "Indiquez un email, un rôle ou un environnement.")
 
     try:
         repo.grant_on_dataset(s, dataset_id, subject=subject, subject_kind=kind,
@@ -574,7 +578,7 @@ def remove_dataset_grant(dataset_id: str, subject: str, kind: str = "user",
     except repo.NotFound as e:
         raise HTTPException(404, str(e))
     scope = env or d.environment or repo.DEFAULT_ENV
-    mine = repo.dataset_permission(s, d, user, _auth.role_in(s, user, scope))
+    mine = repo.dataset_permission(s, d, user, _auth.role_in(s, user, scope), environment=scope)
     if not repo.can_on_dataset(mine, "manage"):
         raise HTTPException(403, f"Seul un gestionnaire de « {d.name} » peut la partager.")
     repo.revoke_on_dataset(s, dataset_id, subject, kind)

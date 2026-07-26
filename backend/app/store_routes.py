@@ -34,6 +34,7 @@ import io
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app import repository as repo
@@ -152,8 +153,8 @@ def list_artefacts(kind: str, include_archived: bool = False,
     `?env=` from a display convention into a boundary.
     """
     _kind_or_404(kind)
-    return [_artefact_info(a) for a in repo.list_artefacts(s, kind, include_archived,
-                                                           environment=scope)]
+    return [_artefact_info(a) for a in repo.list_visible_artefacts(s, kind, include_archived,
+                                                                   environment=scope)]
 
 
 @router.get("/artefacts/{kind}/{artefact_id}/lineage")
@@ -179,23 +180,116 @@ def list_environments(s: Session = Depends(get_session)):
     return {"environments": repo.list_environments(s), "default": repo.DEFAULT_ENV}
 
 
+def _user_can_view_artefact(s: Session, user, art) -> bool:
+    """
+    Whether this specific person may read this artefact, through any
+    environment they belong to — not just the one named in the URL, since
+    these routes are reached by id and the caller rarely states a scope.
+
+    Visible through ownership, an explicit grant, or an EnvironmentProfile pin
+    (`repo.artefact_visible`, checked once per environment the user is a
+    member of) — a "locked configuration" environment could otherwise never
+    actually read the configuration it is locked to.
+    """
+    if not getattr(user, "id", ""):
+        return True                             # setup mode: no accounts yet
+    if getattr(user, "is_superadmin", False):
+        return True
+    from app.services import auth_service as _auth
+    envs = set(_auth.memberships_of(s, user.id).keys())
+    return any(repo.artefact_visible(s, art, e) for e in envs)
+
+
 @router.get("/artefacts/{kind}/{artefact_id}", response_model=ArtefactDetail)
-def get_artefact(kind: str, artefact_id: str, s: Session = Depends(get_session)):
+def get_artefact(kind: str, artefact_id: str, user=Depends(require_user),
+                 s: Session = Depends(get_session)):
     _kind_or_404(kind)
-    return _detail(s, artefact_id, kind)
+    return _detail(s, artefact_id, kind, user)
 
 
-def _detail(s: Session, artefact_id: str, kind: str | None = None) -> ArtefactDetail:
+def _detail(s: Session, artefact_id: str, kind: str | None = None, user=None) -> ArtefactDetail:
     try:
         a = repo.get_artefact(s, artefact_id)
     except repo.NotFound as e:
         raise HTTPException(404, str(e))
     if kind and a.kind != kind:
         raise HTTPException(404, f"{artefact_id} is a '{a.kind}', not a '{kind}'.")
+    if user is not None and not _user_can_view_artefact(s, user, a):
+        # 404, not 403: an artefact one cannot see must not even prove it exists.
+        raise HTTPException(404, f"Artefact {artefact_id} not found.")
     return ArtefactDetail(
         **_artefact_info(a).model_dump(),
         versions=[VersionInfo(id=v.id, version_no=v.version_no, note=v.note,
                               created_at=v.created_at) for v in a.versions])
+
+
+# ══════════════════════════════════════════════════════════════════
+# ARTEFACT GRANTS — sharing an artefact with another environment
+# ══════════════════════════════════════════════════════════════════
+class ArtefactGrantIn(BaseModel):
+    environment: str
+
+
+def _require_owner_admin(s: Session, user, art) -> None:
+    """
+    Only an admin of the *owning* environment may grant access to its own
+    artefact — the beneficiary environment has no say in what it receives.
+    """
+    from app.services import auth_service as _auth
+    if not getattr(user, "id", ""):
+        return                                  # setup mode
+    role = _auth.role_in(s, user, art.environment)
+    if role != "admin":
+        raise HTTPException(
+            403, f"Seul un administrateur de « {art.environment} » peut partager "
+                 f"cet artefact.")
+
+
+@router.get("/artefacts/{kind}/{artefact_id}/grants")
+def list_artefact_grants(kind: str, artefact_id: str,
+                         user=Depends(require_user), s: Session = Depends(get_session)):
+    _kind_or_404(kind)
+    try:
+        a = repo.get_artefact(s, artefact_id)
+    except repo.NotFound as e:
+        raise HTTPException(404, str(e))
+    _require_owner_admin(s, user, a)
+    return {"owner_environment": a.environment,
+            "grants": [{"environment": g.subject, "permission": g.permission}
+                      for g in repo.list_artefact_grants(s, artefact_id)]}
+
+
+@router.post("/artefacts/{kind}/{artefact_id}/grants")
+def set_artefact_grant(kind: str, artefact_id: str, req: ArtefactGrantIn,
+                       user=Depends(require_user), s: Session = Depends(get_session)):
+    _kind_or_404(kind)
+    try:
+        a = repo.get_artefact(s, artefact_id)
+    except repo.NotFound as e:
+        raise HTTPException(404, str(e))
+    _require_owner_admin(s, user, a)
+    if not req.environment.strip():
+        raise HTTPException(422, "Indiquez un environnement.")
+    if req.environment == a.environment:
+        raise HTTPException(422, "Cet environnement possède déjà l'artefact.")
+    repo.grant_artefact_to_environment(s, artefact_id, environment=req.environment,
+                                       granted_by=getattr(user, "id", ""))
+    commit(s)
+    return list_artefact_grants(kind, artefact_id, user, s)
+
+
+@router.delete("/artefacts/{kind}/{artefact_id}/grants/{environment}")
+def remove_artefact_grant(kind: str, artefact_id: str, environment: str,
+                          user=Depends(require_user), s: Session = Depends(get_session)):
+    _kind_or_404(kind)
+    try:
+        a = repo.get_artefact(s, artefact_id)
+    except repo.NotFound as e:
+        raise HTTPException(404, str(e))
+    _require_owner_admin(s, user, a)
+    repo.revoke_artefact_from_environment(s, artefact_id, environment)
+    commit(s)
+    return {"revoked": environment}
 
 
 @router.post("/artefacts/{kind}/{artefact_id}/versions", response_model=ArtefactDetail)
@@ -223,25 +317,31 @@ def add_version(kind: str, artefact_id: str, req: ArtefactUpdate, env: str = "",
 
 
 @router.get("/artefacts/{kind}/{artefact_id}/versions/{version_no}", response_model=VersionBody)
-def get_version(kind: str, artefact_id: str, version_no: int, s: Session = Depends(get_session)):
+def get_version(kind: str, artefact_id: str, version_no: int,
+                user=Depends(require_user), s: Session = Depends(get_session)):
     _kind_or_404(kind)
     try:
         ver = repo.resolve_ref(s, artefact_id, version_no)
     except repo.NotFound as e:
         raise HTTPException(404, str(e))
+    if not _user_can_view_artefact(s, user, ver.artefact):
+        raise HTTPException(404, f"Artefact {artefact_id} not found.")
     return VersionBody(id=ver.id, artefact_id=artefact_id, kind=kind,
                        version_no=ver.version_no, body=ver.body, note=ver.note,
                        created_at=ver.created_at)
 
 
 @router.get("/artefacts/config/{artefact_id}/versions/{version_no}/yaml")
-def get_config_version_yaml(artefact_id: str, version_no: int, s: Session = Depends(get_session)):
+def get_config_version_yaml(artefact_id: str, version_no: int,
+                            user=Depends(require_user), s: Session = Depends(get_session)):
     """A stored config version rendered back to YAML — for the UI 'load from
     library' path and for humans who want to read or diff a version."""
     try:
         ver = repo.resolve_ref(s, artefact_id, version_no)
     except repo.NotFound as e:
         raise HTTPException(404, str(e))
+    if not _user_can_view_artefact(s, user, ver.artefact):
+        raise HTTPException(404, f"Artefact {artefact_id} not found.")
     if ver.artefact.kind != "config":
         raise HTTPException(404, f"{artefact_id} is a '{ver.artefact.kind}', not a config.")
     from app.models import FileConfig

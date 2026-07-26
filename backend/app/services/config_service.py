@@ -43,6 +43,7 @@ class ConfigService:
         sheet: str | None = None,
         filters: dict[str, str] | None = None,
         strict_header: bool = False,
+        min_header: bool = False,
         variables: dict[str, str] | None = None,
         table_marker: str | None = None,
         table_index: int = 0,
@@ -52,6 +53,8 @@ class ConfigService:
         Construit un FileConfig complet.
         Seuls les champs visibles sont inclus dans Fields.
         """
+        if strict_header and min_header:
+            raise ValueError("strict_header et min_header sont mutuellement exclusifs.")
         fields = [
             field_configs[col]
             for col in visible_cols
@@ -66,6 +69,7 @@ class ConfigService:
             table_index=table_index,
             table_header_mode=table_header_mode,
             strict_header=strict_header,
+            min_header=min_header,
             variables=variables or {},
             header=header_config,
             Fields=fields,
@@ -90,6 +94,8 @@ class ConfigService:
             d["table_header_mode"] = getattr(config, "table_header_mode", "local")
         if getattr(config, "strict_header", False):
             d["strict_header"] = True
+        if getattr(config, "min_header", False):
+            d["min_header"] = True
         if getattr(config, "variables", None):
             d["variables"] = dict(config.variables)
         if getattr(config, "filters", None):
@@ -169,6 +175,10 @@ class ConfigService:
             return fd
 
         fields = [FieldConfig(**_norm_field(fd)) for fd in data.get("Fields", [])]
+        strict_header = bool(data.get("strict_header", False))
+        min_header = bool(data.get("min_header", False))
+        if strict_header and min_header:
+            raise ValueError("strict_header et min_header sont mutuellement exclusifs.")
         return FileConfig(
             type=data.get("type"),
             encoding=data.get("encoding"),
@@ -177,7 +187,8 @@ class ConfigService:
             table_marker=data.get("table_marker"),
             table_index=int(data.get("table_index", 0) or 0),
             table_header_mode=data.get("table_header_mode", "local"),
-            strict_header=bool(data.get("strict_header", False)),
+            strict_header=strict_header,
+            min_header=min_header,
             variables=data.get("variables") or {},
             delete_char_delimiter=data.get("delete_char_delimiter", False),
             header=header,

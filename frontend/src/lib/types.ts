@@ -144,6 +144,7 @@ export interface ImportResponse {
     table_index?: number;
     table_header_mode?: string;
     strict_header?: boolean;
+    min_header?: boolean;
     variables?: Record<string, string>;
     header?: HeaderConfig | null;
     Fields: FieldConfig[];

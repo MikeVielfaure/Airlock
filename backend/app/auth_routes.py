@@ -580,7 +580,9 @@ def overview(s: Session = Depends(get_session), user: User = Depends(require_use
         modules = list(prof.modules_json or []) if prof else []
         members = [
             {"email": (u.email if (u := s.get(User, m.user_id)) else ""),
-             "role": m.role, "from_sso": m.from_sso}
+             "role": m.role, "from_sso": m.from_sso,
+             "last_login_at": (u.last_login_at.isoformat()
+                               if u and u.last_login_at else "")}
             for m in s.scalars(select(Membership).where(Membership.environment == name))
         ]
         kinds = {k: count(Artefact, environment=name, kind=k, archived=False)

@@ -43,6 +43,7 @@ export interface ExportArgsLocal {
   delimiter: string;
   sheet?: string | null;
   strict_header?: boolean;
+  min_header?: boolean;
   variables?: Record<string, string>;
   table_marker?: string | null;
   table_index?: number;
@@ -474,6 +475,41 @@ export const api = {
       method: "POST", headers: authHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify(body),
     }).then((r) => json<EnvProfile>(r)),
+
+  environmentContent: (name: string) =>
+    fetch(`${BASE}/environments/${name}/content`, { headers: authHeaders() })
+      .then((r) => json<{
+        artefacts: { id: string; kind: string; name: string; archived: boolean }[];
+        datasets: { id: string; name: string; archived: boolean }[];
+        keys: { id: string; name: string; active: boolean }[];
+      }>(r)),
+
+  deleteEnvironment: (name: string, body: {
+    migrate_artefact_ids?: string[]; migrate_dataset_ids?: string[];
+    migrate_key_ids?: string[]; target_environment?: string;
+    mode: "profile_only" | "cascade"; confirm_name?: string;
+  }) =>
+    fetch(`${BASE}/environments/${name}`, {
+      method: "DELETE", headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify(body),
+    }).then((r) => json<{ deleted: string; mode: string }>(r)),
+
+  // ── artefact grants (v37) ──────────────────────────────────────
+  listArtefactGrants: (kind: string, id: string) =>
+    fetch(`${BASE}/artefacts/${kind}/${id}/grants`, { headers: authHeaders() })
+      .then((r) => json<{ owner_environment: string;
+                          grants: { environment: string; permission: string }[] }>(r)),
+
+  setArtefactGrant: (kind: string, id: string, environment: string) =>
+    fetch(`${BASE}/artefacts/${kind}/${id}/grants`, {
+      method: "POST", headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ environment }),
+    }).then((r) => json<{ owner_environment: string;
+                          grants: { environment: string; permission: string }[] }>(r)),
+
+  removeArtefactGrant: (kind: string, id: string, environment: string) =>
+    fetch(`${BASE}/artefacts/${kind}/${id}/grants/${environment}`,
+          { method: "DELETE", headers: authHeaders() }).then((r) => json<{ revoked: string }>(r)),
 
   /** Turn "these values were not mapped" into rows ready to complete. */
   suggestTco: (uncovered: Record<string, { value: string; count: number }[]>,

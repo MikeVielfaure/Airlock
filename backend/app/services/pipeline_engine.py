@@ -170,7 +170,7 @@ class PipelineEngine:
         structure = dict(file_type=ftype, sheet=sheet_used, sheets=sheets,
                          tables_found=tables_found, columns=cols, rows=int(len(work)))
 
-        # ── 2. MATCH + STRICT HEADER ──────────────────────────────
+        # ── 2. MATCH + HEADER RULES (strict_header / min_header) ──
         match = self._config.match_fields_to_columns(fc, cols)
         matched: dict[str, FieldConfig] = match["matched"]
         missing = [(f.mapping or (f.name[0] if f.name else "?")) for f in match["unmatched"]]
@@ -184,6 +184,14 @@ class PipelineEngine:
                 parts.append(f"colonnes du fichier non déclarées : {', '.join(map(str, extra))}")
             return EngineResult(ok=False, stage="strict_header",
                 error="En-tête strict : " + " ; ".join(parts) + ".",
+                structure=structure, matched_columns=list(matched.keys()),
+                missing_columns=missing, extra_columns=extra)
+
+        if getattr(fc, "min_header", False) and missing:
+            # Extra columns are the whole point of this mode: never blocking.
+            return EngineResult(ok=False, stage="min_header",
+                error="En-tête minimal : colonnes attendues absentes : "
+                      + ", ".join(map(str, missing)) + ".",
                 structure=structure, matched_columns=list(matched.keys()),
                 missing_columns=missing, extra_columns=extra)
 

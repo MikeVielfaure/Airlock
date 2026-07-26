@@ -92,6 +92,14 @@ def test_buttons_that_call_a_flow_are_part_of_the_profile():
     assert call.json()["count"] == 1
 
 
+def test_a_freshly_profiled_environment_appears_in_the_environments_selector():
+    """A profile with no artefact/table yet must still show up — otherwise the
+    admin can never select it again right after creating it."""
+    client.post("/api/environments", json={"name": "sans-donnees", "template": "complet"})
+    names = client.get("/api/environments").json()["environments"]
+    assert "sans-donnees" in names
+
+
 def test_resetting_a_profile_leaves_the_artefacts_alone():
     _cfg("cfg-tmp", "temporaire")
     client.post("/api/environments", json={"name": "temporaire", "template": "complet"})

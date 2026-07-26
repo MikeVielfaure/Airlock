@@ -442,6 +442,25 @@ def test_config_roundtrips_variables_and_strict_header():
     assert imp["file_config"]["variables"] == {"societe": "italie"}
 
 
+def test_config_roundtrips_min_header():
+    exp = client.post("/api/config/export", json={
+        "type": "CSV", "delimiter": ";", "min_header": True,
+        "header": {}, "fields": {"A": {"name": ["A"], "type": "string"}},
+        "visible_cols": ["A"],
+    }).json()
+    assert "min_header: true" in exp["yaml"]
+    imp = client.post("/api/config/import", json={"yaml": exp["yaml"]}).json()
+    assert imp["file_config"]["min_header"] is True
+
+
+def test_strict_header_and_min_header_are_mutually_exclusive():
+    r = client.post("/api/config/export", json={
+        "type": "CSV", "delimiter": ";", "strict_header": True, "min_header": True,
+        "header": {}, "fields": {}, "visible_cols": [],
+    })
+    assert r.status_code == 422
+
+
 def test_dynamic_column_name_matching():
     # A column named like the current short month is matched by a field whose
     # source name is the token [MOIS_COURT].
@@ -629,6 +648,25 @@ def test_pipeline_strict_header_missing_column():
     assert body["ok"] is False and body["stage"] == "strict_header"
     assert "VILLE" in body["missing_columns"]
     assert body["export"] is None
+
+
+def test_pipeline_min_header_missing_column_blocks():
+    cfg = ('type: CSV\ndelimiter: ";"\nmin_header: true\nFields:\n'
+           '  - name: ["AGE"]\n    type: integer\n'
+           '  - name: ["VILLE"]\n    type: string\n')
+    r = _pipe(cfg, "AGE\n30\n")              # VILLE missing
+    body = r.json()
+    assert body["ok"] is False and body["stage"] == "min_header"
+    assert "VILLE" in body["missing_columns"]
+    assert body["export"] is None
+
+
+def test_pipeline_min_header_tolerates_extra_column():
+    cfg = ('type: CSV\ndelimiter: ";"\nmin_header: true\nFields:\n'
+           '  - name: ["AGE"]\n    type: integer\n')
+    r = _pipe(cfg, "AGE;VILLE\n30;Paris\n")   # VILLE unexpected but tolerated
+    body = r.json()
+    assert body["ok"] is True and body["stage"] == "done"
 
 
 def test_pipeline_missing_tco_errors():

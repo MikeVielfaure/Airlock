@@ -21,8 +21,8 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from app.db_models import (
-    Artefact, ArtefactVersion, Dataset, DatasetRow, DatasetWrite, Flow, FlowRun,
-    DatasetGrant, FlowRunStep, Run, Variable,
+    Artefact, ArtefactGrant, ArtefactVersion, Dataset, DatasetRow, DatasetWrite,
+    Flow, FlowRun, DatasetGrant, FlowRunStep, Run, Variable,
 )
 
 
@@ -90,6 +90,35 @@ def list_artefacts(s: Session, kind: Optional[str] = None, include_archived: boo
     q = select(Artefact)
     if environment != "*":
         q = q.where(Artefact.environment == (environment or DEFAULT_ENV))
+    if kind:
+        q = q.where(Artefact.kind == kind)
+    if not include_archived:
+        q = q.where(Artefact.archived == False)  # noqa: E712
+    return list(s.scalars(q.order_by(Artefact.updated_at.desc())))
+
+
+def list_visible_artefacts(s: Session, kind: Optional[str] = None, include_archived: bool = False,
+                           environment: Optional[str] = None) -> list[Artefact]:
+    """
+    Owned artefacts UNION artefacts explicitly granted to this environment.
+
+    `list_artefacts` answers "what does X own" (used for name uniqueness, for
+    admin screens about property); this answers "what can X work with" — the
+    library an environment browses from, which also includes what another
+    environment chose to share with it.
+    """
+    if environment == "*":
+        return list_artefacts(s, kind, include_archived, environment="*")
+    env = environment or DEFAULT_ENV
+    owned_ids = {a.id for a in list_artefacts(s, kind, include_archived, environment=env)}
+    granted_ids = {g.artefact_id for g in s.scalars(
+        select(ArtefactGrant).where(ArtefactGrant.subject_kind == "environment",
+                                    ArtefactGrant.subject == env,
+                                    ArtefactGrant.permission == "read"))}
+    all_ids = owned_ids | granted_ids
+    if not all_ids:
+        return []
+    q = select(Artefact).where(Artefact.id.in_(all_ids))
     if kind:
         q = q.where(Artefact.kind == kind)
     if not include_archived:
@@ -222,9 +251,15 @@ def get_dataset(s: Session, dataset_id: str) -> Dataset:
 
 
 def list_environments(s: Session) -> list[str]:
-    """Every environment that holds something — artefacts or tables."""
+    """Every environment that holds something, has a profile, or has members —
+    a profile-only environment (no artefact/table yet) must still show up,
+    same union as auth_routes.overview()."""
+    from app.db_models import EnvironmentProfile, Membership
+
     envs = {e for (e,) in s.execute(select(Artefact.environment).distinct())}
     envs |= {e for (e,) in s.execute(select(Dataset.environment).distinct())}
+    envs |= {p.name for p in s.scalars(select(EnvironmentProfile))}
+    envs |= {e for (e,) in s.execute(select(Membership.environment).distinct())}
     envs.discard(None)
     envs.add(DEFAULT_ENV)
     return sorted(envs)
@@ -470,7 +505,7 @@ def grant_on_dataset(s: Session, dataset_id: str, *, subject: str,
                      granted_by: str = "") -> DatasetGrant:
     if permission not in PERM_RANK:
         raise Conflict(f"Unknown permission '{permission}'.")
-    if subject_kind not in ("user", "role"):
+    if subject_kind not in ("user", "role", "environment"):
         raise Conflict(f"Unknown subject kind '{subject_kind}'.")
     g = s.scalar(select(DatasetGrant).where(
         DatasetGrant.dataset_id == dataset_id,
@@ -499,7 +534,8 @@ def list_grants(s: Session, dataset_id: str) -> list[DatasetGrant]:
                           .where(DatasetGrant.dataset_id == dataset_id)))
 
 
-def dataset_permission(s: Session, ds, user, env_role: Optional[str]) -> Optional[str]:
+def dataset_permission(s: Session, ds, user, env_role: Optional[str],
+                       environment: str = "") -> Optional[str]:
     """
     The strongest permission this person has on this table.
 
@@ -509,7 +545,8 @@ def dataset_permission(s: Session, ds, user, env_role: Optional[str]) -> Optiona
         would be absurd;
       * an environment admin gets manage, otherwise a table could outlive
         everyone able to administer it;
-      * explicit grants, by user then by role;
+      * explicit grants, by user, by role, then by environment (an environment
+        as a whole, granted read access to a table it does not own);
       * finally the default: a personal table is private, a business table is
         readable by the environment. Making that a flag rather than a convention
         means the choice is made deliberately when the table is created.
@@ -524,7 +561,8 @@ def dataset_permission(s: Session, ds, user, env_role: Optional[str]) -> Optiona
     best: Optional[str] = None
     for g in list_grants(s, ds.id):
         applies = ((g.subject_kind == "user" and g.subject == user.id)
-                   or (g.subject_kind == "role" and env_role and g.subject == env_role))
+                   or (g.subject_kind == "role" and env_role and g.subject == env_role)
+                   or (g.subject_kind == "environment" and environment and g.subject == environment))
         if applies and (best is None or PERM_RANK[g.permission] > PERM_RANK[best]):
             best = g.permission
     if best is not None:
@@ -536,6 +574,65 @@ def can_on_dataset(permission: Optional[str], needed: str) -> bool:
     if permission is None:
         return False
     return PERM_RANK.get(permission, -1) >= PERM_RANK.get(needed, 99)
+
+
+# ══════════════════════════════════════════════════════════════════
+# ARTEFACT GRANTS — one environment reading another's artefact
+# ══════════════════════════════════════════════════════════════════
+def grant_artefact_to_environment(s: Session, artefact_id: str, *, environment: str,
+                                  granted_by: str = "") -> ArtefactGrant:
+    """
+    v1 is deliberately narrow: `subject_kind` is always "environment" and
+    `permission` is always "read" — write stays with the owning environment,
+    so there is never a question of who may create the next version.
+    """
+    g = s.scalar(select(ArtefactGrant).where(
+        ArtefactGrant.artefact_id == artefact_id,
+        ArtefactGrant.subject_kind == "environment", ArtefactGrant.subject == environment))
+    if g is None:
+        g = ArtefactGrant(artefact_id=artefact_id, subject_kind="environment",
+                          subject=environment, permission="read", granted_by=granted_by)
+        s.add(g)
+        s.flush()
+    return g
+
+
+def revoke_artefact_from_environment(s: Session, artefact_id: str, environment: str) -> None:
+    g = s.scalar(select(ArtefactGrant).where(
+        ArtefactGrant.artefact_id == artefact_id,
+        ArtefactGrant.subject_kind == "environment", ArtefactGrant.subject == environment))
+    if g is not None:
+        s.delete(g)
+
+
+def list_artefact_grants(s: Session, artefact_id: str) -> list[ArtefactGrant]:
+    return list(s.scalars(select(ArtefactGrant)
+                          .where(ArtefactGrant.artefact_id == artefact_id)))
+
+
+def artefact_visible(s: Session, art, environment: str) -> bool:
+    """
+    Whether `environment` may read this artefact: owns it, has been granted it,
+    or has pinned it as its own config/tco through its EnvironmentProfile — a
+    profile's pin is itself a form of authorization, or a "locked configuration"
+    environment could never actually read the configuration it is locked to.
+    """
+    from app.db_models import EnvironmentProfile
+
+    if environment == "*":
+        return True
+    env = environment or DEFAULT_ENV
+    if art.environment == env:
+        return True
+    granted = s.scalar(select(ArtefactGrant).where(
+        ArtefactGrant.artefact_id == art.id, ArtefactGrant.subject_kind == "environment",
+        ArtefactGrant.subject == env, ArtefactGrant.permission == "read"))
+    if granted is not None:
+        return True
+    prof = s.get(EnvironmentProfile, env)
+    if prof is not None and art.id in (prof.config_artefact_id, prof.tco_artefact_id):
+        return True
+    return False
 
 
 def lineage(s: Session, artefact_id: str) -> dict:
@@ -571,3 +668,135 @@ def lineage(s: Session, artefact_id: str) -> dict:
                                    .where(Artefact.derived_from == artefact_id))]
     return {"id": art.id, "name": art.name, "kind": art.kind,
             "ancestors": ancestors, "children": children}
+
+
+# ══════════════════════════════════════════════════════════════════
+# ENVIRONMENT DELETION — migrate what's chosen, then profile-only or cascade
+# ══════════════════════════════════════════════════════════════════
+def _dedup_name(exists: "callable", name: str) -> str:
+    """`name` if free in the target, else `name-migré`, `name-migré-2`, … A
+    migration must never fail over a naming collision — the admin asked to
+    move data, not to be told no."""
+    if not exists(name):
+        return name
+    candidate = f"{name}-migré"
+    n = 1
+    while exists(candidate):
+        n += 1
+        candidate = f"{name}-migré-{n}"
+    return candidate
+
+
+def move_artefact_to_environment(s: Session, artefact_id: str, from_env: str, to_env: str) -> Artefact:
+    art = get_artefact(s, artefact_id)
+    if art.environment != from_env:
+        raise Conflict(f"L'artefact {artefact_id} n'appartient pas à '{from_env}'.")
+
+    def _exists(name: str) -> bool:
+        return s.scalar(select(Artefact).where(
+            Artefact.kind == art.kind, Artefact.name == name,
+            Artefact.environment == to_env)) is not None
+
+    art.environment = to_env
+    art.name = _dedup_name(_exists, art.name)
+    s.flush()   # autoflush is off: a later query in this request must see the move
+    return art
+
+
+def move_dataset_to_environment(s: Session, dataset_id: str, from_env: str, to_env: str) -> Dataset:
+    ds = get_dataset(s, dataset_id)
+    if ds.environment != from_env:
+        raise Conflict(f"La table {dataset_id} n'appartient pas à '{from_env}'.")
+
+    def _exists(name: str) -> bool:
+        return s.scalar(select(Dataset).where(
+            Dataset.name == name, Dataset.environment == to_env)) is not None
+
+    ds.environment = to_env
+    ds.name = _dedup_name(_exists, ds.name)
+    s.flush()
+    return ds
+
+
+def move_crypto_key_to_environment(s: Session, key_id: str, from_env: str, to_env: str):
+    from app.db_models import CryptoKey
+
+    key = s.get(CryptoKey, key_id)
+    if key is None:
+        raise NotFound(f"Key {key_id} not found.")
+    if key.environment != from_env:
+        raise Conflict(f"La clé {key_id} n'appartient pas à '{from_env}'.")
+
+    def _exists(name: str) -> bool:
+        return s.scalar(select(CryptoKey).where(
+            CryptoKey.name == name, CryptoKey.environment == to_env)) is not None
+
+    key.environment = to_env
+    key.name = _dedup_name(_exists, key.name)
+    s.flush()
+    return key
+
+
+def _blocking_flows(s: Session, artefact_id: str) -> list[Flow]:
+    """Non-archived flows that still point at this artefact — a hard delete
+    would otherwise leave them referencing something gone."""
+    return list(s.scalars(select(Flow).where(
+        Flow.archived == False,  # noqa: E712
+        (Flow.config_artefact_id == artefact_id) | (Flow.tco_artefact_id == artefact_id)
+        | (Flow.computed_artefact_id == artefact_id))))
+
+
+def delete_environment_profile_only(s: Session, name: str) -> None:
+    """The environment becomes orphaned: whatever it still owns stays exactly
+    as it is — a profile describes exposure and membership, not data."""
+    from app.db_models import EnvironmentProfile, Membership
+
+    prof = s.get(EnvironmentProfile, name)
+    if prof is not None:
+        s.delete(prof)
+    s.execute(delete(Membership).where(Membership.environment == name))
+    s.execute(delete(Variable).where(Variable.scope == "environment",
+                                     Variable.environment == name))
+
+
+def delete_environment_cascade(s: Session, name: str) -> None:
+    """
+    Everything `delete_environment_profile_only` does, plus a hard delete of
+    whatever this environment still owns.
+
+    FlowRun and RevealEvent are never purged: they are an audit trail, and
+    losing them the moment their subject disappears would be worse than
+    keeping a record that now points at a name nobody occupies any more.
+
+    Grants and versions/rows are deleted explicitly rather than left to the
+    database's ON DELETE CASCADE — SQLite (dev and tests) never turns
+    `PRAGMA foreign_keys` on, so those constraints are inert there; only the
+    ORM relationships (`cascade="all, delete-orphan"`) fire on every engine.
+    """
+    from app.db_models import CryptoKey, EnvironmentProfile
+
+    delete_environment_profile_only(s, name)
+
+    remaining_artefacts = list_artefacts(s, environment=name, include_archived=True)
+    for art in remaining_artefacts:
+        blockers = _blocking_flows(s, art.id)
+        if blockers:
+            raise Conflict(f"« {art.name} » est encore utilisé par le flux "
+                           f"« {blockers[0].name} » : archivez-le d'abord.")
+        pinning = list(s.scalars(select(EnvironmentProfile).where(
+            (EnvironmentProfile.config_artefact_id == art.id)
+            | (EnvironmentProfile.tco_artefact_id == art.id))))
+        if pinning:
+            raise Conflict(f"« {art.name} » est imposé par le profil de "
+                           f"« {pinning[0].name} » : détachez-le d'abord.")
+    for art in remaining_artefacts:
+        s.execute(delete(ArtefactGrant).where(ArtefactGrant.artefact_id == art.id))
+        s.delete(art)   # cascades to ArtefactVersion via the ORM relationship
+
+    remaining_datasets = list_datasets(s, environment=name, include_archived=True)
+    for ds in remaining_datasets:
+        s.execute(delete(DatasetGrant).where(DatasetGrant.dataset_id == ds.id))
+        s.delete(ds)    # cascades to DatasetRow via the ORM relationship
+
+    for key in s.scalars(select(CryptoKey).where(CryptoKey.environment == name)):
+        s.delete(key)   # cascades to KeyHolder via the ORM relationship
