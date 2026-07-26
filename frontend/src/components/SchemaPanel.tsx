@@ -1,0 +1,226 @@
+import { useState } from "react";
+import type { FieldConfig, HeaderConfig, Presets, ProcessStats } from "../lib/types";
+import { FieldEditor } from "./FieldEditor";
+import { IconEdit } from "../lib/icons";
+
+interface Props {
+  columns: string[];
+  visible: string[];
+  setVisible: (v: string[]) => void;
+  unmapped: string[];
+  header: HeaderConfig;
+  setHeader: (h: HeaderConfig) => void;
+  applyHeader: () => void;
+  fields: Record<string, FieldConfig>;
+  setField: (col: string, patch: Partial<FieldConfig>) => void;
+  resetFields: () => void;
+  addColumn: (name: string) => void;
+  removeColumn: (name: string) => void;
+  presets: Presets;
+  tcoLabels: string[];
+  stats: ProcessStats | null;
+  configFields: Record<string, FieldConfig>;
+  unmatchedConfig: FieldConfig[];
+  assignConfigField: (col: string, field: FieldConfig) => void;
+  strictHeader: boolean;
+  setStrictHeader: (v: boolean) => void;
+  hasConfig: boolean;
+}
+
+const HEADER_OPTS: { key: keyof HeaderConfig; label: string; sub: string }[] = [
+  { key: "auto_header", label: "Promote first data row to header", sub: "When the header line is empty and the real names sit below." },
+  { key: "delete_empty_line_before_header", label: "Drop empty lines before header", sub: "" },
+  { key: "delete_empty_line_after_header", label: "Drop trailing empty lines", sub: "" },
+  { key: "delete_all_empty_line", label: "Drop all empty lines", sub: "Anywhere in the file." },
+  { key: "delete_unamed_column", label: "Drop unnamed columns", sub: "Columns with no header name (kept only if every column is unnamed)." },
+];
+
+function hasRules(f: FieldConfig): boolean {
+  return Boolean(
+    f.regex || f.length != null || f.on_list?.length || !f.nullable ||
+    f.check_type || f.tco_mapping || f.mapping || f.normalize_case ||
+    f.delimiteur || f.separator_mile || f.separator_decimal ||
+    f.format || f.format_clean || f.auto_date_format || f.identifiant,
+  );
+}
+
+export function SchemaPanel(p: Props) {
+  const [edit, setEdit] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const [hideInactive, setHideInactive] = useState(false);
+  const [newCol, setNewCol] = useState("");
+
+  // File columns + columns the user declared in the schema (not in the file).
+  const declared = Object.keys(p.fields).filter((k) => !p.columns.includes(k));
+  const allColumns = [...p.columns, ...declared];
+
+  const editing = edit && allColumns.includes(edit) ? edit : null;
+  const many = allColumns.length > 18;
+
+  const toggle = (c: string) =>
+    p.setVisible(
+      p.visible.includes(c)
+        ? p.visible.filter((x) => x !== c)
+        : allColumns.filter((x) => p.visible.includes(x) || x === c),
+    );
+
+  const addColumn = () => {
+    const name = newCol.trim();
+    if (!name || allColumns.includes(name)) { setNewCol(""); return; }
+    p.addColumn(name);
+    setNewCol("");
+  };
+
+  const shown = (query
+    ? allColumns.filter((c) => c.toLowerCase().includes(query.toLowerCase()))
+    : allColumns
+  ).filter((c) => !hideInactive || p.visible.includes(c));
+
+  return (
+    <div>
+      {/* structure / header */}
+      <div className="sec">
+        <div className="sec-h">
+          <h3>Structure</h3>
+          <span className="sub">Clean the file shape before applying field rules.</span>
+          <button className="btn sm" style={{ marginLeft: "auto" }} onClick={p.applyHeader}>Apply structure</button>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 24px", marginTop: 8 }}>
+          {HEADER_OPTS.map((o) => (
+            <label className="check" key={o.key}>
+              <input type="checkbox" checked={p.header[o.key]}
+                onChange={(e) => p.setHeader({ ...p.header, [o.key]: e.target.checked })} />
+              <span className="ctxt">{o.label}{o.sub && <div className="csub">{o.sub}</div>}</span>
+            </label>
+          ))}
+        </div>
+        {p.hasConfig && (
+          <label className="check" style={{ marginTop: 8 }}>
+            <input type="checkbox" checked={p.strictHeader} onChange={(e) => p.setStrictHeader(e.target.checked)} />
+            <span className="ctxt">Strict header
+              <div className="csub">The file's columns must match the config exactly — flagged below if they don't.</div>
+            </span>
+          </label>
+        )}
+        {p.strictHeader && p.hasConfig && (p.unmatchedConfig.length > 0 || p.unmapped.length > 0) && (
+          <div className="banner err" style={{ marginTop: 8 }}>
+            <span>
+              <strong>Strict header mismatch.</strong>{" "}
+              {p.unmatchedConfig.length > 0 && `${p.unmatchedConfig.length} config field(s) missing from the file. `}
+              {p.unmapped.length > 0 && `${p.unmapped.length} file column(s) not in the config. `}
+              Resolve below, or uncheck strict header.
+            </span>
+          </div>
+        )}
+      </div>
+
+      {/* fields */}
+      <div className="sec">
+        <div className="sec-h">
+          <h3>Fields</h3>
+          <span className="sub">
+            {p.visible.length}/{allColumns.length} active · click to toggle, pencil to configure
+          </span>
+          <span style={{ marginLeft: "auto", display: "flex", gap: 6, alignItems: "center" }}>
+            <label className="check" style={{ padding: 0, marginRight: 4 }}>
+              <input type="checkbox" checked={hideInactive} onChange={(e) => setHideInactive(e.target.checked)} />
+              <span className="ctxt" style={{ fontSize: 12 }}>Hide inactive</span>
+            </label>
+            <button className="btn sm" onClick={() => p.setVisible([...allColumns])}>Activate all</button>
+            <button className="btn sm" onClick={() => p.setVisible([])}>Deactivate all</button>
+            <button className="btn sm" onClick={p.resetFields}>Reset rules</button>
+          </span>
+        </div>
+
+        <div className="addcol">
+          <input type="text" className="mono-input" placeholder="declare a column (e.g. a month name)…"
+            value={newCol} onChange={(e) => setNewCol(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") addColumn(); }} />
+          <button className="btn sm" onClick={addColumn} disabled={!newCol.trim()}>+ Add column</button>
+          <span className="csub">Declared columns are saved in the config; they apply to any future file that has them.</span>
+        </div>
+
+        {p.unmapped.length > 0 && (
+          <div className="banner" style={{ marginTop: 4 }}>
+            <span>
+              Config imported. <strong>{p.visible.length}</strong> column{p.visible.length > 1 ? "s" : ""} matched and
+              activated; <strong>{p.unmapped.length}</strong> left inactive (greyed). Click any to include it.
+            </span>
+          </div>
+        )}
+
+        {p.unmatchedConfig.length > 0 && (
+          <div className="orphans">
+            <div className="orphans-h">
+              {p.unmatchedConfig.length} config field{p.unmatchedConfig.length > 1 ? "s" : ""} matched no column — link to a file column
+            </div>
+            {p.unmatchedConfig.map((f, i) => {
+              const label = f.mapping || (f.name && f.name[0]) || `field_${i}`;
+              return (
+                <div className="orphan-row" key={label + i}>
+                  <span className={`tchip ${f.type ?? "string"}`}>{(f.type ?? "string").slice(0, 3)}</span>
+                  <span className="orphan-name">{label}</span>
+                  <span className="orphan-arrow">←</span>
+                  <select defaultValue="" onChange={(e) => { if (e.target.value) p.assignConfigField(e.target.value, f); }}>
+                    <option value="">choose a column…</option>
+                    {p.unmapped.map((c) => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {many && (
+          <input type="text" placeholder={`Filter ${p.columns.length} fields…`}
+            value={query} onChange={(e) => setQuery(e.target.value)}
+            style={{ maxWidth: 280, marginTop: 6, marginBottom: 4 }} />
+        )}
+
+        <div className={`fieldchips ${many ? "scroll" : ""}`}>
+          {shown.map((c) => {
+            const f = p.fields[c];
+            const on = p.visible.includes(c);
+            const isDeclared = !p.columns.includes(c);
+            const cstat = p.stats?.per_col?.[f?.mapping || c];
+            return (
+              <div key={c}
+                className={`fieldchip ${on ? "on" : "off"} ${editing === c ? "editing" : ""} ${isDeclared ? "declared" : ""}`}
+                onClick={() => toggle(c)}
+                title={isDeclared ? "Declared column (not in the loaded file)" : (on ? "Click to deactivate" : "Click to activate")}>
+                <span className={`tchip ${f?.type ?? "string"}`}>{(f?.type ?? "string").slice(0, 3)}</span>
+                <span className="fname">{c}</span>
+                {isDeclared && <span className="declared-badge" title="Not in the loaded file">declared</span>}
+                {cstat?.errors ? <span className="dot err" title={`${cstat.errors} errors`} /> : null}
+                {cstat?.cleans ? <span className="dot clean" title={`${cstat.cleans} cleaned`} /> : null}
+                {!cstat && f && hasRules(f) ? <span className="dot rule" title="has rules" /> : null}
+                <button className="chip-edit" title="Configure field"
+                  onClick={(e) => { e.stopPropagation(); setEdit(editing === c ? null : c); }}>
+                  <IconEdit size={13} />
+                </button>
+                {isDeclared && (
+                  <button className="chip-edit" title="Remove declared column"
+                    onClick={(e) => { e.stopPropagation(); if (editing === c) setEdit(null); p.removeColumn(c); }}>×</button>
+                )}
+              </div>
+            );
+          })}
+          {shown.length === 0 && <span style={{ color: "var(--ink-faint)", fontSize: 12 }}>No field matches “{query}”.</span>}
+        </div>
+
+        {editing && p.fields[editing] && (
+          <div style={{ marginTop: 14 }}>
+            <FieldEditor
+              col={editing}
+              field={p.fields[editing]}
+              presets={p.presets}
+              tcoLabels={p.tcoLabels}
+              configFields={p.configFields}
+              onChange={(patch) => p.setField(editing, patch)}
+            />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

@@ -1,0 +1,92 @@
+name: DESADV D96A (exemple)
+standard: EDIFACT
+message_type: DESADV
+directory: D96A
+envelope:
+  syntax: UNOA:2
+  sender: "5498765000021:14"
+  recipient: "5412345000013:14"
+
+header:
+  - tag: BGM
+    status: M
+    max: 1
+    fields:
+      - name: type_avis
+        path: "1.1"
+        codes: ["351"]
+      - name: numero_avis
+        path: "2.1"
+
+  - tag: DTM
+    status: M
+    max: 5
+    qualifier: "1.1"
+    when:
+      "137":
+        label: Date de l'avis
+        required: true
+        fields:
+          - name: date_avis
+            path: "1.2"
+            date_format: "102"
+      "11":
+        label: Date d'expédition
+        fields:
+          - name: date_expedition
+            path: "1.2"
+            date_format: "102"
+
+  - tag: NAD
+    status: M
+    max: 5
+    qualifier: "1.1"
+    when:
+      "SU":
+        label: Expéditeur
+        required: true
+        fields:
+          - name: expediteur_id
+            path: "2.1"
+      "DP":
+        label: Lieu de livraison
+        fields:
+          - name: lieu_livraison_id
+            path: "2.1"
+
+  - tag: CPS
+    status: C
+    max: 9
+    fields:
+      - name: sequence_colisage
+        path: "1.1"
+
+items:
+  loop_start: LIN
+  segments:
+    - tag: LIN
+      status: M
+      max: 1
+      fields:
+        - name: numero_ligne
+          path: "1.1"
+        - name: code_article
+          path: "3.1"
+        - name: type_code_article
+          path: "3.2"
+          codes: ["EN", "UP"]
+
+    - tag: QTY
+      status: M
+      max: 5
+      qualifier: "1.1"
+      when:
+        "12":
+          label: Quantité expédiée
+          required: true
+          fields:
+            - name: quantite_expediee
+              path: "1.2"
+              type: number
+
+summary: []

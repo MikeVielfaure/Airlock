@@ -1,0 +1,638 @@
+import { useCallback, useEffect, useState } from "react";
+import { api, setToken } from "../lib/api";
+import type { AuthUser, EnvProfile } from "../lib/types";
+import {
+  IconCheck, IconCode, IconLayers, IconPlay, IconReset, IconSave, IconTable, IconWarn,
+} from "../lib/icons";
+
+interface Props {
+  me: AuthUser | null;
+  notify: (m: string, k?: "ok" | "err" | "info") => void;
+  /** Re-read the identity after borrowing one, so the whole app follows. */
+  onIdentityChange: () => void;
+}
+
+type Tab = "overview" | "sandbox" | "users" | "envs" | "sso";
+
+const ROLES = ["viewer", "operator", "editor", "admin"];
+
+interface Member { user_id: string; email: string; display_name: string;
+                   role: string; from_sso: boolean }
+interface UserRow { id: string; email: string; display_name: string;
+                    is_superadmin: boolean; active: boolean;
+                    environments: Record<string, string>; sso: string[] }
+
+/**
+ * Administration, and a sandbox for trying a role design out.
+ *
+ * Designing roles blind is how a team ends up with an operator who cannot do
+ * their job. So the first tab is deliberately the sandbox: conjure an account,
+ * give it a role, borrow its identity, look. Nothing here is a separate
+ * mechanism — a test user is a real user, the sandbox is just the short path.
+ */
+export function AdminPanel({ me, notify, onIdentityChange }: Props) {
+  const [tab, setTab] = useState<Tab>("overview");
+  const [envs, setEnvs] = useState<string[]>([]);
+
+  const refreshEnvs = useCallback(async () => {
+    try { setEnvs((await api.listEnvironments()).environments); } catch { /* ignore */ }
+  }, []);
+  useEffect(() => { refreshEnvs(); }, [refreshEnvs]);
+
+  if (!me?.is_superadmin && !me?.setup_mode) {
+    return (
+      <p className="ad-hint">
+        <IconWarn size={14} /> Cette section est réservée à l'administrateur général.
+      </p>
+    );
+  }
+
+  return (
+    <div className="ad">
+      <nav className="ad-tabs">
+        {([["overview", "Aperçu"], ["sandbox", "Bac à sable"],
+           ["users", "Utilisateurs"], ["envs", "Environnements & modules"],
+           ["sso", "SSO"]] as [Tab, string][])
+          .map(([k, label]) => (
+            <button key={k} className={`tab ${tab === k ? "active" : ""}`}
+                    onClick={() => setTab(k)}>{label}</button>
+          ))}
+      </nav>
+
+      {tab === "overview" && <Overview notify={notify} />}
+      {tab === "sandbox" && <Sandbox envs={envs} notify={notify}
+                                    onIdentityChange={onIdentityChange} />}
+      {tab === "users" && <Users envs={envs} notify={notify} />}
+      {tab === "envs" && <Envs envs={envs} notify={notify} refreshEnvs={refreshEnvs} />}
+      {tab === "sso" && <Sso envs={envs} notify={notify} />}
+    </div>
+  );
+}
+
+/* ── sandbox ─────────────────────────────────────────────────────── */
+function Sandbox({ envs, notify, onIdentityChange }: {
+  envs: string[]; notify: Props["notify"]; onIdentityChange: () => void;
+}) {
+  const [email, setEmail] = useState("essai@test.local");
+  const [env, setEnv] = useState("default");
+  const [role, setRole] = useState("operator");
+  const [made, setMade] = useState<{ email: string; environments: Record<string, string> }[]>([]);
+  const [busy, setBusy] = useState(false);
+
+  const create = async () => {
+    setBusy(true);
+    try {
+      const r = await api.quickUser(email, { [env]: role });
+      setMade((m) => [{ email: r.email, environments: r.environments },
+                      ...m.filter((x) => x.email !== r.email)]);
+      notify(`« ${r.email} » prêt — ${env} : ${role}. Mot de passe : motdepasse1`, "ok");
+    } catch (e) { notify(e instanceof Error ? e.message : String(e), "err"); }
+    finally { setBusy(false); }
+  };
+
+  const borrow = async (mail: string) => {
+    try {
+      const r = await api.impersonate(mail);
+      setToken(r.token);
+      onIdentityChange();
+      notify(`Vous voyez l'application comme ${mail}. Un bandeau le rappelle.`, "info");
+    } catch (e) { notify(e instanceof Error ? e.message : String(e), "err"); }
+  };
+
+  return (
+    <div className="ad-body">
+      <p className="ad-hint">
+        Concevoir des rôles à l'aveugle, c'est se retrouver avec un opérateur qui
+        ne peut pas travailler. Ici : on fabrique un compte, on lui donne un rôle,
+        on emprunte son identité, on regarde. Un compte d'essai est un vrai
+        compte — c'est seulement le chemin qui est court.
+      </p>
+
+      <div className="ad-form">
+        <input value={email} onChange={(e) => setEmail(e.target.value)}
+               placeholder="email du compte d'essai" />
+        <input value={env} onChange={(e) => setEnv(e.target.value)}
+               placeholder="environnement" list="ad-envs" />
+        <datalist id="ad-envs">{envs.map((e) => <option key={e} value={e} />)}</datalist>
+        <select value={role} onChange={(e) => setRole(e.target.value)}>
+          {ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
+        </select>
+        <button className="btn" disabled={busy || !email.includes("@")} onClick={create}>
+          <IconPlay size={14} /> Créer / mettre à jour
+        </button>
+      </div>
+      <p className="ad-note">
+        Un environnement qui n'existe pas encore est créé de fait par
+        l'appartenance : rien à préparer pour essayer.
+      </p>
+
+      {made.length > 0 && (
+        <>
+          <h4><IconLayers size={13} /> Comptes d'essai de cette session</h4>
+          {made.map((u) => (
+            <div key={u.email} className="ad-row">
+              <strong>{u.email}</strong>
+              <span className="ad-chips">
+                {Object.entries(u.environments).map(([e, r]) => (
+                  <code key={e}>{e} : {r}</code>
+                ))}
+              </span>
+              <button className="btn sm" onClick={() => borrow(u.email)}>
+                Prendre son identité
+              </button>
+            </div>
+          ))}
+        </>
+      )}
+    </div>
+  );
+}
+
+/* ── users & roles ───────────────────────────────────────────────── */
+function Users({ envs, notify }: { envs: string[]; notify: Props["notify"] }) {
+  const [rows, setRows] = useState<UserRow[]>([]);
+  const [env, setEnv] = useState(envs[0] || "default");
+  const [members, setMembers] = useState<Member[]>([]);
+  const [email, setEmail] = useState("");
+  const [role, setRole] = useState("operator");
+
+  const refresh = useCallback(async () => {
+    try { setRows(await api.listUsers()); } catch (e) {
+      notify(e instanceof Error ? e.message : String(e), "err");
+    }
+  }, [notify]);
+  const refreshMembers = useCallback(async () => {
+    if (!env) return;
+    try { setMembers(await api.envMembers(env)); } catch { setMembers([]); }
+  }, [env]);
+
+  useEffect(() => { refresh(); }, [refresh]);
+  useEffect(() => { refreshMembers(); }, [refreshMembers]);
+  useEffect(() => { if (!env && envs.length) setEnv(envs[0]); }, [envs]); // eslint-disable-line
+
+  return (
+    <div className="ad-body">
+      <h4><IconTable size={13} /> Comptes <span className="count">{rows.length}</span></h4>
+      <table className="ad-table">
+        <thead><tr><th>Compte</th><th>Environnements</th><th>SSO</th><th /></tr></thead>
+        <tbody>
+          {rows.map((u) => (
+            <tr key={u.id}>
+              <td>
+                <strong>{u.email}</strong>
+                {u.is_superadmin && <span className="ad-tag">admin général</span>}
+              </td>
+              <td className="ad-chips">
+                {Object.entries(u.environments).map(([e, r]) => (
+                  <code key={e}>{e} : {r}</code>
+                ))}
+                {Object.keys(u.environments).length === 0 && <em>aucun</em>}
+              </td>
+              <td>{u.sso.join(", ") || "—"}</td>
+              <td>
+                {!u.is_superadmin && (
+                  <button className="btn sm" onClick={async () => {
+                    try {
+                      const r = await api.impersonate(u.email);
+                      setToken(r.token);
+                      window.location.reload();
+                    } catch (e) { notify(e instanceof Error ? e.message : String(e), "err"); }
+                  }}>Voir comme</button>
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      <h4><IconCheck size={13} /> Rôles dans un environnement</h4>
+      <div className="ad-form">
+        <select value={env} onChange={(e) => setEnv(e.target.value)}>
+          {envs.map((e) => <option key={e} value={e}>{e}</option>)}
+        </select>
+        <input value={email} onChange={(e) => setEmail(e.target.value)}
+               placeholder="email" list="ad-users" />
+        <datalist id="ad-users">{rows.map((u) => <option key={u.id} value={u.email} />)}</datalist>
+        <select value={role} onChange={(e) => setRole(e.target.value)}>
+          {ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
+        </select>
+        <button className="btn sm" disabled={!email} onClick={async () => {
+          try {
+            await api.setMember(env, email, role);
+            await refreshMembers(); await refresh();
+            notify(`${email} : ${role} dans ${env}.`, "ok");
+          } catch (e) { notify(e instanceof Error ? e.message : String(e), "err"); }
+        }}><IconSave size={12} /> Appliquer</button>
+      </div>
+
+      <table className="ad-table">
+        <thead><tr><th>Membre</th><th>Rôle</th><th>Origine</th></tr></thead>
+        <tbody>
+          {members.map((m) => (
+            <tr key={m.user_id}>
+              <td>{m.email}</td>
+              <td><span className="ad-badge">{m.role}</span></td>
+              <td>{m.from_sso
+                ? <span className="ad-note">annuaire — à changer dans l'IdP</span>
+                : "manuel"}</td>
+            </tr>
+          ))}
+          {members.length === 0 && (
+            <tr><td colSpan={3} className="ad-note">Aucun membre dans « {env} ».</td></tr>
+          )}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/* ── environments, profiles, module list ─────────────────────────── */
+function Envs({ envs, notify, refreshEnvs }: {
+  envs: string[]; notify: Props["notify"]; refreshEnvs: () => Promise<void>;
+}) {
+  const [templates, setTemplates] = useState<{ key: string; label: string;
+                                               description: string; modules: string[];
+                                               config_locked: boolean }[]>([]);
+  const [allModules, setAllModules] = useState<string[]>([]);
+  const [sel, setSel] = useState("");
+  const [profile, setProfile] = useState<EnvProfile | null>(null);
+  const [newName, setNewName] = useState("");
+  const [tpl, setTpl] = useState("complet");
+
+  useEffect(() => {
+    api.envTemplates().then((r) => { setTemplates(r.templates); setAllModules(r.modules); })
+      .catch(() => {});
+  }, []);
+  useEffect(() => {
+    if (!sel) { setProfile(null); return; }
+    api.envProfile(sel).then(setProfile).catch(() => setProfile(null));
+  }, [sel]);
+
+  const toggle = (m: string) => {
+    if (!profile) return;
+    const has = profile.modules.includes(m);
+    setProfile({ ...profile,
+                 modules: has ? profile.modules.filter((x) => x !== m)
+                              : [...profile.modules, m] });
+  };
+
+  return (
+    <div className="ad-body">
+      <h4><IconLayers size={13} /> Créer un environnement</h4>
+      <div className="ad-form">
+        <input value={newName} onChange={(e) => setNewName(e.target.value)}
+               placeholder="nom (rh, adv, bac-a-sable…)" />
+        <select value={tpl} onChange={(e) => setTpl(e.target.value)}>
+          {templates.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
+        </select>
+        <button className="btn sm" disabled={!newName.trim()} onClick={async () => {
+          try {
+            await api.createEnvironment({ name: newName.trim(), template: tpl });
+            await refreshEnvs();
+            notify(`Environnement « ${newName} » créé.`, "ok");
+            setNewName("");
+          } catch (e) { notify(e instanceof Error ? e.message : String(e), "err"); }
+        }}><IconPlay size={12} /> Créer</button>
+      </div>
+      {templates.filter((t) => t.key === tpl).map((t) => (
+        <p key={t.key} className="ad-note">
+          {t.description} — modules : {t.modules.join(", ")}
+          {t.config_locked && " · configuration imposée (il faut en désigner une)"}
+        </p>
+      ))}
+
+      <h4><IconCode size={13} /> Modules d'un environnement</h4>
+      <div className="ad-form">
+        <select value={sel} onChange={(e) => setSel(e.target.value)}>
+          <option value="">— choisir un environnement —</option>
+          {envs.map((e) => <option key={e} value={e}>{e}</option>)}
+        </select>
+      </div>
+
+      {profile && (
+        <>
+          <p className="ad-note">
+            Ce qui n'est pas coché n'apparaît pas pour les personnes travaillant
+            dans « {sel} ». Ce qui n'est pas affiché ne peut pas être cassé.
+          </p>
+          <div className="ad-modules">
+            {allModules.map((m) => (
+              <label key={m} className={`ad-mod ${profile.modules.includes(m) ? "on" : ""}`}>
+                <input type="checkbox" checked={profile.modules.includes(m)}
+                       onChange={() => toggle(m)} />
+                {m}
+              </label>
+            ))}
+          </div>
+          <div className="ad-form">
+            <label className="ad-check">
+              <input type="checkbox" checked={profile.tco_editable}
+                     onChange={(e) => setProfile({ ...profile, tco_editable: e.target.checked })} />
+              table de correspondance modifiable
+            </label>
+            <button className="btn" onClick={async () => {
+              try {
+                const saved = await api.saveEnvProfile(sel, {
+                  modules: profile.modules, tco_editable: profile.tco_editable });
+                setProfile(saved);
+                notify(`Profil de « ${sel} » enregistré.`, "ok");
+              } catch (e) { notify(e instanceof Error ? e.message : String(e), "err"); }
+            }}><IconSave size={14} /> Enregistrer</button>
+            <button className="btn sm" onClick={async () => {
+              try {
+                await api.resetEnvProfile(sel);
+                setProfile(await api.envProfile(sel));
+                notify("Profil remis à zéro — tout s'affiche à nouveau.", "ok");
+              } catch (e) { notify(e instanceof Error ? e.message : String(e), "err"); }
+            }}><IconReset size={12} /> Tout réafficher</button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+/* ── SSO ─────────────────────────────────────────────────────────── */
+function Sso({ envs, notify }: { envs: string[]; notify: Props["notify"] }) {
+  const [rows, setRows] = useState<Record<string, unknown>[]>([]);
+  const [name, setName] = useState("corp");
+  const [clientId, setClientId] = useState("");
+  const [secret, setSecret] = useState("");
+  const [discovery, setDiscovery] = useState("");
+  const [maps, setMaps] = useState<{ group: string; environment: string; role: string }[]>(
+    [{ group: "", environment: envs[0] || "default", role: "operator" }]);
+
+  const refresh = useCallback(async () => {
+    try { setRows(await api.listProviders()); } catch { /* ignore */ }
+  }, []);
+  useEffect(() => { refresh(); }, [refresh]);
+
+  return (
+    <div className="ad-body">
+      <p className="ad-hint">
+        Les groupes de votre annuaire deviennent des rôles ici, et sont
+        <strong> réappliqués à chaque connexion</strong> : retirer quelqu'un d'un
+        groupe lui retire réellement l'accès.
+      </p>
+      <div className="ad-form">
+        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="nom" />
+        <input value={clientId} onChange={(e) => setClientId(e.target.value)}
+               placeholder="client id" />
+        <input value={secret} onChange={(e) => setSecret(e.target.value)} type="password"
+               placeholder="client secret (vide = inchangé)" />
+        <input value={discovery} onChange={(e) => setDiscovery(e.target.value)}
+               placeholder="URL de découverte (.well-known/openid-configuration)" />
+      </div>
+
+      <h4>Correspondances groupe → rôle</h4>
+      {maps.map((m, i) => (
+        <div key={i} className="ad-form">
+          <input value={m.group} placeholder="groupe dans l'annuaire"
+                 onChange={(e) => setMaps((ms) => ms.map((x, j) =>
+                   j === i ? { ...x, group: e.target.value } : x))} />
+          <input value={m.environment} placeholder="environnement" list="ad-envs2"
+                 onChange={(e) => setMaps((ms) => ms.map((x, j) =>
+                   j === i ? { ...x, environment: e.target.value } : x))} />
+          <datalist id="ad-envs2">{envs.map((e) => <option key={e} value={e} />)}</datalist>
+          <select value={m.role} onChange={(e) => setMaps((ms) => ms.map((x, j) =>
+            j === i ? { ...x, role: e.target.value } : x))}>
+            {ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
+          </select>
+        </div>
+      ))}
+      <div className="ad-form">
+        <button className="btn sm" onClick={() => setMaps((ms) =>
+          [...ms, { group: "", environment: envs[0] || "default", role: "operator" }])}>
+          + correspondance
+        </button>
+        <button className="btn" disabled={!name.trim() || !clientId.trim()}
+                onClick={async () => {
+                  try {
+                    await api.saveProvider({
+                      name: name.trim(), client_id: clientId, client_secret: secret,
+                      discovery_url: discovery,
+                      claim_mappings: maps.filter((m) => m.group.trim()) });
+                    setSecret(""); await refresh();
+                    notify(`Fournisseur « ${name} » enregistré.`, "ok");
+                  } catch (e) { notify(e instanceof Error ? e.message : String(e), "err"); }
+                }}><IconSave size={14} /> Enregistrer</button>
+      </div>
+
+      {rows.length > 0 && (
+        <table className="ad-table">
+          <thead><tr><th>Fournisseur</th><th>Client</th><th>Secret</th><th>Groupes</th></tr></thead>
+          <tbody>
+            {rows.map((p, i) => (
+              <tr key={i}>
+                <td><strong>{String(p.name)}</strong></td>
+                <td>{String(p.client_id || "—")}</td>
+                <td>{p.has_secret ? "enregistré" : <em>absent</em>}</td>
+                <td>{((p.claim_mappings as unknown[]) || []).length}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
+/* ── the whole picture ───────────────────────────────────────────── */
+interface EnvRow {
+  name: string; label: string; has_profile: boolean; modules: string[];
+  modules_restricted: boolean; config_locked: boolean; tco_editable: boolean;
+  actions: number; members: { email: string; role: string; from_sso: boolean }[];
+  roles: Record<string, number>; artefacts: Record<string, number>;
+  tables: number; keys: number; runs_error: number; url: string;
+}
+
+/**
+ * A console made only of separate screens forces its user to hold the picture in
+ * their head. This assembles it once, so the other tabs become places you go to
+ * *change* something rather than to find out what the state is.
+ */
+function Overview({ notify }: { notify: Props["notify"] }) {
+  const [data, setData] = useState<{
+    environments: EnvRow[]; users: UserRow[]; modules: string[]; roles: string[];
+    policy: Record<string, string[]>;
+    capabilities: { capability: string; min_role: string; label: string }[];
+    providers: { name: string; enabled: boolean; mappings: number }[];
+    totals: Record<string, number>;
+  } | null>(null);
+  const [open, setOpen] = useState("");
+
+  const refresh = useCallback(async () => {
+    try { setData(await api.adminOverview()); }
+    catch (e) { notify(e instanceof Error ? e.message : String(e), "err"); }
+  }, [notify]);
+  useEffect(() => { refresh(); }, [refresh]);
+
+  if (!data) return <p className="ad-note">…</p>;
+
+  return (
+    <div className="ad-body">
+      <div className="ad-totals">
+        {[["environnements", data.totals.environments], ["comptes", data.totals.users],
+          ["tables", data.totals.tables], ["artefacts", data.totals.artefacts]]
+          .map(([label, n]) => (
+            <span key={String(label)} className="ad-total">
+              <strong>{String(n)}</strong> {String(label)}
+            </span>
+          ))}
+        <button className="btn sm" onClick={refresh}><IconReset size={12} /> Rafraîchir</button>
+      </div>
+
+      <h4><IconLayers size={13} /> Environnements</h4>
+      <table className="ad-table">
+        <thead>
+          <tr><th>Environnement</th><th>Adresse</th><th>Modules</th><th>Membres</th>
+              <th>Contenu</th><th /></tr>
+        </thead>
+        <tbody>
+          {data.environments.map((e) => (
+            <>
+              <tr key={e.name}>
+                <td>
+                  <strong>{e.label}</strong>
+                  {!e.has_profile && <span className="ad-note"> · sans profil</span>}
+                  {e.config_locked && <span className="ad-tag">config imposée</span>}
+                </td>
+                <td>
+                  {/* An address to hand out, not a sequence of clicks. */}
+                  <a className="ad-link" href={e.url}>{e.url}</a>
+                </td>
+                <td>
+                  {e.modules_restricted
+                    ? <span className="ad-badge">{e.modules.length} / {data.modules.length}</span>
+                    : <span className="ad-note">tous</span>}
+                </td>
+                <td>
+                  {e.members.length === 0
+                    ? <em className="ad-note">personne</em>
+                    : (
+                      <span className="ad-chips">
+                        {Object.entries(e.roles).filter(([, n]) => n > 0)
+                          .map(([r, n]) => <code key={r}>{n} {r}</code>)}
+                      </span>
+                    )}
+                </td>
+                <td className="ad-note">
+                  {Object.entries(e.artefacts).filter(([, n]) => n > 0)
+                    .map(([k, n]) => `${n} ${k}`).join(" · ") || "vide"}
+                  {e.tables > 0 && ` · ${e.tables} table(s)`}
+                  {e.keys > 0 && ` · ${e.keys} clé(s)`}
+                  {e.runs_error > 0 && (
+                    <span className="ad-err"> · {e.runs_error} exécution(s) en erreur</span>
+                  )}
+                </td>
+                <td>
+                  <button className="btn sm"
+                          onClick={() => setOpen(open === e.name ? "" : e.name)}>
+                    {open === e.name ? "Fermer" : "Détail"}
+                  </button>
+                </td>
+              </tr>
+              {open === e.name && (
+                <tr key={`${e.name}-d`} className="ad-detail">
+                  <td colSpan={6}>
+                    <div className="ad-modules">
+                      {data.modules.map((m) => (
+                        <span key={m} className={`ad-mod ${e.modules.includes(m) ? "on" : ""}`}>
+                          {m}
+                        </span>
+                      ))}
+                    </div>
+                    <table className="ad-table">
+                      <thead><tr><th>Membre</th><th>Rôle</th><th>Origine</th></tr></thead>
+                      <tbody>
+                        {e.members.map((m) => (
+                          <tr key={m.email}>
+                            <td>{m.email}</td>
+                            <td><span className="ad-badge">{m.role}</span></td>
+                            <td className="ad-note">{m.from_sso ? "annuaire" : "manuel"}</td>
+                          </tr>
+                        ))}
+                        {e.members.length === 0 && (
+                          <tr><td colSpan={3} className="ad-note">
+                            Aucun membre — personne ne peut y entrer.
+                          </td></tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </td>
+                </tr>
+              )}
+            </>
+          ))}
+        </tbody>
+      </table>
+
+      <h4><IconCheck size={13} /> Ce que chaque rôle autorise</h4>
+      <p className="ad-note">
+        La politique du serveur, telle quelle : un nom de rôle n'a pas à être
+        interprété.
+      </p>
+      <table className="ad-table">
+        <thead><tr><th>Droit</th>{data.roles.map((r) => <th key={r}>{r}</th>)}</tr></thead>
+        <tbody>
+          {data.capabilities.map((c) => (
+            <tr key={c.capability}>
+              <td>{c.label} <code className="ad-cap">{c.capability}</code></td>
+              {data.roles.map((r) => (
+                <td key={r} className="ad-cell">
+                  {(data.policy[r] || []).includes(c.capability)
+                    ? <span className="ad-yes">oui</span>
+                    : <span className="ad-no">—</span>}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      <h4><IconTable size={13} /> Comptes</h4>
+      <table className="ad-table">
+        <thead><tr><th>Compte</th><th>Environnements</th><th>SSO</th><th>Dernière connexion</th></tr></thead>
+        <tbody>
+          {data.users.map((u) => (
+            <tr key={u.id}>
+              <td>
+                <strong>{u.email}</strong>
+                {u.is_superadmin && <span className="ad-tag">admin général</span>}
+              </td>
+              <td className="ad-chips">
+                {Object.entries(u.environments).map(([e, r]) => <code key={e}>{e} : {r}</code>)}
+                {Object.keys(u.environments).length === 0 && <em className="ad-note">aucun</em>}
+              </td>
+              <td className="ad-note">{u.sso.join(", ") || "—"}</td>
+              <td className="ad-note">
+                {(u as UserRow & { last_login_at?: string }).last_login_at
+                  ? String((u as UserRow & { last_login_at?: string }).last_login_at)
+                      .replace("T", " ").slice(0, 16)
+                  : "jamais"}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      {data.providers.length > 0 && (
+        <>
+          <h4>SSO</h4>
+          <table className="ad-table">
+            <thead><tr><th>Fournisseur</th><th>Actif</th><th>Correspondances</th></tr></thead>
+            <tbody>
+              {data.providers.map((p) => (
+                <tr key={p.name}>
+                  <td><strong>{p.name}</strong></td>
+                  <td>{p.enabled ? "oui" : "non"}</td>
+                  <td>{p.mappings}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
+    </div>
+  );
+}

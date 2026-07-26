@@ -1,0 +1,121 @@
+name: ORDERS D96A (exemple)
+standard: EDIFACT
+message_type: ORDERS
+directory: D96A
+envelope:
+  syntax: UNOA:2
+  sender: "5498765000021:14"
+  recipient: "5412345000013:14"
+
+header:
+  - tag: BGM
+    status: M
+    max: 1
+    fields:
+      - name: type_document
+        path: "1.1"
+        codes: ["220", "221"]
+      - name: numero_commande
+        path: "2.1"
+
+  - tag: DTM
+    status: M
+    max: 5
+    qualifier: "1.1"
+    when:
+      "137":
+        label: Date du document
+        required: true
+        fields:
+          - name: date_document
+            path: "1.2"
+            date_format: "102"
+      "2":
+        label: Date de livraison demandée
+        fields:
+          - name: date_livraison_demandee
+            path: "1.2"
+            date_format: "102"
+
+  - tag: NAD
+    status: M
+    max: 5
+    qualifier: "1.1"
+    when:
+      "BY":
+        label: Acheteur
+        required: true
+        fields:
+          - name: acheteur_id
+            path: "2.1"
+      "SU":
+        label: Fournisseur
+        fields:
+          - name: fournisseur_id
+            path: "2.1"
+      "DP":
+        label: Lieu de livraison
+        fields:
+          - name: lieu_livraison_id
+            path: "2.1"
+
+items:
+  loop_start: LIN
+  segments:
+    - tag: LIN
+      status: M
+      max: 1
+      fields:
+        - name: numero_ligne
+          path: "1.1"
+        - name: code_article
+          path: "3.1"
+        - name: type_code_article
+          path: "3.2"
+          codes: ["EN", "UP"]
+
+    - tag: QTY
+      status: M
+      max: 5
+      qualifier: "1.1"
+      when:
+        "21":
+          label: Quantité commandée
+          required: true
+          fields:
+            - name: quantite_commandee
+              path: "1.2"
+              type: number
+
+    - tag: PRI
+      status: C
+      max: 5
+      qualifier: "1.1"
+      when:
+        "AAA":
+          label: Prix net
+          fields:
+            - name: prix_net
+              path: "1.2"
+              type: number
+
+summary:
+  - tag: UNS
+    status: M
+    max: 1
+    qualifier: "1.1"
+    when:
+      "S":
+        label: Début de la section résumé
+
+  - tag: CNT
+    status: C
+    max: 5
+    qualifier: "1.1"
+    when:
+      "2":
+        label: Nombre de lignes du message
+        fields:
+          - name: nombre_lignes
+            path: "1.2"
+            type: number

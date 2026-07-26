@@ -1,0 +1,570 @@
+// Mirrors the backend data contract (app/models.py).
+
+export type FieldType = "string" | "integer" | "float" | "date" | "boolean";
+export type CaseMode = "upper" | "lower" | "title";
+
+export type CellStatus =
+  | "OK"
+  | "CLEANED"
+  | "ERROR"
+  | "MAPPING_OK"
+  | "MAPPING_KO"
+  | "NO_TCO"
+  | "COMPUTED"
+  | "EDITED";      // client-side: cell changed by hand, pending re-validation
+
+export interface ComputedColumn {
+  name: string;
+  expression: string;
+}
+
+export interface FieldConfig {
+  name?: string[] | null;
+  type: FieldType;
+  format?: string | null;
+  format_clean?: string | null;
+  auto_date_format: boolean;
+  regex?: string | null;
+  length?: number | null;
+  nullable: boolean;
+  on_list?: (string | number)[] | null;
+  separator_mile: boolean;
+  separator_decimal: boolean;
+  delimiteur?: string | null;
+  trim: boolean;
+  normalize_case?: CaseMode | null;
+  mapping?: string | null;
+  rename_output: boolean;
+  tco_mapping?: string | null;
+  tco_replace?: boolean;
+  identifiant: boolean;
+  check_type: boolean;
+}
+
+export interface HeaderConfig {
+  delete_empty_line_before_header: boolean;
+  delete_empty_line_after_header: boolean;
+  delete_all_empty_line: boolean;
+  delete_unamed_column: boolean;
+  auto_header: boolean;
+}
+
+export interface TablePreview {
+  columns: string[];
+  data: string[][];
+  total_rows: number;
+  shown_rows: number;
+  index?: number[];              // df index per row (stable key for edits)
+}
+
+export interface FileResponse {
+  session_id: string;
+  type: string;
+  encoding: string;
+  delimiter: string;
+  sheet?: string | null;
+  sheets: string[];
+  table_count: number;
+  preview: TablePreview;
+  seeded_fields?: Record<string, FieldConfig> | null;   // set when seeded from a config
+}
+
+export interface ColumnStat {
+  errors: number;
+  cleans: number;
+}
+
+export interface ProcessStats {
+  total_rows: number;
+  rows_err: number;
+  rows_clean: number;
+  per_col: Record<string, ColumnStat>;
+}
+
+export interface ReportRow {
+  id: string | number;
+  colonne: string;
+  valeur_originale: string;
+  valeur_finale: string;
+  resultat: string;
+  statut: CellStatus;
+}
+
+export interface ProcessResponse {
+  columns: string[];
+  data: string[][];
+  status: CellStatus[][];
+  computed: string[];
+  compute_errors: Record<string, string>;
+  stats: ProcessStats;
+  report: ReportRow[];
+  tco_uncovered?: Record<string, { value: string; count: number }[]>;
+  warnings?: string[];
+  index?: number[];              // df index per preview row
+}
+
+export interface RowsResponse {
+  columns: string[];
+  data: string[][];
+  status: CellStatus[][];
+  total: number;
+  total_all: number;
+  offset: number;
+  limit: number;
+  index: number[];               // df index per row of the page
+}
+
+export interface TcoResponse {
+  rows: number;
+  labels: string[];
+}
+
+export interface Presets {
+  regex_presets: Record<string, string>;
+  date_formats: string[];
+  field_types: FieldType[];
+  encodings: string[];
+  delimiters: Record<string, string | null>;
+  case_modes: CaseMode[];
+}
+
+export interface MatchInfo {
+  matched: Record<string, FieldConfig>;
+  unmatched: FieldConfig[];
+  unused: string[];
+}
+
+export interface ImportResponse {
+  file_config: {
+    type?: string | null;
+    encoding?: string | null;
+    delimiter: string;
+    sheet?: string | null;
+    table_marker?: string | null;
+    table_index?: number;
+    table_header_mode?: string;
+    strict_header?: boolean;
+    variables?: Record<string, string>;
+    header?: HeaderConfig | null;
+    Fields: FieldConfig[];
+    filters?: Record<string, string>;
+  };
+  match?: MatchInfo | null;
+}
+
+export function defaultField(colName: string): FieldConfig {
+  return {
+    name: [colName],
+    type: "string",
+    format: null,
+    format_clean: null,
+    auto_date_format: false,
+    regex: null,
+    length: null,
+    nullable: true,
+    on_list: null,
+    separator_mile: false,
+    separator_decimal: false,
+    delimiteur: null,
+    trim: true,
+    normalize_case: null,
+    mapping: null,
+    rename_output: true,
+    tco_mapping: null,
+    tco_replace: false,
+    identifiant: false,
+    check_type: false,
+  };
+}
+
+export function defaultHeader(): HeaderConfig {
+  return {
+    delete_empty_line_before_header: false,
+    delete_empty_line_after_header: false,
+    delete_all_empty_line: false,
+    delete_unamed_column: false,
+    auto_header: false,
+  };
+}
+
+export interface EditCellsResponse {
+  applied: number;
+  rejected: { index: number; column: string; reason: string }[];
+  edits_total: number;
+  stale: boolean;
+}
+
+// ── artefact library / flows / runs (v12) ───────────────────────────
+export interface ArtefactInfo {
+  id: string;
+  environment?: string;
+  kind: "config" | "computed" | "tco" | "edi_model" | "mapping";
+  name: string;
+  description: string;
+  latest_version_no: number;
+  archived: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface FlowInfo {
+  id: string;
+  name: string;
+  description: string;
+  archived: boolean;
+  config_artefact_id: string;
+  config_version_no: number | null;
+  tco_artefact_id: string | null;
+  tco_version_no: number | null;
+  computed_artefact_id: string | null;
+  computed_version_no: number | null;
+  default_export_filename: string;
+}
+
+export interface RunInfo {
+  id: string;
+  flow_id: string | null;
+  flow_name: string;
+  source_name: string;
+  ok: boolean;
+  stage: string;
+  error: string | null;
+  rows_total: number;
+  rows_error: number;
+  rows_cleaned: number;
+  created_at: string;
+}
+
+
+// ── EDI module ────────────────────────────────────────────────────────
+export interface EdiKb {
+  segments: { tag: string; name: string; desc: string;
+              elements: { path: string; label: string }[] }[];
+  qualifiers: { tag: string; code: string; label: string }[];
+  date_formats: { code: string; label: string }[];
+  separators: { role: string; default: string; label: string; desc: string }[];
+}
+
+export interface EdiError {
+  code: string;
+  message: string;
+  segment_pos: number;
+  tag: string;
+  message_no: number;
+  zone: string;
+  path: string;
+}
+
+export interface EdiDecodedSegment {
+  pos: number;
+  tag: string;
+  label: string;                 // "Nom et adresse"
+  qualifier_label: string;       // "Acheteur" — what NAD+BY actually means
+  raw: string;
+  elements: { path: string; label: string; value: string }[];
+}
+
+export interface EdiDecodedMessage {
+  ref: string;
+  type: string;
+  directory: string;
+  segment_count: number;
+  segments: EdiDecodedSegment[];
+}
+
+export interface EdiInspectResponse {
+  format: string;
+  had_una: boolean;
+  filename: string;
+  syntax_errors: EdiError[];
+  truncated: boolean;
+  total_segments: number;
+  separators: Record<string, string>;
+  interchanges: {
+    sender: string; recipient: string; ref: string; implicit: boolean;
+    messages: EdiDecodedMessage[];
+  }[];
+}
+
+export interface EdiValidateResponse {
+  model_name: string;
+  syntax_errors: EdiError[];
+  model_errors: EdiError[];
+  stats: { messages: number; items: number; errors: number };
+  ok: boolean;
+}
+
+export interface EdiPivotPreview {
+  mode: "flat" | "linked";
+  flat?: TablePreview;
+  heads?: TablePreview;
+  items?: TablePreview;
+}
+
+export interface EdiDownload {
+  filename: string;
+  media_type: string;
+  content_base64: string;
+}
+
+export interface EdiGenerateResponse {
+  messages: number;
+  items: number;
+  file: EdiDownload;
+  preview: string;
+}
+
+export interface EdiConvertResponse {
+  messages: number;
+  source: string;
+  target: string;
+  file: EdiDownload;
+  preview: string;
+}
+
+export interface EdiInferResponse {
+  yaml: string;
+  model: Record<string, unknown>;
+  notes: string[];
+}
+
+
+// ── datasets: landing cleaned data in the database (v14) ──────────────
+export interface DatasetInfo {
+  id: string;
+  name: string;
+  description: string;
+  columns: string[];
+  key: string[];
+  types: Record<string, string>;
+  row_count: number;
+  archived: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * A problem found before writing. `category` is the whole point: "config" means
+ * the shape is wrong and no hand-editing will help — go look at the source;
+ * "data" means specific rows are wrong and can be fixed in the Data view.
+ */
+export interface WriteProblem {
+  severity: "error" | "warning";
+  category: "config" | "data";
+  code: string;
+  message: string;
+  hint: string;
+  columns: string[];
+  rows: number[];
+  count: number;
+}
+
+export interface WritePlan {
+  mode: string;
+  policy: string;
+  key_fields: string[];
+  columns: string[];
+  rows_in: number;
+  rows_to_write: number;
+  rows_rejected: number;
+  existing_rows: number;
+  will_delete: number;
+  creates_dataset: boolean;
+}
+
+export interface WriteResponse {
+  ok: boolean;
+  blocked_by: "config" | "data" | null;
+  problems: WriteProblem[];
+  plan: WritePlan | null;
+  dataset: DatasetInfo | null;
+  rows_written: number;
+  rows_updated: number;
+  rows_rejected: number;
+  rows_deleted: number;
+  write_id: string;
+}
+
+export interface DatasetWriteLog {
+  id: string;
+  dataset_name: string;
+  mode: string;
+  ok: boolean;
+  blocked_by: string | null;
+  error: string | null;
+  rows_in: number;
+  rows_written: number;
+  rows_updated: number;
+  rows_rejected: number;
+  rows_deleted: number;
+  created_at: string;
+}
+
+export interface RowsMutationResponse {
+  added: number;
+  deleted: number;
+  restored: number;
+  total_rows: number;
+  deleted_total: number;
+  added_total: number;
+  stale: boolean;              // a run happened before this change
+}
+
+
+// ── mapping & the central pivot (v16) ────────────────────────────────
+/**
+ * One correspondence. A field has exactly one origin — `source` (read) or
+ * `expr` (computed) — plus optional `rules`, the same constraints a cleaning
+ * config declares. Mapping, computing and validating stopped being three
+ * features: they are one field with two possible origins and its checks.
+ */
+export interface MappingLink {
+  pivot: string;
+  source?: string;
+  expr?: string | null;
+  scope: "head" | "item";
+  default?: string | null;
+  rules?: Record<string, unknown> | null;
+}
+
+export interface MappingDoc {
+  name: string;
+  source_kind: "flat" | "edi";
+  source_ref?: string | null;
+  description?: string;
+  links: MappingLink[];
+}
+
+export interface RuleProblem {
+  field: string;
+  code: string;
+  row: number;
+  value: string;
+  message: string;
+}
+
+export interface PivotChecks {
+  ok: boolean;
+  checked: number;
+  problems: RuleProblem[];
+}
+
+export interface PivotPreview {
+  columns: string[];
+  data: string[][];
+  total_rows: number;
+  shown_rows: number;
+  documents?: number;
+}
+
+export interface PivotObjectResponse {
+  documents: number;
+  preview: PivotPreview;
+  checks: PivotChecks;
+  session_id?: string;
+}
+
+export interface PivotConvertResponse {
+  documents: number;
+  format: "csv" | "edi";
+  checks: PivotChecks;
+  preview: string | PivotPreview;
+  content_base64: string;
+  filename: string;
+  media_type: string;
+}
+
+export interface MappingSuggestion {
+  yaml: string;
+  mapping: MappingDoc;
+  fields: string[];
+}
+
+
+// ── connection points & operations (v22) ─────────────────────────────
+export interface VariableRow {
+  id: string;
+  name: string;
+  value: string;                 // "••••••" when secret
+  scope: "global" | "environment" | "flow" | "brick";
+  environment: string;
+  graph_id: string;
+  node_id: string;
+  secret: boolean;
+  description: string;
+}
+
+export interface RunStep {
+  ordinal: number;
+  node_id: string;
+  type: string;
+  label: string;
+  status: string;
+  ms: number;
+  records: number;
+  rows: number;
+  message: string;
+  meta: Record<string, unknown>;
+}
+
+export interface RunRow {
+  id: string;
+  graph_id: string;
+  graph_name: string;
+  environment: string;
+  status: "running" | "success" | "error";
+  ms: number;
+  rows_out: number;
+  error: string;
+  error_node: string;
+  params: Record<string, string>;
+  messages: { node: string; level: string; text: string }[];
+  replay_of: string;
+  replay_mode: string;
+  started_at: string;
+  finished_at: string;
+  /** Whether the exact input is still available — decides which replay modes apply. */
+  has_snapshot: boolean;
+  steps?: RunStep[];
+}
+
+
+// ── environment profiles (v23) ───────────────────────────────────────
+/** What an environment exposes: modules, an imposed config, buttons. */
+export interface EnvProfile {
+  name: string;
+  label: string;
+  description: string;
+  modules: string[];
+  config_artefact_id: string;
+  config_version_no: number | null;
+  config_locked: boolean;
+  tco_artefact_id: string;
+  tco_editable: boolean;
+  actions: { label: string; graph_id: string; params?: Record<string, string>;
+             confirm?: boolean }[];
+}
+
+export interface TcoSuggestRow {
+  TYPE: string;
+  SOURCE_VALUE: string;
+  TARGET_LABEL: string;
+  count: number;
+  column: string;
+}
+
+
+// ── identity (v24) ───────────────────────────────────────────────────
+export interface AuthUser {
+  id: string;
+  email: string;
+  display_name: string;
+  is_superadmin: boolean;
+  /** environment → role. What this person may do, where. */
+  environments: Record<string, string>;
+  /** environment -> capabilities. The UI asks instead of guessing from a role. */
+  capabilities?: Record<string, string[]>;
+  setup_mode: boolean;
+  /** Set when a superadmin is borrowing this identity. */
+  impersonated_by?: string;
+}

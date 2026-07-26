@@ -1,0 +1,29 @@
+type: CSV
+encoding: utf-8
+delimiter: ";"
+header:
+  delete_unamed_column: true
+Fields:
+  - name: [SIRET]
+    type: string
+    length: 14
+    regex: "^\\d{14}$"
+    nullable: false
+    identifiant: true
+  - name: [CIVILITE]
+    type: string
+    tco_mapping: MASCULIN
+  - name: [DATE_NAISSANCE]
+    type: date
+    format: "%d/%m/%Y"
+    format_clean: "%Y-%m-%d"
+    check_type: true
+  - name: [MONTANT]
+    type: float
+    separator_mile: true
+    separator_decimal: true
+    check_type: true
+  - name: [EMAIL]
+    type: string
+    regex: "^[\\w\\.-]+@[\\w\\.-]+\\.\\w{2,}$"
+    normalize_case: lower
