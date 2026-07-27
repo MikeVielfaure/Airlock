@@ -24,7 +24,7 @@ export function OpsPanel({ notify }: Props) {
           <IconLayers size={14} /> Runs
         </button>
         <button className={`tab ${tab === "vars" ? "active" : ""}`} onClick={() => setTab("vars")}>
-          <IconCode size={14} /> Connection points
+          <IconCode size={14} /> Référentiel
         </button>
       </nav>
       {tab === "runs" ? <Runs notify={notify} /> : <Vars notify={notify} />}

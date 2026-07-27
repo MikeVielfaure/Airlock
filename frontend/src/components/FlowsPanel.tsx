@@ -1,10 +1,27 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../lib/api";
-import type { ArtefactInfo, FlowInfo, RunInfo } from "../lib/types";
-import { IconPlay, IconReset } from "../lib/icons";
+import type { ArtefactInfo, FlowInfo, ReportRow, RunInfo } from "../lib/types";
+import { IconLayers, IconPlay, IconReset } from "../lib/icons";
 
 interface Props {
   notify: (msg: string, kind?: "ok" | "err" | "info") => void;
+  /** Feed a run's report straight into the workbench's Report tab, in the
+   * same shape a JSON import would produce — one mechanism, two doors in. */
+  onOpenReport: (report: ReportRow[], tcoUncovered?: Record<string, { value: string; count: number }[]>) => void;
+}
+
+/** A stored run's report is grouped by id (one entry per row, each holding
+ * every flagged cell); the workbench reads a flat one row per cell instead. */
+function flattenRunReport(rows: { id: string | number;
+                                  errors: { column: string; value: string; status: string; message: string }[] }[]): ReportRow[] {
+  const out: ReportRow[] = [];
+  for (const group of rows) {
+    for (const e of group.errors) {
+      out.push({ id: group.id, colonne: e.column, valeur_originale: "",
+                valeur_finale: e.value, resultat: e.message, statut: e.status as ReportRow["statut"] });
+    }
+  }
+  return out;
 }
 
 /**
@@ -14,7 +31,10 @@ interface Props {
  * fed from the Yaml / Computed tabs ("save to library") and from the TCO
  * mini-form below.
  */
-export function FlowsPanel({ notify }: Props) {
+export function FlowsPanel({ notify, onOpenReport }: Props) {
+  const [openRun, setOpenRun] = useState<string>("");
+  const [openReport, setOpenReport] = useState<ReportRow[]>([]);
+  const [openBusy, setOpenBusy] = useState(false);
   const [configs, setConfigs] = useState<ArtefactInfo[]>([]);
   const [computeds, setComputeds] = useState<ArtefactInfo[]>([]);
   const [tcos, setTcos] = useState<ArtefactInfo[]>([]);
@@ -116,6 +136,17 @@ export function FlowsPanel({ notify }: Props) {
 
   const fmtDate = (iso: string) => new Date(iso).toLocaleString();
 
+  const toggleRun = async (runId: string) => {
+    if (openRun === runId) { setOpenRun(""); return; }
+    setOpenBusy(true);
+    try {
+      const detail = await api.getRun(runId);
+      setOpenReport(flattenRunReport(detail.report?.rows ?? []));
+      setOpenRun(runId);
+    } catch (e) { notify(e instanceof Error ? e.message : String(e), "err"); }
+    finally { setOpenBusy(false); }
+  };
+
   return (
     <div>
       <input type="file" ref={runFileRef} accept=".csv,.xlsx,.xls" style={{ display: "none" }}
@@ -194,19 +225,66 @@ export function FlowsPanel({ notify }: Props) {
               <thead><tr><th>When</th><th>Flow</th><th>File</th><th>Result</th><th>Rows</th><th></th></tr></thead>
               <tbody>
                 {runs.map((r) => (
-                  <tr key={r.id}>
-                    <td>{fmtDate(r.created_at)}</td>
-                    <td>{r.flow_name}</td>
-                    <td className="mono">{r.source_name}</td>
-                    <td>{r.ok
-                      ? <span className="runok">OK</span>
-                      : <span className="runko">KO · {r.stage}{r.rows_error ? ` · ${r.rows_error} err` : ""}</span>}</td>
-                    <td>{r.rows_total.toLocaleString()}</td>
-                    <td className="libactions">
-                      {r.ok && <a className="btn sm" href={`/api/runs/${r.id}/export`}>Export</a>}
-                      <a className="btn sm" href={`/api/runs/${r.id}`} target="_blank" rel="noreferrer">Report (json)</a>
-                    </td>
-                  </tr>
+                  <Fragment key={r.id}>
+                    <tr>
+                      <td>{fmtDate(r.created_at)}</td>
+                      <td>{r.flow_name}</td>
+                      <td className="mono">{r.source_name}</td>
+                      <td>{r.ok
+                        ? <span className="runok">OK</span>
+                        : <span className="runko">KO · {r.stage}{r.rows_error ? ` · ${r.rows_error} err` : ""}</span>}</td>
+                      <td>{r.rows_total.toLocaleString()}</td>
+                      <td className="libactions">
+                        <button className="btn sm" disabled={openBusy} onClick={() => toggleRun(r.id)}>
+                          {openRun === r.id ? "Fermer" : "Voir"}
+                        </button>
+                        {r.ok && <a className="btn sm" href={`/api/runs/${r.id}/export`}>Export</a>}
+                        <a className="btn sm" href={`/api/runs/${r.id}`} target="_blank" rel="noreferrer">Report (json)</a>
+                      </td>
+                    </tr>
+                    {openRun === r.id && (
+                      <tr>
+                        <td colSpan={6} style={{ background: "var(--panel-2)", padding: "10px 12px" }}>
+                          {openReport.length === 0 ? (
+                            <span className="csub">Aucune cellule signalée dans ce rapport.</span>
+                          ) : (
+                            <>
+                              <div style={{ display: "flex", justifyContent: "space-between",
+                                          alignItems: "center", marginBottom: 8 }}>
+                                <span className="csub">{openReport.length} ligne(s)</span>
+                                <button className="btn sm" onClick={() => onOpenReport(openReport)}>
+                                  <IconLayers size={13} /> Ouvrir dans Rapport
+                                </button>
+                              </div>
+                              <div className="tablewrap">
+                                <table className="grid">
+                                  <thead>
+                                    <tr><th>id</th><th>column</th><th>value</th><th>result</th><th>status</th></tr>
+                                  </thead>
+                                  <tbody>
+                                    {openReport.slice(0, 500).map((row, i) => (
+                                      <tr key={i}>
+                                        <td style={{ fontFamily: "var(--mono)", fontSize: 12 }}>{String(row.id)}</td>
+                                        <td style={{ fontFamily: "var(--mono)", fontSize: 12 }}>{row.colonne}</td>
+                                        <td>{row.valeur_finale}</td>
+                                        <td style={{ color: "var(--ink-soft)", fontSize: 12 }}>{row.resultat}</td>
+                                        <td><span className={`statustag ${row.statut}`}>{row.statut}</span></td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                              {openReport.length > 500 && (
+                                <div className="csub" style={{ marginTop: 6 }}>
+                                  Showing first 500 of {openReport.length.toLocaleString()} — open in Report or export for the rest.
+                                </div>
+                              )}
+                            </>
+                          )}
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
                 ))}
               </tbody>
             </table>

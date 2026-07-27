@@ -26,7 +26,6 @@ interface Props {
   setStrictHeader: (v: boolean) => void;
   minHeader: boolean;
   setMinHeader: (v: boolean) => void;
-  hasConfig: boolean;
 }
 
 const HEADER_OPTS: { key: keyof HeaderConfig; label: string; sub: string }[] = [
@@ -96,24 +95,20 @@ export function SchemaPanel(p: Props) {
             </label>
           ))}
         </div>
-        {p.hasConfig && (
-          <label className="check" style={{ marginTop: 8 }}>
-            <input type="checkbox" checked={p.strictHeader} onChange={(e) => p.setStrictHeader(e.target.checked)} />
-            <span className="ctxt">Strict header
-              <div className="csub">The file's columns must match the config exactly — flagged below if they don't.</div>
-            </span>
-          </label>
-        )}
-        {p.hasConfig && (
-          <label className="check" style={{ marginTop: 4 }}>
-            <input type="checkbox" checked={p.minHeader} onChange={(e) => p.setMinHeader(e.target.checked)} />
-            <span className="ctxt">Minimum header
-              <div className="csub">The file must contain at least the config's columns — extra columns are tolerated and ignored.</div>
-            </span>
-          </label>
-        )}
+        <label className="check" style={{ marginTop: 8 }}>
+          <input type="checkbox" checked={p.strictHeader} onChange={(e) => p.setStrictHeader(e.target.checked)} />
+          <span className="ctxt">Strict header
+            <div className="csub">The file's columns must match the config exactly — flagged below if they don't.</div>
+          </span>
+        </label>
+        <label className="check" style={{ marginTop: 4 }}>
+          <input type="checkbox" checked={p.minHeader} onChange={(e) => p.setMinHeader(e.target.checked)} />
+          <span className="ctxt">Minimum header
+            <div className="csub">The file must contain at least the config's columns — extra columns are tolerated and ignored.</div>
+          </span>
+        </label>
         {((p.strictHeader && (p.unmatchedConfig.length > 0 || p.unmapped.length > 0)) ||
-          (p.minHeader && p.unmatchedConfig.length > 0)) && p.hasConfig && (
+          (p.minHeader && p.unmatchedConfig.length > 0)) && (
           <div className="banner err" style={{ marginTop: 8 }}>
             <span>
               <strong>{p.strictHeader ? "Strict header mismatch." : "Minimum header mismatch."}</strong>{" "}

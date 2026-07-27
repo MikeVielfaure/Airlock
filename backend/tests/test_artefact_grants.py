@@ -56,6 +56,20 @@ def _cfg(token, name="cfg-share", env="source"):
     return r.json()["id"]
 
 
+def test_subject_kind_column_is_wide_enough_for_its_own_values():
+    """SQLite never enforces VARCHAR length, so a column too narrow for the
+    literal it stores passes every test here and only breaks on Postgres, in
+    production, at the worst moment. This test does not touch the database —
+    it checks the declared width against what the code actually writes."""
+    from app.db_models import ArtefactGrant, DatasetGrant
+
+    art_len = ArtefactGrant.__table__.c.subject_kind.type.length
+    assert art_len is not None and art_len >= len("environment")
+
+    ds_len = DatasetGrant.__table__.c.subject_kind.type.length
+    assert ds_len is not None and ds_len >= max(len("user"), len("role"), len("environment"))
+
+
 def test_an_ungranted_artefact_is_invisible_to_another_environment(team):
     _cfg(team["emma"])
     seen = [a["name"] for a in

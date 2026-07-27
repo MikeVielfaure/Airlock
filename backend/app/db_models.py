@@ -643,7 +643,7 @@ class DatasetGrant(Base):
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_uuid)
     dataset_id: Mapped[str] = mapped_column(
         ForeignKey("datasets.id", ondelete="CASCADE"), index=True)
-    subject_kind: Mapped[str] = mapped_column(String(8), default="user")
+    subject_kind: Mapped[str] = mapped_column(String(16), default="user")
     subject: Mapped[str] = mapped_column(String(64), index=True)
     # read | write | manage. manage = grant to others, and delete the table.
     permission: Mapped[str] = mapped_column(String(8), default="read")
@@ -671,7 +671,7 @@ class ArtefactGrant(Base):
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_uuid)
     artefact_id: Mapped[str] = mapped_column(
         ForeignKey("artefacts.id", ondelete="CASCADE"), index=True)
-    subject_kind: Mapped[str] = mapped_column(String(8), default="environment")
+    subject_kind: Mapped[str] = mapped_column(String(16), default="environment")
     subject: Mapped[str] = mapped_column(String(64), index=True)
     permission: Mapped[str] = mapped_column(String(8), default="read")
     granted_by: Mapped[str] = mapped_column(String(32), default="")

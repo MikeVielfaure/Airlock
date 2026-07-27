@@ -6,7 +6,7 @@ import {
   type FieldConfig, type FieldType, type HeaderConfig, type Presets,
   type EnvProfile,
   type FileResponse, type RowsMutationResponse,
-  type ProcessResponse, type TablePreview, type TcoResponse,
+  type ProcessResponse, type ReportRow, type TablePreview, type TcoResponse,
 } from "./lib/types";
 import { Sidebar } from "./components/Sidebar";
 import { SchemaPanel } from "./components/SchemaPanel";
@@ -143,6 +143,13 @@ export default function App() {
                marker: fc.table_marker ?? "", index: fc.table_index ?? 0,
                headerMode: (fc.table_header_mode as "local" | "global") ?? "local" };
     }
+    // No file to match against yet: the config's own fields are the best
+    // available picture, so the YAML tab (and everything else reading
+    // `fields`/`visible`) shows the loaded configuration right away instead
+    // of looking empty until a file arrives to match against.
+    setFields(cf);
+    setVisible(Object.keys(cf));
+    setUnmapped([]);
     setUnmatchedConfig([]);
     return { matched: 0, sheet: fc.sheet ?? null,
              marker: fc.table_marker ?? "", index: fc.table_index ?? 0,
@@ -228,6 +235,22 @@ export default function App() {
       : Object.fromEntries(cols.map((c) => [c, defaultField(c)])));
     setResult(null);
     setTab("schema");
+  }, []);
+
+  /**
+   * Load a report that did not come from running validation just now — either
+   * re-imported from a JSON export, or pulled from a stored flow run. Report
+   * only ever reads `report`/`tco_uncovered` off `result` (confirmed in
+   * ReportPanel), so every other field here is a harmless empty placeholder.
+   */
+  const loadReport = useCallback((report: ReportRow[],
+                                  tcoUncovered: Record<string, { value: string; count: number }[]> = {}) => {
+    setResult({
+      columns: [], data: [], status: [], computed: [], compute_errors: {},
+      stats: { total_rows: 0, rows_err: 0, rows_clean: 0, per_col: {} },
+      report, tco_uncovered: tcoUncovered, warnings: [], index: [],
+    });
+    setTab("report");
   }, []);
 
   /** Start a session from a schema instead of a file: columns alone, or seeded
@@ -575,10 +598,91 @@ export default function App() {
     return <LoginGate onReady={(u) => { setMe(u); setGateDone(true); }} />;
   }
 
+  /**
+   * One navigation, always in the same place, whatever tab is active and
+   * whether a file is loaded — a previous version had eight buttons on the
+   * empty state and a separate tab bar elsewhere, and it read as two apps.
+   * Every optional tab goes through `gate()`, no exceptions: a tool absent
+   * from the profile must stay absent everywhere, not just on one screen.
+   */
+  const tabsNav = (
+    <nav className="tabs">
+      {gate("schema", (
+        <button className={`tab ${tab === "schema" ? "active" : ""}`} onClick={() => setTab("schema")}>
+          <IconList size={15} /> Schéma & Règles <span className="count">{visible.length}</span>
+        </button>
+      ))}
+      {gate("computed", (
+        <button className={`tab ${tab === "computed" ? "active" : ""}`} onClick={() => setTab("computed")}>
+          <IconCode size={15} /> Calculs {computed.length > 0 && <span className="count">{computed.length}</span>}
+        </button>
+      ))}
+      <button className={`tab ${tab === "data" ? "active" : ""}`} onClick={() => setTab("data")}>
+        <IconTable size={15} /> Données
+        {errCount > 0 && <span className="count err">{errCount}</span>}
+      </button>
+      <button className={`tab ${tab === "report" ? "active" : ""}`} onClick={() => setTab("report")}>
+        <IconLayers size={15} /> Rapport
+        {result && <span className="count">{result.report.length}</span>}
+      </button>
+      {gate("yaml", (
+        <button className={`tab ${tab === "yaml" ? "active" : ""}`} onClick={() => setTab("yaml")}>
+          <IconCode size={15} /> Configuration
+        </button>
+      ))}
+      {profile?.tco_artefact_id !== undefined && shows("tco") && (
+        <button className={`tab ${tab === "tco" ? "active" : ""}`} onClick={() => setTab("tco")}>
+          <IconTable size={15} /> Correspondances
+        </button>
+      )}
+      {gate("datasets", (
+        <button className={`tab ${tab === "datasets" ? "active" : ""}`} onClick={() => setTab("datasets")}>
+          <IconTable size={15} /> Tables BDD
+        </button>
+      ))}
+      {gate("mapping", (
+        <button className={`tab ${tab === "mapping" ? "active" : ""}`} onClick={() => setTab("mapping")}>
+          <IconCode size={15} /> Mapping
+        </button>
+      ))}
+      {gate("flows", (
+        <button className={`tab ${tab === "flows" ? "active" : ""}`} onClick={() => setTab("flows")}>
+          <IconLayers size={15} /> Flux
+        </button>
+      ))}
+      {gate("edi", (
+        <button className={`tab ${tab === "edi" ? "active" : ""}`} onClick={() => setTab("edi")}>
+          <IconGrid size={15} /> EDIFACT
+        </button>
+      ))}
+      {gate("canvas", (
+        <button className={`tab ${tab === "canvas" ? "active" : ""}`} onClick={() => setTab("canvas")}>
+          <IconLayers size={15} /> Studio Flux
+        </button>
+      ))}
+      {gate("functions", (
+        <button className={`tab ${tab === "functions" ? "active" : ""}`} onClick={() => setTab("functions")}>
+          <IconCode size={15} /> Fonctions
+        </button>
+      ))}
+      {gate("ops", (
+        <button className={`tab ${tab === "ops" ? "active" : ""}`} onClick={() => setTab("ops")}>
+          <IconPlay size={15} /> Exploitation
+        </button>
+      ))}
+      {(me?.is_superadmin || me?.setup_mode) && (
+        <button className={`tab ${tab === "admin" ? "active" : ""}`} onClick={() => setTab("admin")}>
+          <IconLayers size={15} /> Administration
+        </button>
+      )}
+    </nav>
+  );
+
   return (
     <div className="shell">
       <header className="topbar">
-        <div className="brand">
+        <div className="brand" onClick={() => setTab("home")} style={{ cursor: "pointer" }}
+             title="Retour à l'accueil">
           <span className="brand-mark"><IconGrid size={17} /></span>
           <div>
             <div className="brand-name">File Explorer</div>
@@ -586,7 +690,24 @@ export default function App() {
           </div>
         </div>
         {badges}
+        {me && (
+          <span className="whoami" title={me.is_superadmin
+            ? "Administrateur général" : Object.entries(me.environments)
+              .map(([e, r]) => `${e}: ${r}`).join(" · ")}>
+            {me.display_name || me.email}
+            <button className="whoami-out" title="Se déconnecter"
+                    onClick={async () => {
+                      try { await api.logout(); } catch { /* already gone */ }
+                      setToken(""); setMe(null); setGateDone(false);
+                    }}>↩</button>
+          </span>
+        )}
+        <select className="envpick" value={env} onChange={(e) => setEnv(e.target.value)}
+                title="Environment — scopes configs, mappings, flows, functions and tables">
+          {envs.map((e) => <option key={e} value={e}>{e}</option>)}
+        </select>
       </header>
+      {tabsNav}
 
       <div className={`body ${FULL_WIDTH.has(tab) || sidebarCollapsed ? "wide" : ""}`}>
         {!FULL_WIDTH.has(tab) && <Sidebar
@@ -609,38 +730,8 @@ export default function App() {
 
         <main className="main">
           {!hasFile ? (
-            tab !== "schema" && tab !== "computed" && tab !== "data" && tab !== "report"
-             && tab !== "yaml" && tab !== "tco" ? (
+            tab !== "schema" && tab !== "data" && tab !== "tco" ? (
               <>
-                <nav className="tabs">
-                  <button className="tab" onClick={() => setTab("schema")}>← Retour</button>
-                  {gate("flows", (
-                  <button className={`tab ${tab === "flows" ? "active" : ""}`} onClick={() => setTab("flows")}>
-                    <IconLayers size={15} /> Flux
-                  </button>
-                  ))}
-                  {gate("edi", (
-                  <button className={`tab ${tab === "edi" ? "active" : ""}`} onClick={() => setTab("edi")}>
-                    <IconGrid size={15} /> EDIFACT
-                  </button>
-                  ))}
-                  {gate("canvas", (
-                  <button className={`tab ${tab === "canvas" ? "active" : ""}`} onClick={() => setTab("canvas")}>
-                    <IconLayers size={15} /> Studio Flux
-                  </button>
-                  ))}
-                  {gate("ops", (
-                  <button className={`tab ${tab === "ops" ? "active" : ""}`} onClick={() => setTab("ops")}>
-                    <IconPlay size={15} /> Exploitation
-                  </button>
-                  ))}
-                  {(me?.is_superadmin || me?.setup_mode) && (
-                    <button className={`tab ${tab === "admin" ? "active" : ""}`}
-                            onClick={() => setTab("admin")}>
-                      <IconLayers size={15} /> Administration
-                    </button>
-                  )}
-                </nav>
               {me?.impersonated_by && (
                 <div className="borrowbar">
                   <strong>Vous voyez l'application comme {me.email}</strong>
@@ -675,11 +766,22 @@ export default function App() {
                     <Home me={me} env={env} profile={profile} shows={shows}
                           go={(k) => setTab(k as Tab)} />
                   )
-                    : tab === "flows" ? <FlowsPanel notify={toast} />
+                    : tab === "flows" ? <FlowsPanel notify={toast} onOpenReport={loadReport} />
                     : tab === "admin" ? <AdminPanel me={me} notify={toast}
                                                      onIdentityChange={() => window.location.reload()} />
                     : tab === "ops" ? <OpsPanel notify={toast} />
                     : tab === "canvas" ? <FlowCanvas notify={toast} />
+                    : tab === "functions" ? <FunctionsPanel notify={toast} />
+                    : tab === "report" ? <ReportPanel result={result} sid={sid} notify={toast} onLoadReport={loadReport} />
+                    : tab === "computed" ? (
+                        <ComputedPanel notify={toast} columns={effectiveColumns} computed={computed}
+                          setComputed={setComputed} variables={configVariables}
+                          setVariables={setConfigVariables} errors={result?.compute_errors ?? {}} />
+                      )
+                    : tab === "yaml" ? (
+                        <YamlPanel yaml={yaml} generating={yamlGen} onCopy={copyYaml}
+                          onImportYaml={onImportYaml} notify={toast} />
+                      )
                     : tab === "datasets" ? <DatasetPanel sid={null} columns={[]}
                         identifiers={[]} hasRun={false} sourceName="" notify={toast}
                         onOpenSession={(res) => { adoptSession(res, "table"); setTab("data"); }} />
@@ -702,81 +804,11 @@ export default function App() {
             )
           ) : (
             <>
-              <nav className="tabs">
-                {gate("schema", (
-                <button className={`tab ${tab === "schema" ? "active" : ""}`} onClick={() => setTab("schema")}>
-                  <IconList size={15} /> Schéma & Règles <span className="count">{visible.length}</span>
-                </button>
-                ))}
-                {gate("computed", (
-                <button className={`tab ${tab === "computed" ? "active" : ""}`} onClick={() => setTab("computed")}>
-                  <IconCode size={15} /> Calculs {computed.length > 0 && <span className="count">{computed.length}</span>}
-                </button>
-                ))}
-                <button className={`tab ${tab === "data" ? "active" : ""}`} onClick={() => setTab("data")}>
-                  <IconTable size={15} /> Données
-                  {errCount > 0 && <span className="count err">{errCount}</span>}
-                </button>
-                <button className={`tab ${tab === "report" ? "active" : ""}`} onClick={() => setTab("report")}>
-                  <IconLayers size={15} /> Rapport
-                  {result && <span className="count">{result.report.length}</span>}
-                </button>
-                {gate("yaml", (
-                <button className={`tab ${tab === "yaml" ? "active" : ""}`} onClick={() => setTab("yaml")}>
-                  <IconCode size={15} /> Export YAML
-                </button>
-                ))}
-                <button className={`tab ${tab === "flows" ? "active" : ""}`} onClick={() => setTab("flows")}>
-                  <IconLayers size={15} /> Flux
-                </button>
-                <button className={`tab ${tab === "edi" ? "active" : ""}`} onClick={() => setTab("edi")}>
-                  <IconGrid size={15} /> EDIFACT
-                </button>
-                {profile?.tco_artefact_id !== undefined && shows("tco") && (
-                  <button className={`tab ${tab === "tco" ? "active" : ""}`} onClick={() => setTab("tco")}>
-                    <IconTable size={15} /> Correspondances
-                  </button>
-                )}
-                {gate("datasets", (
-                <button className={`tab ${tab === "datasets" ? "active" : ""}`} onClick={() => setTab("datasets")}>
-                  <IconTable size={15} /> Tables BDD
-                </button>
-                ))}
-                {gate("mapping", (
-                <button className={`tab ${tab === "mapping" ? "active" : ""}`} onClick={() => setTab("mapping")}>
-                  <IconCode size={15} /> Mapping
-                </button>
-                ))}
-                <button className={`tab ${tab === "canvas" ? "active" : ""}`} onClick={() => setTab("canvas")}>
-                  <IconLayers size={15} /> Studio Flux
-                </button>
-                {gate("functions", (
-                <button className={`tab ${tab === "functions" ? "active" : ""}`} onClick={() => setTab("functions")}>
-                  <IconCode size={15} /> Fonctions
-                </button>
-                ))}
-                <button className={`tab ${tab === "ops" ? "active" : ""}`} onClick={() => setTab("ops")}>
-                  <IconPlay size={15} /> Exploitation
-                </button>
-                {me && (
-                  <span className="whoami" title={me.is_superadmin
-                    ? "Administrateur général" : Object.entries(me.environments)
-                      .map(([e, r]) => `${e}: ${r}`).join(" · ")}>
-                    {me.display_name || me.email}
-                    <button className="whoami-out" title="Se déconnecter"
-                            onClick={async () => {
-                              try { await api.logout(); } catch { /* already gone */ }
-                              setToken(""); setMe(null); setGateDone(false);
-                            }}>↩</button>
-                  </span>
-                )}
-                <select className="envpick" value={env} onChange={(e) => setEnv(e.target.value)}
-                        title="Environment — scopes configs, mappings, flows, functions and tables">
-                  {envs.map((e) => <option key={e} value={e}>{e}</option>)}
-                </select>
-              </nav>
-
               <div className="view">
+                {tab === "home" && (
+                  <Home me={me} env={env} profile={profile} shows={shows}
+                        go={(k) => setTab(k as Tab)} />
+                )}
                 {tab === "schema" && presets && (
                   <SchemaPanel
                     columns={columns} visible={visible} setVisible={setVisible}
@@ -789,7 +821,6 @@ export default function App() {
                     unmatchedConfig={unmatchedConfig} assignConfigField={assignConfigField}
                     strictHeader={strictHeader} setStrictHeader={setStrictHeader}
                     minHeader={minHeader} setMinHeader={setMinHeader}
-                    hasConfig={Boolean(configYaml)}
                   />
                 )}
                 {tab === "computed" && (
@@ -808,8 +839,8 @@ export default function App() {
                     srcOf={srcOf} notify={toast} onResetEdits={onResetEdits}
                     onRowsChanged={onRowsChanged} deletedTotal={deletedTotal} />
                 )}
-                {tab === "report" && <ReportPanel result={result} sid={sid} />}
-                {tab === "flows" && <FlowsPanel notify={toast} />}
+                {tab === "report" && <ReportPanel result={result} sid={sid} notify={toast} onLoadReport={loadReport} />}
+                {tab === "flows" && <FlowsPanel notify={toast} onOpenReport={loadReport} />}
                 {tab === "edi" && <EdiPanel notify={toast} onSession={adoptSession} />}
                 {tab === "canvas" && <FlowCanvas notify={toast} />}
                 {tab === "functions" && <FunctionsPanel notify={toast} />}

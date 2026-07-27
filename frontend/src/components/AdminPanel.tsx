@@ -64,7 +64,8 @@ export function AdminPanel({ me, notify, onIdentityChange }: Props) {
       {tab === "sandbox" && <Sandbox envs={envs} notify={notify}
                                     onIdentityChange={onIdentityChange} />}
       {tab === "users" && <Users envs={envs} notify={notify} />}
-      {tab === "envs" && <Envs envs={envs} notify={notify} refreshEnvs={refreshEnvs} />}
+      {tab === "envs" && <Envs envs={envs} notify={notify} refreshEnvs={refreshEnvs}
+                              onIdentityChange={onIdentityChange} />}
       {tab === "sso" && <Sso envs={envs} notify={notify} />}
     </div>
   );
@@ -254,8 +255,9 @@ interface EnvContent {
   keys: { id: string; name: string; active: boolean }[];
 }
 
-function Envs({ envs, notify, refreshEnvs }: {
+function Envs({ envs, notify, refreshEnvs, onIdentityChange }: {
   envs: string[]; notify: Props["notify"]; refreshEnvs: () => Promise<void>;
+  onIdentityChange: () => void;
 }) {
   const [templates, setTemplates] = useState<{ key: string; label: string;
                                                description: string; modules: string[];
@@ -379,6 +381,10 @@ function Envs({ envs, notify, refreshEnvs }: {
                   modules: profile.modules, tco_editable: profile.tco_editable });
                 setProfile(saved);
                 notify(`Profil de « ${sel} » enregistré.`, "ok");
+                // The workshop reads its own environment's profile once, on
+                // mount or on switch — a save here would otherwise sit
+                // invisible until an unrelated reload happened to catch it.
+                onIdentityChange();
               } catch (e) { notify(e instanceof Error ? e.message : String(e), "err"); }
             }}><IconSave size={14} /> Enregistrer</button>
             <button className="btn sm" onClick={async () => {
@@ -386,6 +392,7 @@ function Envs({ envs, notify, refreshEnvs }: {
                 await api.resetEnvProfile(sel);
                 setProfile(await api.envProfile(sel));
                 notify("Profil remis à zéro — tout s'affiche à nouveau.", "ok");
+                onIdentityChange();
               } catch (e) { notify(e instanceof Error ? e.message : String(e), "err"); }
             }}><IconReset size={12} /> Tout réafficher</button>
           </div>

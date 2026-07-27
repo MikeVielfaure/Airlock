@@ -25,6 +25,7 @@ import type {
   EditCellsResponse,
   FlowInfo,
   RunInfo,
+  RunDetail,
   FieldConfig,
   FileResponse,
   HeaderConfig,
@@ -295,6 +296,9 @@ export const api = {
     if (flowId) qs.set("flow_id", flowId);
     return fetch(`${BASE}/runs?${qs.toString()}`, { headers: authHeaders() }).then((r) => json<RunInfo[]>(r));
   },
+
+  getRun: (id: string) =>
+    fetch(`${BASE}/runs/${id}`, { headers: authHeaders() }).then((r) => json<RunDetail>(r)),
 
   // ── EDI module (v13) ──────────────────────────────────────────
   ediKb: () => fetch(`${BASE}/edi/kb`, { headers: authHeaders() }).then((r) => json<EdiKb>(r)),

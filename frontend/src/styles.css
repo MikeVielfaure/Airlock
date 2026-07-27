@@ -77,13 +77,13 @@ input, select, textarea { font-family: inherit; }
 .shell { display: flex; flex-direction: column; height: 100vh; }
 
 .topbar {
-  display: flex; align-items: center; gap: 16px;
-  padding: 0 22px; height: 58px;
+  display: flex; align-items: center; gap: 10px 16px; flex-wrap: wrap;
+  padding: 8px 22px; min-height: 58px;
   background: var(--panel);
   border-bottom: 1px solid var(--line);
   flex-shrink: 0;
 }
-.brand { display: flex; align-items: center; gap: 11px; }
+.brand { display: flex; align-items: center; gap: 11px; flex-shrink: 0; white-space: nowrap; }
 .brand-mark {
   width: 30px; height: 30px; border-radius: 8px;
   background: var(--ink); color: #fff;
@@ -183,7 +183,7 @@ textarea { resize: vertical; min-height: 64px; }
 .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 
 .tabs {
-  display: flex; gap: 2px; padding: 0 22px;
+  display: flex; gap: 2px; padding: 0 22px; flex-wrap: wrap;
   background: var(--panel); border-bottom: 1px solid var(--line); flex-shrink: 0;
 }
 .tab {
@@ -1099,6 +1099,9 @@ pre.yaml .k { color: #8db4ff; }
   margin-left: auto; border: 1px solid var(--accent); background: var(--accent-tint);
   color: var(--accent); border-radius: 999px; padding: 4px 11px;
   font-size: 12px; font-weight: 600; cursor: pointer;
+  /* Override the generic `select { width: 100% }` reset — as a flex item in
+     the topbar it must size to its content, not swallow the whole row. */
+  width: auto; flex: 0 0 auto;
 }
 .fn { display: flex; flex-direction: column; gap: 12px; }
 .fn-hint { font-size: 12.5px; line-height: 1.6; color: var(--ink-soft); margin: 0; max-width: 78ch; }

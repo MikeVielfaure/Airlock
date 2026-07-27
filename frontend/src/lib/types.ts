@@ -236,6 +236,20 @@ export interface RunInfo {
   created_at: string;
 }
 
+export interface RunReportError { column: string; value: string; status: string; message: string }
+export interface RunReportGroup { id: string | number; errors: RunReportError[] }
+
+export interface RunDetail extends RunInfo {
+  config_version_id: string | null;
+  tco_version_id: string | null;
+  computed_version_id: string | null;
+  summary: Record<string, unknown>;
+  report: { rows?: RunReportGroup[] };
+  has_export: boolean;
+  export_name: string | null;
+  export_format: string | null;
+}
+
 
 // ── EDI module ────────────────────────────────────────────────────────
 export interface EdiKb {
