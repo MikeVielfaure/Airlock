@@ -289,6 +289,11 @@ class Variable(Base):
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_uuid)
     name: Mapped[str] = mapped_column(String(120), index=True)
     value: Mapped[str] = mapped_column(Text, default="")
+    # "value" is a plain string; anything else means `value` holds a JSON object
+    # with kind-specific keys ("hotfolder" -> path/archive_dir/error_dir, "smtp"
+    # -> host/...). One system for both a threshold and a connection, rather
+    # than a second table duplicating scope, CRUD and secret-masking.
+    kind: Mapped[str] = mapped_column(String(16), default="value", index=True)
     scope: Mapped[str] = mapped_column(String(16), default="environment", index=True)
     environment: Mapped[str] = mapped_column(String(64), default="", index=True)
     graph_id: Mapped[str] = mapped_column(String(32), default="", index=True)
@@ -301,6 +306,29 @@ class Variable(Base):
 
     __table_args__ = (UniqueConstraint("name", "scope", "environment", "graph_id",
                                        "node_id", name="uq_variable_scope"),)
+
+
+class VariableRestriction(Base):
+    """
+    An allow-list entry narrowing a global connection point to one environment.
+
+    The absence of any row for a variable is the common case and means
+    "visible everywhere" — today's behaviour, preserved so existing globals
+    keep working untouched. Only once a row exists does that variable become
+    restricted to the environments listed; there is no way to end up with a
+    global visible nowhere by accident.
+    """
+    __tablename__ = "variable_restrictions"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_uuid)
+    variable_id: Mapped[str] = mapped_column(
+        ForeignKey("variables.id", ondelete="CASCADE"), index=True)
+    environment: Mapped[str] = mapped_column(String(64), index=True)
+    granted_by: Mapped[str] = mapped_column(String(32), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+    __table_args__ = (UniqueConstraint("variable_id", "environment",
+                                       name="uq_variable_restriction"),)
 
 
 class FlowRun(Base):

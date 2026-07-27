@@ -85,6 +85,32 @@ edges: [{{from: src, to: ctl}}, {{from: ctl, to: out}}]
     assert step["meta"]["rows"] == 2 and step["meta"]["on_error"] == "keep"
 
 
+def test_the_reported_config_name_survives_a_row_with_problems():
+    """A loop variable used to be named `label`, the same name as the
+    configuration's — shadowing it before meta["config"] and the block message
+    were built, so a run with a bad cell could report a corrupted name."""
+    name = f"contrat-{_u()}"
+    cfg = _cfg(CONTRAT, name)
+    y = f"""
+name: nomme
+nodes:
+  - id: src
+    type: inline
+    config:
+      rows:
+        - {{MATRICULE: "M0001", SERVICE: "RH"}}
+        - {{MATRICULE: "oups", SERVICE: "ADV"}}
+  - {{id: ctl, type: config, config: {{config_id: "{cfg['id']}"}}}}
+  - {{id: out, type: response}}
+edges: [{{from: src, to: ctl}}, {{from: ctl, to: out}}]
+"""
+    r = _flow(y)
+    assert r.status_code == 200, r.text
+    step = [s for s in r.json()["trace"] if s["node"] == "ctl"][0]
+    assert step["meta"]["errors"] == 1                # the row still fails …
+    assert step["meta"]["config"] == name             # … but the name is intact
+
+
 def test_a_configuration_can_be_named_instead_of_referenced_by_id():
     """A hand-written flow reads better with a name than a hex string."""
     name = f"contrat-{_u()}"

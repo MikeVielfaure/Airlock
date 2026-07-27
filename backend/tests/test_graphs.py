@@ -309,6 +309,12 @@ def test_the_brick_palette_is_advertised():
     assert "graph" in types                            # a flow is a brick
 
 
+def test_the_connection_point_bricks_are_in_the_palette():
+    types = {x["type"]: x["role"] for x in client.get("/api/graphs/bricks").json()["bricks"]}
+    assert types["hotfolder"] == "source"
+    assert types["email"] == "sink"
+
+
 # ── relational bricks: what row-wise work could never do ─────────────
 VENTES = """
   - id: src

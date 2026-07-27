@@ -68,6 +68,15 @@ class RunContext:
     # brick). They substitute into node configs exactly like parameters do, so a
     # brick needs no notion of "variable" at all.
     variables: Dict[str, str] = field(default_factory=dict)
+    # The kind of each connection in `variables` ("hotfolder", "smtp", "value"…)
+    # — how a brick checks it was handed the sort of connection it expects,
+    # rather than a bare threshold meant for something else.
+    variable_kinds: Dict[str, str] = field(default_factory=dict)
+    # Files a hotfolder brick picked up this run, so the caller can move each
+    # one to its connection's archive or error folder once the run's outcome
+    # is known — a brick runs once, in the middle of the graph, and has no way
+    # to know yet whether a later node will fail.
+    hotfolder_picks: List[dict] = field(default_factory=list)
     # What each source brick produced, kept so a failed run can be replayed on
     # the very same data instead of calling the world again.
     snapshot: Dict[str, List[dict]] = field(default_factory=dict)
@@ -132,6 +141,87 @@ def _brick_inline(node: FlowNode, inputs: List[dict], ctx: RunContext) -> NodeRe
     if rows and "head" in rows[0]:
         return NodeResult(records=rows)
     return NodeResult(records=[{"head": {}, "items": rows}])
+
+
+def _connection(node: FlowNode, ctx: RunContext, cfg: dict, expected_kind: str) -> dict:
+    """Resolve `cfg["connection"]` to its parsed JSON body, checking it exists
+    and is the kind this brick expects — a hotfolder brick fed an smtp
+    connection (or vice-versa) must fail loudly, not misread the wrong keys."""
+    import json
+
+    name = (cfg.get("connection") or "").strip()
+    if not name:
+        raise FlowError(node.id, "needs a `connection`")
+    if name not in ctx.variables:
+        raise FlowError(node.id, f"no connection point named '{name}'")
+    if ctx.variable_kinds.get(name) != expected_kind:
+        raise FlowError(node.id, f"'{name}' is not a {expected_kind} connection")
+    try:
+        data = json.loads(ctx.variables[name])
+    except ValueError:
+        raise FlowError(node.id, f"connection '{name}' is not valid JSON")
+    if not isinstance(data, dict):
+        raise FlowError(node.id, f"connection '{name}' is not a JSON object")
+    return {**data, "_name": name}
+
+
+def _brick_hotfolder(node: FlowNode, inputs: List[dict], ctx: RunContext) -> NodeResult:
+    """
+    Pick up the oldest file waiting in a hotfolder connection and parse it —
+    through `FileService`, the same CSV/XLSX parser the rest of the app uses,
+    not a second one.
+
+    Triggered on demand only: this brick looks at whatever sits in the folder
+    *right now* — nothing polls it in the background. Which file it took is
+    remembered on `ctx.hotfolder_picks` so the caller can move it to the
+    connection's archive or error folder once the whole run's outcome is
+    known; this brick runs once, in the middle of the graph, well before that
+    outcome exists.
+    """
+    import glob
+    import os
+
+    from app.services.file_service import FileService
+
+    cfg = _resolve(node.config, _subs(ctx))
+    conn = _connection(node, ctx, cfg, "hotfolder")
+    path, archive_dir, error_dir = conn.get("path"), conn.get("archive_dir"), conn.get("error_dir")
+    if not (path and archive_dir and error_dir):
+        raise FlowError(node.id, f"connection '{conn['_name']}' is missing "
+                                 f"path/archive_dir/error_dir")
+    if not os.path.isdir(path):
+        raise FlowError(node.id, f"hotfolder '{path}' does not exist")
+
+    pattern = cfg.get("pattern") or "*"
+    required = cfg.get("required", True)
+    candidates = [f for f in glob.glob(os.path.join(path, pattern)) if os.path.isfile(f)]
+    if not candidates:
+        if required:
+            raise FlowError(node.id, f"no file matching '{pattern}' in '{path}'")
+        # A genuinely empty list of records, not one record with empty items:
+        # `records_to_frame` treats the latter as one blank row (`or [{}]`),
+        # which would misreport "nothing found" as "one empty row".
+        return NodeResult(records=[], meta={"rows": 0, "picked": None})
+    # FIFO: the oldest file is the one that has been waiting longest.
+    picked = min(candidates, key=os.path.getmtime)
+
+    file_type = (cfg.get("file_type") or "csv").lower()
+    with open(picked, "rb") as f:
+        raw = f.read()
+    files = FileService()
+    if file_type == "csv":
+        df, _enc, _delim = files.load_csv_raw(raw, cfg.get("encoding") or "AUTO",
+                                              cfg.get("delimiter") or None)
+    elif file_type == "xlsx":
+        df = files.load_xlsx_raw(raw, cfg.get("sheet") or 0)
+    else:
+        raise FlowError(node.id, f"unsupported file_type '{file_type}' (csv or xlsx)")
+
+    ctx.hotfolder_picks.append({"node": node.id, "connection": conn["_name"], "path": picked,
+                                "archive_dir": archive_dir, "error_dir": error_dir})
+    rows = df.astype(str).to_dict(orient="records")
+    return NodeResult(records=[{"head": {}, "items": rows}],
+                      meta={"picked": os.path.basename(picked), "rows": len(rows)})
 
 
 def _brick_api(node: FlowNode, inputs: List[dict], ctx: RunContext) -> NodeResult:
@@ -341,10 +431,15 @@ def _brick_graph(node: FlowNode, inputs: List[dict], ctx: RunContext) -> NodeRes
 
     inner = RunContext(params={p.name: p.default for p in sub.params},
                        session=ctx.session, depth=ctx.depth + 1,
-                       load_graph=ctx.load_graph, load_artefact=ctx.load_artefact)
+                       load_graph=ctx.load_graph, load_artefact=ctx.load_artefact,
+                       environment=ctx.environment, graph_id=ctx.graph_id,
+                       variables=ctx.variables, variable_kinds=ctx.variable_kinds)
     inner.params.update({str(k): str(v) for k, v in (cfg.get("params") or {}).items()})
     result = run_graph(sub, inner, seed=_merge(inputs))
     ctx.trace.extend({**t, "node": f"{node.id}/{t['node']}"} for t in inner.trace)
+    # A hotfolder picked up inside the nested flow is still this run's
+    # responsibility to archive or error out once the whole run concludes.
+    ctx.hotfolder_picks.extend(inner.hotfolder_picks)
     return NodeResult(records=result["records"], meta={"sub_flow": sub.name})
 
 
@@ -688,13 +783,16 @@ def _brick_config(node: FlowNode, inputs: List[dict], ctx: RunContext) -> NodeRe
     bad: set = set()
     for col, status in (validation or {}).items():
         for pos, st in enumerate(status.tolist()):
-            label = str(st).strip()
-            if label and label.upper() != "OK":
+            # Named apart from the outer `label` (the configuration's name):
+            # that one is still needed below, in the block message and in
+            # meta["config"] — shadowing it here used to corrupt both.
+            cell_status = str(st).strip()
+            if cell_status and cell_status.upper() != "OK":
                 bad.add(pos)
                 if len(problems) < 200:
                     problems.append({"row": pos + 1, "column": col,
                                      "value": str(cleaned.iloc[pos].get(col, "")),
-                                     "message": label})
+                                     "message": cell_status})
 
     mode = str(cfg.get("on_error") or "keep").lower()
     if mode not in ("keep", "drop", "block"):
@@ -775,8 +873,60 @@ def _brick_http(node: FlowNode, inputs: List[dict], ctx: RunContext) -> NodeResu
                             "statuses": statuses})
 
 
+def _brick_email(node: FlowNode, inputs: List[dict], ctx: RunContext) -> NodeResult:
+    """
+    Terminal: send a notification through an smtp connection point.
+
+    The whole point of chaining this after `dataset_write` is the fail-fast
+    DAG: if an earlier node raised, this one never runs at all — there is no
+    branching primitive to build for "send mail only on success", the graph
+    already does it. Never retried, same as `http`: a silent retry on a mail
+    server would make "did it send twice?" unanswerable.
+    """
+    import smtplib
+    from email.mime.text import MIMEText
+
+    cfg = _resolve(node.config, _subs(ctx))
+    conn = _connection(node, ctx, cfg, "smtp")
+    host = conn.get("host")
+    if not host:
+        raise FlowError(node.id, f"connection '{conn['_name']}' is missing a host")
+    port = int(conn.get("port") or 587)
+    use_tls = bool(conn.get("use_tls", True))
+    user = conn.get("user") or ""
+    password = conn.get("password") or ""
+    sender = conn.get("from") or user or "noreply@localhost"
+
+    to = (cfg.get("to") or "").strip()
+    if not to:
+        raise FlowError(node.id, "an email node needs a `to`")
+    subject = str(cfg.get("subject") or "")
+    body = str(cfg.get("body") or "")
+
+    msg = MIMEText(body)
+    msg["Subject"] = subject
+    msg["From"] = sender
+    msg["To"] = to
+
+    try:
+        with smtplib.SMTP(host, port, timeout=20) as smtp:
+            if use_tls:
+                smtp.starttls()
+            if user:
+                smtp.login(user, password)
+            smtp.sendmail(sender, [to], msg.as_string())
+    except FlowError:
+        raise
+    except Exception as e:  # noqa: BLE001 — a bad connection must name the node
+        raise FlowError(node.id, f"{type(e).__name__} sending mail via "
+                                 f"'{conn['_name']}': {e}")
+
+    return NodeResult(records=_merge(inputs), meta={"to": to, "subject": subject})
+
+
 BRICKS: Dict[str, Callable[[FlowNode, List[dict], RunContext], NodeResult]] = {
     "inline": _brick_inline,
+    "hotfolder": _brick_hotfolder,
     "session": _brick_session,
     "api": _brick_api,
     "dataset": _brick_dataset,
@@ -794,6 +944,7 @@ BRICKS: Dict[str, Callable[[FlowNode, List[dict], RunContext], NodeResult]] = {
     "dataset_write": _brick_dataset_write,
     "file": _brick_file,
     "http": _brick_http,
+    "email": _brick_email,
 }
 
 

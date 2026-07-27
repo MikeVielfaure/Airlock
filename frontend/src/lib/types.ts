@@ -486,13 +486,32 @@ export interface MappingSuggestion {
 export interface VariableRow {
   id: string;
   name: string;
-  value: string;                 // "••••••" when secret
+  value: string;                 // "••••••" when secret; JSON text when kind != "value"
   scope: "global" | "environment" | "flow" | "brick";
   environment: string;
   graph_id: string;
   node_id: string;
   secret: boolean;
   description: string;
+  kind: "value" | "hotfolder" | "smtp";
+}
+
+/** Parsed shape of a "hotfolder" kind connection's JSON value. */
+export interface HotfolderConnection {
+  path: string;
+  archive_dir: string;
+  error_dir: string;
+}
+
+/** Parsed shape of an "smtp" kind connection's JSON value. Only `host` is
+ * required to save; the rest default at execution time. */
+export interface SmtpConnection {
+  host: string;
+  port?: number;
+  user?: string;
+  password?: string;
+  use_tls?: boolean;
+  from?: string;
 }
 
 export interface RunStep {

@@ -12,6 +12,8 @@ you need to find are the failed ones.
 """
 from __future__ import annotations
 
+import os
+import shutil
 import time
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -45,21 +47,25 @@ class VariableIn(BaseModel):
     node_id: str = ""
     secret: bool = False
     description: str = ""
+    kind: str = "value"                 # value | hotfolder | smtp
 
 
 def _var_out(v, reveal: bool = False) -> dict:
     return {"id": v.id, "name": v.name,
             "value": (v.value if (reveal or not v.secret) else MASK),
             "scope": v.scope, "environment": v.environment, "graph_id": v.graph_id,
-            "node_id": v.node_id, "secret": v.secret, "description": v.description}
+            "node_id": v.node_id, "secret": v.secret, "description": v.description,
+            "kind": v.kind}
 
 
 @router.get("/variables")
-def list_variables(env: str = "", graph_id: str = "", s: Session = Depends(get_session)):
+def list_variables(env: str = "", graph_id: str = "", kind: str = "",
+                   s: Session = Depends(get_session)):
     """Everything that could apply to this context, most general first, so the
-    override chain is readable at a glance."""
+    override chain is readable at a glance. Not filtered by restriction — this
+    is the administration listing, not what a run would resolve."""
     return [_var_out(v) for v in repo.list_variables(s, environment=env or None,
-                                                     graph_id=graph_id)]
+                                                     graph_id=graph_id, kind=kind)]
 
 
 @router.get("/variables/resolved")
@@ -74,6 +80,15 @@ def resolved_variables(env: str = "", graph_id: str = "", node_id: str = "",
             "secret_names": sorted(secrets & set(values))}
 
 
+@router.get("/variables/resolved-kinds")
+def resolved_variable_kinds(env: str = "", graph_id: str = "", node_id: str = "",
+                           s: Session = Depends(get_session)):
+    """The kind of each winning connection in the same cascade — how a brick
+    checks it was handed the sort of connection it expects."""
+    return {"kinds": repo.resolve_variable_kinds(s, environment=env, graph_id=graph_id,
+                                                 node_id=node_id)}
+
+
 @router.post("/variables")
 def upsert_variable(req: VariableIn, s: Session = Depends(get_session),
         _cap=Depends(require_capability("variables.write"))):
@@ -81,7 +96,7 @@ def upsert_variable(req: VariableIn, s: Session = Depends(get_session),
         v = repo.upsert_variable(s, name=req.name, value=req.value, scope=req.scope,
                                  environment=req.environment, graph_id=req.graph_id,
                                  node_id=req.node_id, secret=req.secret,
-                                 description=req.description)
+                                 description=req.description, kind=req.kind)
     except repo.Conflict as e:
         raise HTTPException(409, str(e))
     commit(s)
@@ -99,9 +114,60 @@ def delete_variable(variable_id: str, s: Session = Depends(get_session),
     return {"deleted": variable_id}
 
 
+# ── restricting a global to a handful of environments ─────────────────
+class RestrictionIn(BaseModel):
+    environment: str
+
+
+@router.get("/variables/{variable_id}/restrictions")
+def list_variable_restrictions(variable_id: str, s: Session = Depends(get_session)):
+    return {"environments": sorted(r.environment for r in
+                                   repo.list_variable_restrictions(s, variable_id))}
+
+
+@router.post("/variables/{variable_id}/restrictions")
+def set_variable_restriction(variable_id: str, req: RestrictionIn,
+                             s: Session = Depends(get_session),
+        _cap=Depends(require_capability("variables.write"))):
+    try:
+        repo.set_variable_restriction(s, variable_id, req.environment)
+    except repo.NotFound as e:
+        raise HTTPException(404, str(e))
+    except repo.Conflict as e:
+        raise HTTPException(409, str(e))
+    commit(s)
+    return {"environments": sorted(r.environment for r in
+                                   repo.list_variable_restrictions(s, variable_id))}
+
+
+@router.delete("/variables/{variable_id}/restrictions/{environment}")
+def remove_variable_restriction(variable_id: str, environment: str,
+                                s: Session = Depends(get_session),
+        _cap=Depends(require_capability("variables.write"))):
+    repo.remove_variable_restriction(s, variable_id, environment)
+    commit(s)
+    return {"environments": sorted(r.environment for r in
+                                   repo.list_variable_restrictions(s, variable_id))}
+
+
 # ══════════════════════════════════════════════════════════════════════
 # Running with a journal
 # ══════════════════════════════════════════════════════════════════════
+def _finalize_hotfolder_file(src_path: str, dest_dir: str) -> str:
+    """Move a picked-up file to its connection's archive or error folder.
+    Never overwrites: a same-named file already there keeps its place, and the
+    incoming one gets a millisecond timestamp suffixed onto its name instead —
+    losing an old archived file silently would be worse than an ugly name."""
+    os.makedirs(dest_dir, exist_ok=True)
+    base = os.path.basename(src_path)
+    dest = os.path.join(dest_dir, base)
+    if os.path.exists(dest):
+        stem, ext = os.path.splitext(base)
+        dest = os.path.join(dest_dir, f"{stem}_{int(time.time() * 1000)}{ext}")
+    shutil.move(src_path, dest)
+    return dest
+
+
 def run_and_record(s: Session, graph: FlowGraph, *, params: Dict[str, str],
                    environment: str, graph_id: str = "",
                    snapshot: Optional[dict] = None, replay_mode: str = "",
@@ -115,6 +181,7 @@ def run_and_record(s: Session, graph: FlowGraph, *, params: Dict[str, str],
     """
     load_graph, load_artefact = loaders
     variables = repo.resolve_variables(s, environment=environment, graph_id=graph_id)
+    variable_kinds = repo.resolve_variable_kinds(s, environment=environment, graph_id=graph_id)
     secrets = {v.name: v.value for v in repo.list_variables(s, environment=environment,
                                                             graph_id=graph_id) if v.secret}
 
@@ -127,7 +194,7 @@ def run_and_record(s: Session, graph: FlowGraph, *, params: Dict[str, str],
     commit(s)                      # visible immediately, not only once finished
 
     ctx = RunContext(params=params, session=s, environment=environment or "default",
-                     graph_id=graph_id, variables=variables,
+                     graph_id=graph_id, variables=variables, variable_kinds=variable_kinds,
                      snapshot=dict(snapshot or {}), replay_mode=replay_mode,
                      load_graph=load_graph, load_artefact=load_artefact)
 
@@ -140,6 +207,17 @@ def run_and_record(s: Session, graph: FlowGraph, *, params: Dict[str, str],
         failed = e
     except ValueError as e:
         failed = FlowError("", str(e))
+
+    for pick in ctx.hotfolder_picks:
+        dest_dir = pick["archive_dir"] if failed is None else pick["error_dir"]
+        try:
+            _finalize_hotfolder_file(pick["path"], dest_dir)
+        except Exception as e:  # noqa: BLE001 — a filesystem problem must never
+            # overturn a run whose outcome is already decided.
+            ctx.messages.append({
+                "node": pick["node"], "level": "error",
+                "text": f"Impossible de déplacer « {os.path.basename(pick['path'])} » "
+                        f"vers {dest_dir} : {e}"})
 
     run.ms = int((time.perf_counter() - started) * 1000)
     run.finished_at = datetime.now(timezone.utc)

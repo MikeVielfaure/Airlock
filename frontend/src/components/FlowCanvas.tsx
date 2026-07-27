@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../lib/api";
-import type { ArtefactInfo } from "../lib/types";
+import type { ArtefactInfo, DatasetInfo, VariableRow } from "../lib/types";
 import {
   IconCheck, IconCode, IconLayers, IconPlay, IconReset, IconSave, IconWarn,
 } from "../lib/icons";
@@ -48,14 +48,22 @@ const SEED: Record<string, Record<string, unknown>> = {
   mapping: { mapping_yaml: "name: m\nsource_kind: flat\nlinks: []\n" },
   validate: { rules: {}, block: false },
   graph: { graph_id: "" },
+  config: { config_id: "" },
   dataset_write: { name: "", mode: "replace", key_fields: [] },
   file: { format: "csv", filename: "sortie.csv" },
   response: {},
+  hotfolder: { connection: "", file_type: "csv", delimiter: ";", encoding: "AUTO",
+               pattern: "*", required: true },
+  email: { connection: "", to: "", subject: "", body: "" },
 };
 
 const ROLE_CLASS: Record<string, string> = {
   source: "src", transform: "tr", sink: "sink",
 };
+
+/** Brick types with a dedicated inspector form instead of the raw JSON
+ * textarea — a foundation meant to grow to more types over time. */
+const ENRICHED_TYPES = new Set(["hotfolder", "config", "dataset_write", "email"]);
 
 export function FlowCanvas({ notify }: Props) {
   const [bricks, setBricks] = useState<Brick[]>([]);
@@ -73,6 +81,14 @@ export function FlowCanvas({ notify }: Props) {
   const [saved, setSaved] = useState<ArtefactInfo[]>([]);
   const [showYaml, setShowYaml] = useState(false);
 
+  // Options for the per-brick inspector fields (hotfolder/smtp connections,
+  // stored configs, stored tables) — loaded once, refreshed on demand.
+  const [hotfolderConns, setHotfolderConns] = useState<VariableRow[]>([]);
+  const [smtpConns, setSmtpConns] = useState<VariableRow[]>([]);
+  const [configs, setConfigs] = useState<ArtefactInfo[]>([]);
+  const [datasets, setDatasets] = useState<DatasetInfo[]>([]);
+  const [advanced, setAdvanced] = useState<Record<string, boolean>>({});
+
   const surface = useRef<HTMLDivElement>(null);
 
   const roleOf = (type: string) =>
@@ -81,6 +97,10 @@ export function FlowCanvas({ notify }: Props) {
   useEffect(() => {
     api.flowBricks().then((r) => setBricks(r.bricks)).catch(() => { /* palette optional */ });
     api.listArtefacts("graph").then(setSaved).catch(() => { /* empty is fine */ });
+    api.listVariables("", "", "hotfolder").then(setHotfolderConns).catch(() => {});
+    api.listVariables("", "", "smtp").then(setSmtpConns).catch(() => {});
+    api.listArtefacts("config").then(setConfigs).catch(() => {});
+    api.listDatasets().then(setDatasets).catch(() => {});
   }, []);
 
   /* ── graph edits ─────────────────────────────────────────── */
@@ -114,6 +134,14 @@ export function FlowCanvas({ notify }: Props) {
     try {
       setNodes((ns) => ns.map((n) => (n.id === id ? { ...n, config: JSON.parse(raw) } : n)));
     } catch { /* keep the last valid config while the user is mid-typing */ }
+  };
+
+  /** Write one key of a node's config — used by the dedicated per-brick
+   * fields, so a select/input and the raw-JSON fallback edit the very same
+   * object rather than two copies that could drift apart. */
+  const patchField = (id: string, key: string, value: unknown) => {
+    setNodes((ns) => ns.map((n) =>
+      n.id === id ? { ...n, config: { ...n.config, [key]: value } } : n));
   };
 
   /* ── serialisation: the canvas and the YAML are one graph ── */
@@ -345,15 +373,32 @@ export function FlowCanvas({ notify }: Props) {
             <input value={sel.label ?? ""} placeholder="what this brick does"
                    onChange={(e) => setNodes((ns) =>
                      ns.map((n) => (n.id === sel.id ? { ...n, label: e.target.value } : n)))} />
-            <label>Config</label>
-            <textarea className="mono" rows={14}
-                      defaultValue={JSON.stringify(sel.config, null, 2)}
-                      key={sel.id}
-                      onChange={(e) => patchConfig(sel.id, e.target.value)} />
-            <p className="fc-hint">
-              Edited live. An invalid JSON draft is ignored until it parses again,
-              so typing never destroys the config.
-            </p>
+
+            {ENRICHED_TYPES.has(sel.type) && (
+              <BrickFields node={sel} patchField={patchField}
+                          hotfolderConns={hotfolderConns} smtpConns={smtpConns}
+                          configs={configs} datasets={datasets} />
+            )}
+
+            {(!ENRICHED_TYPES.has(sel.type) || advanced[sel.id]) && (
+              <>
+                <label>Config{ENRICHED_TYPES.has(sel.type) ? " (avancé)" : ""}</label>
+                <textarea className="mono" rows={14}
+                          defaultValue={JSON.stringify(sel.config, null, 2)}
+                          key={sel.id}
+                          onChange={(e) => patchConfig(sel.id, e.target.value)} />
+                <p className="fc-hint">
+                  Edited live. An invalid JSON draft is ignored until it parses again,
+                  so typing never destroys the config.
+                </p>
+              </>
+            )}
+            {ENRICHED_TYPES.has(sel.type) && (
+              <button className="btn sm" onClick={() =>
+                setAdvanced((a) => ({ ...a, [sel.id]: !a[sel.id] }))}>
+                {advanced[sel.id] ? "Masquer le JSON" : "Avancé / JSON"}
+              </button>
+            )}
             {failed === sel.id && (
               <p className="fc-fail"><IconWarn size={12} /> This brick failed on the last run.</p>
             )}
@@ -388,4 +433,116 @@ export function FlowCanvas({ notify }: Props) {
       </aside>
     </div>
   );
+}
+
+/* ── dedicated fields for the bricks enriched beyond raw JSON ──────── */
+function BrickFields({ node, patchField, hotfolderConns, smtpConns, configs, datasets }: {
+  node: Node;
+  patchField: (id: string, key: string, value: unknown) => void;
+  hotfolderConns: VariableRow[];
+  smtpConns: VariableRow[];
+  configs: ArtefactInfo[];
+  datasets: DatasetInfo[];
+}) {
+  const cfg = node.config;
+  const set = (key: string, value: unknown) => patchField(node.id, key, value);
+
+  if (node.type === "hotfolder") {
+    const fileType = String(cfg.file_type ?? "csv");
+    return (
+      <>
+        <label>Connexion (hotfolder)</label>
+        <select value={String(cfg.connection ?? "")} onChange={(e) => set("connection", e.target.value)}>
+          <option value="">— choisir —</option>
+          {hotfolderConns.map((v) => <option key={v.id} value={v.name}>{v.name}</option>)}
+        </select>
+        <label>Type de fichier</label>
+        <select value={fileType} onChange={(e) => set("file_type", e.target.value)}>
+          <option value="csv">CSV</option>
+          <option value="xlsx">Excel (xlsx)</option>
+        </select>
+        {fileType === "csv" ? (
+          <>
+            <label>Délimiteur</label>
+            <input value={String(cfg.delimiter ?? "")} placeholder=";"
+                   onChange={(e) => set("delimiter", e.target.value)} />
+            <label>Encodage</label>
+            <input value={String(cfg.encoding ?? "AUTO")}
+                   onChange={(e) => set("encoding", e.target.value)} />
+          </>
+        ) : (
+          <>
+            <label>Feuille</label>
+            <input value={String(cfg.sheet ?? "")} placeholder="0"
+                   onChange={(e) => set("sheet", e.target.value)} />
+          </>
+        )}
+        <label>Motif de fichier</label>
+        <input value={String(cfg.pattern ?? "*")} onChange={(e) => set("pattern", e.target.value)} />
+        <label className="check">
+          <input type="checkbox" checked={cfg.required !== false}
+                 onChange={(e) => set("required", e.target.checked)} />
+          Bloquer si aucun fichier n'est trouvé
+        </label>
+      </>
+    );
+  }
+
+  if (node.type === "config") {
+    return (
+      <>
+        <label>Configuration stockée</label>
+        <select value={String(cfg.config_id ?? "")} onChange={(e) => set("config_id", e.target.value)}>
+          <option value="">— choisir —</option>
+          {configs.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+        </select>
+      </>
+    );
+  }
+
+  if (node.type === "dataset_write") {
+    const keyFields = Array.isArray(cfg.key_fields) ? (cfg.key_fields as unknown[]).join(", ") : "";
+    return (
+      <>
+        <label>Table cible</label>
+        <input list="fc-dataset-names" value={String(cfg.name ?? "")}
+               placeholder="nom (existant ou nouveau)"
+               onChange={(e) => set("name", e.target.value)} />
+        <datalist id="fc-dataset-names">
+          {datasets.map((d) => <option key={d.id} value={d.name} />)}
+        </datalist>
+        <label>Mode</label>
+        <select value={String(cfg.mode ?? "replace")} onChange={(e) => set("mode", e.target.value)}>
+          <option value="replace">Remplacer</option>
+          <option value="append">Ajouter</option>
+        </select>
+        <label>Colonnes clé (séparées par des virgules)</label>
+        <input value={keyFields}
+               onChange={(e) => set("key_fields",
+                 e.target.value.split(",").map((s) => s.trim()).filter(Boolean))} />
+      </>
+    );
+  }
+
+  if (node.type === "email") {
+    return (
+      <>
+        <label>Connexion (smtp)</label>
+        <select value={String(cfg.connection ?? "")} onChange={(e) => set("connection", e.target.value)}>
+          <option value="">— choisir —</option>
+          {smtpConns.map((v) => <option key={v.id} value={v.name}>{v.name}</option>)}
+        </select>
+        <label>À</label>
+        <input value={String(cfg.to ?? "")} placeholder="destinataire@exemple.fr"
+               onChange={(e) => set("to", e.target.value)} />
+        <label>Sujet</label>
+        <input value={String(cfg.subject ?? "")} onChange={(e) => set("subject", e.target.value)} />
+        <label>Corps</label>
+        <textarea rows={6} value={String(cfg.body ?? "")}
+                  onChange={(e) => set("body", e.target.value)} />
+      </>
+    );
+  }
+
+  return null;
 }

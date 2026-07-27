@@ -528,8 +528,8 @@ export const api = {
                           rows: number; added: number }>(r)),
 
   // ── connection points & the operations table (v22) ────────────
-  listVariables: (env = "", graphId = "") =>
-    fetch(`${BASE}/variables?env=${encodeURIComponent(env || CURRENT_ENV)}&graph_id=${graphId}`, { headers: authHeaders() })
+  listVariables: (env = "", graphId = "", kind = "") =>
+    fetch(`${BASE}/variables?env=${encodeURIComponent(env || CURRENT_ENV)}&graph_id=${graphId}&kind=${kind}`, { headers: authHeaders() })
       .then((r) => json<VariableRow[]>(r)),
 
   resolvedVariables: (env = "", graphId = "", nodeId = "") =>
@@ -545,6 +545,22 @@ export const api = {
 
   deleteVariable: (id: string) =>
     fetch(`${BASE}/variables/${id}`, { method: "DELETE", headers: authHeaders() }).then((r) => json<unknown>(r)),
+
+  // ── restricting a global connection point to a handful of environments ──
+  listVariableRestrictions: (variableId: string) =>
+    fetch(`${BASE}/variables/${variableId}/restrictions`, { headers: authHeaders() })
+      .then((r) => json<{ environments: string[] }>(r)),
+
+  setVariableRestriction: (variableId: string, environment: string) =>
+    fetch(`${BASE}/variables/${variableId}/restrictions`, {
+      method: "POST", headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ environment }),
+    }).then((r) => json<{ environments: string[] }>(r)),
+
+  removeVariableRestriction: (variableId: string, environment: string) =>
+    fetch(`${BASE}/variables/${variableId}/restrictions/${environment}`,
+          { method: "DELETE", headers: authHeaders() })
+      .then((r) => json<{ environments: string[] }>(r)),
 
   listOpsRuns: (status = "", limit = 50) =>
     fetch(`${BASE}/ops/runs?status=${status}&env=${encodeURIComponent(CURRENT_ENV)}&limit=${limit}`, { headers: authHeaders() })

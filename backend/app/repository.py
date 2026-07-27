@@ -13,6 +13,7 @@ versioning invariants live in exactly one place:
 
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import datetime, timezone
 from typing import Optional
@@ -22,7 +23,7 @@ from sqlalchemy.orm import Session
 
 from app.db_models import (
     Artefact, ArtefactGrant, ArtefactVersion, Dataset, DatasetRow, DatasetWrite,
-    Flow, FlowRun, DatasetGrant, FlowRunStep, Run, Variable,
+    Flow, FlowRun, DatasetGrant, FlowRunStep, Run, Variable, VariableRestriction,
 )
 
 
@@ -374,17 +375,43 @@ def list_writes(s: Session, dataset_id: Optional[str] = None, limit: int = 30) -
 # VARIABLES — connection points, resolved by scope
 # ══════════════════════════════════════════════════════════════════
 SCOPES = ("global", "environment", "flow", "brick")
+# "value" is a plain string. Anything else means the stored value is a JSON
+# object with these keys, all required — sftp/sharepoint/api are reserved
+# names for later, not yet backed by a brick.
+KINDS = ("value", "hotfolder", "smtp")
+KIND_SCHEMAS: dict[str, tuple[str, ...]] = {
+    "hotfolder": ("path", "archive_dir", "error_dir"),
+    "smtp": ("host",),
+}
 _MASK = "••••••"
+
+
+def _validate_kind_value(kind: str, value: str) -> None:
+    if kind not in KINDS:
+        raise Conflict(f"Unknown kind '{kind}' (use {', '.join(KINDS)}).")
+    if kind == "value":
+        return
+    try:
+        data = json.loads(value)
+    except ValueError:
+        raise Conflict(f"A '{kind}' connection needs a JSON object, got unparsable text.")
+    if not isinstance(data, dict):
+        raise Conflict(f"A '{kind}' connection needs a JSON object.")
+    missing = [k for k in KIND_SCHEMAS[kind] if not str(data.get(k, "")).strip()]
+    if missing:
+        raise Conflict(f"A '{kind}' connection is missing: {', '.join(missing)}.")
 
 
 def upsert_variable(s: Session, *, name: str, value: str, scope: str = "environment",
                     environment: str = "", graph_id: str = "", node_id: str = "",
-                    secret: bool = False, description: str = "") -> Variable:
+                    secret: bool = False, description: str = "",
+                    kind: str = "value") -> Variable:
     name = (name or "").strip()
     if not name:
         raise Conflict("A variable needs a name.")
     if scope not in SCOPES:
         raise Conflict(f"Unknown scope '{scope}' (use {', '.join(SCOPES)}).")
+    _validate_kind_value(kind, value)
     # Narrower scopes must say what they narrow: a flow variable with no flow
     # would silently behave as a global one.
     if scope == "environment" and not environment:
@@ -402,26 +429,34 @@ def upsert_variable(s: Session, *, name: str, value: str, scope: str = "environm
         Variable.node_id == node_id))
     if existing is not None:
         existing.value = value
+        existing.kind = kind
         existing.secret = secret
         existing.description = description
         return existing
     v = Variable(name=name, value=value, scope=scope, environment=environment,
                  graph_id=graph_id, node_id=node_id, secret=secret,
-                 description=description)
+                 description=description, kind=kind)
     s.add(v)
     s.flush()
     return v
 
 
 def list_variables(s: Session, environment: Optional[str] = None,
-                   graph_id: str = "") -> list[Variable]:
-    """Everything that could apply to this context, most general first."""
+                   graph_id: str = "", kind: str = "") -> list[Variable]:
+    """Everything that could apply to this context, most general first.
+
+    Unfiltered by restriction on purpose: this is the administration listing
+    (already gated by the variables.write/read capability), not what a run
+    actually resolves — an admin must be able to see and edit a restricted
+    global even from outside the environments it allows."""
     env = environment or DEFAULT_ENV
     q = select(Variable).where(
         (Variable.scope == "global")
         | ((Variable.scope == "environment") & (Variable.environment == env))
         | ((Variable.scope.in_(("flow", "brick"))) & (Variable.graph_id == graph_id))
     )
+    if kind:
+        q = q.where(Variable.kind == kind)
     order = {"global": 0, "environment": 1, "flow": 2, "brick": 3}
     return sorted(s.scalars(q), key=lambda v: (order.get(v.scope, 9), v.name))
 
@@ -433,20 +468,30 @@ def delete_variable(s: Session, variable_id: str) -> None:
     s.delete(v)
 
 
-def resolve_variables(s: Session, *, environment: str = "", graph_id: str = "",
-                      node_id: str = "") -> dict:
+def _resolve_variable_rows(s: Session, *, environment: str = "", graph_id: str = "",
+                           node_id: str = "") -> dict[str, Variable]:
     """
-    Flatten the cascade into one name → value map for this exact context.
+    Flatten the cascade into one name → row map for this exact context — the
+    one engine behind both `resolve_variables` (values) and
+    `resolve_variable_kinds` (kinds), so the two can never disagree on which
+    row won.
 
     Precedence is most-specific-wins: brick beats flow beats environment beats
-    global. Applying them in that order means a later write simply overwrites an
-    earlier one, which is both the simplest implementation and the one whose
-    behaviour is easiest to predict.
+    global. A global with at least one restriction row is only included when
+    the requested environment is among them; a global with no restriction row
+    at all is visible everywhere, exactly as before this existed — an existing
+    install keeps working untouched.
     """
-    out: dict[str, str] = {}
+    env = environment or DEFAULT_ENV
+    out: dict[str, Variable] = {}
     for scope in ("global", "environment", "flow", "brick"):
         for v in s.scalars(select(Variable).where(Variable.scope == scope)):
-            if scope == "environment" and v.environment != (environment or DEFAULT_ENV):
+            if scope == "global":
+                allowed = {r.environment for r in s.scalars(
+                    select(VariableRestriction).where(VariableRestriction.variable_id == v.id))}
+                if allowed and env not in allowed:
+                    continue
+            if scope == "environment" and v.environment != env:
                 continue
             if scope in ("flow", "brick") and v.graph_id != graph_id:
                 continue
@@ -455,13 +500,66 @@ def resolve_variables(s: Session, *, environment: str = "", graph_id: str = "",
             # apply to the whole flow.
             if scope == "brick" and (not node_id or v.node_id != node_id):
                 continue
-            out[v.name] = v.value
+            out[v.name] = v
     return out
+
+
+def resolve_variables(s: Session, *, environment: str = "", graph_id: str = "",
+                      node_id: str = "") -> dict:
+    """Flatten the cascade into one name → value map for this exact context."""
+    return {name: v.value for name, v in
+            _resolve_variable_rows(s, environment=environment, graph_id=graph_id,
+                                   node_id=node_id).items()}
+
+
+def resolve_variable_kinds(s: Session, *, environment: str = "", graph_id: str = "",
+                          node_id: str = "") -> dict:
+    """Same cascade as `resolve_variables`, but the kind of each winning row —
+    what a brick needs to know whether a connection is the type it expects."""
+    return {name: v.kind for name, v in
+            _resolve_variable_rows(s, environment=environment, graph_id=graph_id,
+                                   node_id=node_id).items()}
 
 
 def secret_names(s: Session) -> set:
     """Names whose values must never reach a screen or a journal."""
     return {v.name for v in s.scalars(select(Variable).where(Variable.secret.is_(True)))}
+
+
+# ── global variable restrictions ─────────────────────────────────────
+def list_variable_restrictions(s: Session, variable_id: str) -> list[VariableRestriction]:
+    return list(s.scalars(select(VariableRestriction)
+                          .where(VariableRestriction.variable_id == variable_id)))
+
+
+def set_variable_restriction(s: Session, variable_id: str, environment: str,
+                             granted_by: str = "") -> VariableRestriction:
+    v = s.get(Variable, variable_id)
+    if v is None:
+        raise NotFound(f"Variable {variable_id} not found.")
+    if v.scope != "global":
+        raise Conflict("Only a global variable can be restricted.")
+    environment = (environment or "").strip()
+    if not environment:
+        raise Conflict("Name the environment to restrict this variable to.")
+    existing = s.scalar(select(VariableRestriction).where(
+        VariableRestriction.variable_id == variable_id,
+        VariableRestriction.environment == environment))
+    if existing is not None:
+        return existing
+    r = VariableRestriction(variable_id=variable_id, environment=environment,
+                            granted_by=granted_by)
+    s.add(r)
+    s.flush()
+    return r
+
+
+def remove_variable_restriction(s: Session, variable_id: str, environment: str) -> None:
+    r = s.scalar(select(VariableRestriction).where(
+        VariableRestriction.variable_id == variable_id,
+        VariableRestriction.environment == environment))
+    if r is not None:
+        s.delete(r)
 
 
 def mask_deep(value, secrets: dict):
