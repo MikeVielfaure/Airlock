@@ -160,7 +160,7 @@ function Runs({ notify }: Props) {
 }
 
 /* ── connection points ──────────────────────────────────────────── */
-const KINDS: VariableRow["kind"][] = ["value", "hotfolder", "smtp"];
+const KINDS: VariableRow["kind"][] = ["value", "hotfolder", "smtp", "external_db", "sftp", "api"];
 
 /** Read-only summary for a structured kind, instead of dumping its raw JSON
  * into the table. Falls back to the JSON text if it does not parse (e.g. a
@@ -171,6 +171,9 @@ function summarize(v: VariableRow): string {
     const data = JSON.parse(v.value) as Record<string, unknown>;
     if (v.kind === "hotfolder") return `${data.path} · ${data.archive_dir} · ${data.error_dir}`;
     if (v.kind === "smtp") return `${data.host}${data.port ? `:${data.port}` : ""}`;
+    if (v.kind === "external_db") return String(data.url ?? "").replace(/:\/\/[^@]*@/, "://***@");
+    if (v.kind === "sftp") return `${data.host}${data.port ? `:${data.port}` : ""} · ${data.remote_dir}`;
+    if (v.kind === "api") return String(data.base_url ?? "");
   } catch { /* masked or malformed — show the raw text below */ }
   return v.value;
 }
@@ -223,6 +226,23 @@ function Vars({ notify }: Props) {
         host: conn.host || "", port: conn.port ? Number(conn.port) : undefined,
         user: conn.user || "", password: conn.password || "",
         use_tls: connUseTls, from: conn.from || "",
+      });
+    }
+    if (draft.kind === "external_db") {
+      return JSON.stringify({ url: conn.url || "" });
+    }
+    if (draft.kind === "sftp") {
+      return JSON.stringify({
+        host: conn.host || "", port: conn.port ? Number(conn.port) : undefined,
+        user: conn.user || "", password: conn.password || "",
+        private_key: conn.private_key || "", remote_dir: conn.remote_dir || "",
+        archive_dir: conn.archive_dir || "", error_dir: conn.error_dir || "",
+      });
+    }
+    if (draft.kind === "api") {
+      return JSON.stringify({
+        base_url: conn.base_url || "", auth_header: conn.auth_header || "",
+        token: conn.token || "",
       });
     }
     return draft.value ?? "";
@@ -315,6 +335,43 @@ function Vars({ notify }: Props) {
             <input type="checkbox" checked={connUseTls}
                    onChange={(e) => setConnUseTls(e.target.checked)} /> tls
           </label>
+        </div>
+      )}
+      {draft.kind === "external_db" && (
+        <div className="ops-form">
+          <input placeholder="postgresql+psycopg2://user:pass@host:5432/db" value={conn.url ?? ""}
+                 style={{ minWidth: 340 }}
+                 onChange={(e) => setConn({ ...conn, url: e.target.value })} />
+        </div>
+      )}
+      {draft.kind === "sftp" && (
+        <div className="ops-form">
+          <input placeholder="host" value={conn.host ?? ""}
+                 onChange={(e) => setConn({ ...conn, host: e.target.value })} />
+          <input placeholder="port (22)" value={conn.port ?? ""}
+                 onChange={(e) => setConn({ ...conn, port: e.target.value })} />
+          <input placeholder="user" value={conn.user ?? ""}
+                 onChange={(e) => setConn({ ...conn, user: e.target.value })} />
+          <input placeholder="password" type="password" value={conn.password ?? ""}
+                 onChange={(e) => setConn({ ...conn, password: e.target.value })} />
+          <input placeholder="private_key (optional, PEM text)" value={conn.private_key ?? ""}
+                 onChange={(e) => setConn({ ...conn, private_key: e.target.value })} />
+          <input placeholder="remote_dir" value={conn.remote_dir ?? ""}
+                 onChange={(e) => setConn({ ...conn, remote_dir: e.target.value })} />
+          <input placeholder="archive_dir" value={conn.archive_dir ?? ""}
+                 onChange={(e) => setConn({ ...conn, archive_dir: e.target.value })} />
+          <input placeholder="error_dir" value={conn.error_dir ?? ""}
+                 onChange={(e) => setConn({ ...conn, error_dir: e.target.value })} />
+        </div>
+      )}
+      {draft.kind === "api" && (
+        <div className="ops-form">
+          <input placeholder="base_url" value={conn.base_url ?? ""} style={{ minWidth: 260 }}
+                 onChange={(e) => setConn({ ...conn, base_url: e.target.value })} />
+          <input placeholder="auth_header (Authorization)" value={conn.auth_header ?? ""}
+                 onChange={(e) => setConn({ ...conn, auth_header: e.target.value })} />
+          <input placeholder="token" type="password" value={conn.token ?? ""}
+                 onChange={(e) => setConn({ ...conn, token: e.target.value })} />
         </div>
       )}
 

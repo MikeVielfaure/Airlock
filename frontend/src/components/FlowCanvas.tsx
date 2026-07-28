@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../lib/api";
-import type { ArtefactInfo, DatasetInfo, VariableRow } from "../lib/types";
+import type { ArtefactInfo, DatasetInfo, FileResponse, VariableRow } from "../lib/types";
 import {
   IconCheck, IconCode, IconLayers, IconPlay, IconReset, IconSave, IconWarn,
 } from "../lib/icons";
@@ -29,6 +29,9 @@ interface TraceStep {
 
 interface Props {
   notify: (msg: string, kind?: "ok" | "err" | "info") => void;
+  /** Lets the graph's output become an ordinary working session — the same
+   * mechanism `DatasetPanel` uses to open a stored table. */
+  onOpenSession?: (res: FileResponse) => void;
 }
 
 const NODE_W = 150;
@@ -55,6 +58,11 @@ const SEED: Record<string, Record<string, unknown>> = {
   hotfolder: { connection: "", file_type: "csv", delimiter: ";", encoding: "AUTO",
                pattern: "*", required: true },
   email: { connection: "", to: "", subject: "", body: "" },
+  external_db: { connection: "", query: "SELECT * FROM table1 WHERE id = :id", params: {} },
+  external_db_write: { connection: "", table: "", mode: "insert", key_fields: [] },
+  sftp: { connection: "", file_type: "csv", delimiter: ";", encoding: "AUTO",
+          pattern: "*", required: true },
+  sftp_write: { connection: "", filename: "sortie.csv" },
 };
 
 const ROLE_CLASS: Record<string, string> = {
@@ -63,9 +71,12 @@ const ROLE_CLASS: Record<string, string> = {
 
 /** Brick types with a dedicated inspector form instead of the raw JSON
  * textarea — a foundation meant to grow to more types over time. */
-const ENRICHED_TYPES = new Set(["hotfolder", "config", "dataset_write", "email"]);
+const ENRICHED_TYPES = new Set([
+  "hotfolder", "config", "dataset_write", "email", "join", "lookup", "dataset",
+  "external_db", "external_db_write", "sftp", "sftp_write", "api", "http",
+]);
 
-export function FlowCanvas({ notify }: Props) {
+export function FlowCanvas({ notify, onOpenSession }: Props) {
   const [bricks, setBricks] = useState<Brick[]>([]);
   const [nodes, setNodes] = useState<Node[]>([]);
   const [edges, setEdges] = useState<Edge[]>([]);
@@ -85,6 +96,9 @@ export function FlowCanvas({ notify }: Props) {
   // stored configs, stored tables) — loaded once, refreshed on demand.
   const [hotfolderConns, setHotfolderConns] = useState<VariableRow[]>([]);
   const [smtpConns, setSmtpConns] = useState<VariableRow[]>([]);
+  const [externalDbConns, setExternalDbConns] = useState<VariableRow[]>([]);
+  const [sftpConns, setSftpConns] = useState<VariableRow[]>([]);
+  const [apiConns, setApiConns] = useState<VariableRow[]>([]);
   const [configs, setConfigs] = useState<ArtefactInfo[]>([]);
   const [datasets, setDatasets] = useState<DatasetInfo[]>([]);
   const [advanced, setAdvanced] = useState<Record<string, boolean>>({});
@@ -99,6 +113,9 @@ export function FlowCanvas({ notify }: Props) {
     api.listArtefacts("graph").then(setSaved).catch(() => { /* empty is fine */ });
     api.listVariables("", "", "hotfolder").then(setHotfolderConns).catch(() => {});
     api.listVariables("", "", "smtp").then(setSmtpConns).catch(() => {});
+    api.listVariables("", "", "external_db").then(setExternalDbConns).catch(() => {});
+    api.listVariables("", "", "sftp").then(setSftpConns).catch(() => {});
+    api.listVariables("", "", "api").then(setApiConns).catch(() => {});
     api.listArtefacts("config").then(setConfigs).catch(() => {});
     api.listDatasets().then(setDatasets).catch(() => {});
   }, []);
@@ -217,6 +234,20 @@ export function FlowCanvas({ notify }: Props) {
     } finally { setBusy(""); }
   };
 
+  const adopt = async () => {
+    setBusy("adopt"); setFailed("");
+    try {
+      const res = await api.adoptGraph({ yaml: toYaml() });
+      notify(`Session ouverte — ${res.preview.total_rows} ligne(s).`, "ok");
+      onOpenSession?.(res);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      const m = msg.match(/Node '([^']+)'/);
+      if (m) setFailed(m[1]);
+      notify(msg, "err");
+    } finally { setBusy(""); }
+  };
+
   const check = async () => {
     setBusy("check"); setFailed("");
     try {
@@ -256,6 +287,12 @@ export function FlowCanvas({ notify }: Props) {
           <button className="btn" disabled={!!busy || !nodes.length} onClick={run}>
             <IconPlay size={14} /> {busy === "run" ? "Running…" : "Run"}
           </button>
+          {onOpenSession && (
+            <button className="btn sm" disabled={!!busy || !nodes.length} onClick={adopt}
+                    title="Ouvrir le résultat de ce flux comme une session de travail — Schéma, Calculs, Rapport s'appliquent ensuite normalement.">
+              {busy === "adopt" ? "Ouverture…" : "Ouvrir comme session"}
+            </button>
+          )}
           <button className="btn sm" disabled={!name.trim() || !nodes.length}
                   onClick={async () => {
                     try {
@@ -375,8 +412,10 @@ export function FlowCanvas({ notify }: Props) {
                      ns.map((n) => (n.id === sel.id ? { ...n, label: e.target.value } : n)))} />
 
             {ENRICHED_TYPES.has(sel.type) && (
-              <BrickFields node={sel} patchField={patchField}
+              <BrickFields node={sel} patchField={patchField} edges={edges}
                           hotfolderConns={hotfolderConns} smtpConns={smtpConns}
+                          externalDbConns={externalDbConns} sftpConns={sftpConns}
+                          apiConns={apiConns}
                           configs={configs} datasets={datasets} />
             )}
 
@@ -436,16 +475,105 @@ export function FlowCanvas({ notify }: Props) {
 }
 
 /* ── dedicated fields for the bricks enriched beyond raw JSON ──────── */
-function BrickFields({ node, patchField, hotfolderConns, smtpConns, configs, datasets }: {
+function BrickFields({ node, patchField, edges, hotfolderConns, smtpConns,
+                      externalDbConns, sftpConns, apiConns, configs, datasets }: {
   node: Node;
   patchField: (id: string, key: string, value: unknown) => void;
+  edges: Edge[];
   hotfolderConns: VariableRow[];
   smtpConns: VariableRow[];
+  externalDbConns: VariableRow[];
+  sftpConns: VariableRow[];
+  apiConns: VariableRow[];
   configs: ArtefactInfo[];
   datasets: DatasetInfo[];
 }) {
   const cfg = node.config;
   const set = (key: string, value: unknown) => patchField(node.id, key, value);
+
+  if (node.type === "dataset") {
+    return (
+      <>
+        <label>Table source</label>
+        <input list="fc-dataset-names" value={String(cfg.name ?? "")}
+               placeholder="nom de la table"
+               onChange={(e) => set("name", e.target.value)} />
+        <datalist id="fc-dataset-names">
+          {datasets.map((d) => <option key={d.id} value={d.name} />)}
+        </datalist>
+        <label>Limite de lignes (optionnel)</label>
+        <input value={String(cfg.limit ?? "")} placeholder="200000"
+               onChange={(e) => set("limit", e.target.value)} />
+      </>
+    );
+  }
+
+  if (node.type === "join") {
+    // Which parent is which side matters (see _brick_join) — pick them from
+    // the nodes actually wired into this one, never free text, so a user
+    // can't reference a node that isn't even connected.
+    const parents = edges.filter((e) => e.to === node.id).map((e) => e.from);
+    const on = Array.isArray(cfg.on) ? (cfg.on as unknown[]).join(", ")
+             : String(cfg.on ?? "");
+    return (
+      <>
+        {parents.length < 2 && (
+          <p className="fc-hint">
+            Connectez au moins deux bricks à celui-ci (bouton « › ») pour
+            choisir les entrées gauche et droite.
+          </p>
+        )}
+        <label>Entrée gauche</label>
+        <select value={String(cfg.left ?? "")} onChange={(e) => set("left", e.target.value)}>
+          <option value="">— choisir —</option>
+          {parents.map((p) => <option key={p} value={p}>{p}</option>)}
+        </select>
+        <label>Entrée droite</label>
+        <select value={String(cfg.right ?? "")} onChange={(e) => set("right", e.target.value)}>
+          <option value="">— choisir —</option>
+          {parents.map((p) => <option key={p} value={p}>{p}</option>)}
+        </select>
+        <label>Clés communes (séparées par des virgules)</label>
+        <input value={on}
+               onChange={(e) => set("on",
+                 e.target.value.split(",").map((s) => s.trim()).filter(Boolean))} />
+        <label>Type de jointure</label>
+        <select value={String(cfg.how ?? "left")} onChange={(e) => set("how", e.target.value)}>
+          <option value="left">left</option>
+          <option value="inner">inner</option>
+          <option value="outer">outer</option>
+          <option value="right">right</option>
+        </select>
+      </>
+    );
+  }
+
+  if (node.type === "lookup") {
+    return (
+      <>
+        <label>Colonne clé</label>
+        <input value={String(cfg.key ?? "")} onChange={(e) => set("key", e.target.value)} />
+        <label>Table de référence</label>
+        <input list="fc-dataset-names" value={String(cfg.dataset ?? "")}
+               placeholder="nom de la table"
+               onChange={(e) => set("dataset", e.target.value)} />
+        <datalist id="fc-dataset-names">
+          {datasets.map((d) => <option key={d.id} value={d.name} />)}
+        </datalist>
+        <label>Clé côté référence</label>
+        <input value={String(cfg.ref_key ?? "")} placeholder="par défaut : même que la clé"
+               onChange={(e) => set("ref_key", e.target.value)} />
+        <label>Colonne à récupérer</label>
+        <input value={String(cfg.ref_value ?? "")} onChange={(e) => set("ref_value", e.target.value)} />
+        <label>Nouvelle colonne</label>
+        <input value={String(cfg.into ?? "")} onChange={(e) => set("into", e.target.value)} />
+        <p className="fc-hint">
+          Pour une référence tapée à la main plutôt qu'une table, utilisez «
+          Avancé / JSON » ci-dessous et renseignez <code>values</code>.
+        </p>
+      </>
+    );
+  }
 
   if (node.type === "hotfolder") {
     const fileType = String(cfg.file_type ?? "csv");
@@ -540,6 +668,142 @@ function BrickFields({ node, patchField, hotfolderConns, smtpConns, configs, dat
         <label>Corps</label>
         <textarea rows={6} value={String(cfg.body ?? "")}
                   onChange={(e) => set("body", e.target.value)} />
+      </>
+    );
+  }
+
+  if (node.type === "external_db") {
+    return (
+      <>
+        <label>Connexion (base externe)</label>
+        <select value={String(cfg.connection ?? "")} onChange={(e) => set("connection", e.target.value)}>
+          <option value="">— choisir —</option>
+          {externalDbConns.map((v) => <option key={v.id} value={v.name}>{v.name}</option>)}
+        </select>
+        <label>Requête (paramètres liés : <code>:nom</code>)</label>
+        <textarea rows={4} className="mono" value={String(cfg.query ?? "")}
+                  onChange={(e) => set("query", e.target.value)} />
+        <p className="fc-hint">
+          Les valeurs de <code>params</code> (onglet Avancé / JSON) sont liées à
+          la requête — jamais insérées comme texte.
+        </p>
+      </>
+    );
+  }
+
+  if (node.type === "external_db_write") {
+    const keyFields = Array.isArray(cfg.key_fields) ? (cfg.key_fields as unknown[]).join(", ") : "";
+    return (
+      <>
+        <label>Connexion (base externe)</label>
+        <select value={String(cfg.connection ?? "")} onChange={(e) => set("connection", e.target.value)}>
+          <option value="">— choisir —</option>
+          {externalDbConns.map((v) => <option key={v.id} value={v.name}>{v.name}</option>)}
+        </select>
+        <label>Table cible</label>
+        <input value={String(cfg.table ?? "")} placeholder="table existante"
+               onChange={(e) => set("table", e.target.value)} />
+        <label>Mode</label>
+        <select value={String(cfg.mode ?? "insert")} onChange={(e) => set("mode", e.target.value)}>
+          <option value="insert">Insérer</option>
+          <option value="upsert">Upsert</option>
+        </select>
+        {cfg.mode === "upsert" && (
+          <>
+            <label>Colonnes clé (séparées par des virgules)</label>
+            <input value={keyFields}
+                   onChange={(e) => set("key_fields",
+                     e.target.value.split(",").map((s) => s.trim()).filter(Boolean))} />
+          </>
+        )}
+      </>
+    );
+  }
+
+  if (node.type === "sftp") {
+    const fileType = String(cfg.file_type ?? "csv");
+    return (
+      <>
+        <label>Connexion (sftp)</label>
+        <select value={String(cfg.connection ?? "")} onChange={(e) => set("connection", e.target.value)}>
+          <option value="">— choisir —</option>
+          {sftpConns.map((v) => <option key={v.id} value={v.name}>{v.name}</option>)}
+        </select>
+        <label>Type de fichier</label>
+        <select value={fileType} onChange={(e) => set("file_type", e.target.value)}>
+          <option value="csv">CSV</option>
+          <option value="xlsx">Excel (xlsx)</option>
+        </select>
+        {fileType === "csv" ? (
+          <>
+            <label>Délimiteur</label>
+            <input value={String(cfg.delimiter ?? "")} placeholder=";"
+                   onChange={(e) => set("delimiter", e.target.value)} />
+            <label>Encodage</label>
+            <input value={String(cfg.encoding ?? "AUTO")}
+                   onChange={(e) => set("encoding", e.target.value)} />
+          </>
+        ) : (
+          <>
+            <label>Feuille</label>
+            <input value={String(cfg.sheet ?? "")} placeholder="0"
+                   onChange={(e) => set("sheet", e.target.value)} />
+          </>
+        )}
+        <label>Motif de fichier</label>
+        <input value={String(cfg.pattern ?? "*")} onChange={(e) => set("pattern", e.target.value)} />
+        <label className="check">
+          <input type="checkbox" checked={cfg.required !== false}
+                 onChange={(e) => set("required", e.target.checked)} />
+          Bloquer si aucun fichier n'est trouvé
+        </label>
+      </>
+    );
+  }
+
+  if (node.type === "api" || node.type === "http") {
+    return (
+      <>
+        <label>Connexion (api, optionnel)</label>
+        <select value={String(cfg.connection ?? "")} onChange={(e) => set("connection", e.target.value)}>
+          <option value="">— aucune : url tapée ci-dessous —</option>
+          {apiConns.map((v) => <option key={v.id} value={v.name}>{v.name}</option>)}
+        </select>
+        {cfg.connection ? (
+          <>
+            <label>Chemin (relatif à la connexion)</label>
+            <input value={String(cfg.path ?? "")} placeholder="orders"
+                   onChange={(e) => set("path", e.target.value)} />
+          </>
+        ) : (
+          <>
+            <label>URL</label>
+            <input value={String(cfg.url ?? "")} placeholder="https://…"
+                   onChange={(e) => set("url", e.target.value)} />
+          </>
+        )}
+        <label>Méthode</label>
+        <select value={String(cfg.method ?? (node.type === "http" ? "POST" : "GET"))}
+                onChange={(e) => set("method", e.target.value)}>
+          <option value="GET">GET</option>
+          <option value="POST">POST</option>
+          <option value="PUT">PUT</option>
+          <option value="DELETE">DELETE</option>
+        </select>
+      </>
+    );
+  }
+
+  if (node.type === "sftp_write") {
+    return (
+      <>
+        <label>Connexion (sftp)</label>
+        <select value={String(cfg.connection ?? "")} onChange={(e) => set("connection", e.target.value)}>
+          <option value="">— choisir —</option>
+          {sftpConns.map((v) => <option key={v.id} value={v.name}>{v.name}</option>)}
+        </select>
+        <label>Nom de fichier</label>
+        <input value={String(cfg.filename ?? "")} onChange={(e) => set("filename", e.target.value)} />
       </>
     );
   }

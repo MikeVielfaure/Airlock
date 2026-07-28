@@ -33,6 +33,7 @@ import type {
   Presets,
   ProcessResponse,
   RowsResponse,
+  SourceInfo,
   TablePreview,
   TcoResponse,
 } from "./types";
@@ -179,6 +180,7 @@ export const api = {
       fields: Record<string, FieldConfig>;
       identifier_field: string | null;
       computed: { name: string; expression: string }[];
+      sql_computed?: { name: string; expression: string }[];
       variables?: Record<string, string>;
     },
   ) =>
@@ -187,6 +189,28 @@ export const api = {
       headers: authHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify(body),
     }).then((r) => json<ProcessResponse>(r)),
+
+  /** Extra frames attached to a session for cross-source SQL. */
+  listSources: (sid: string) =>
+    fetch(`${BASE}/files/${sid}/sources`, { headers: authHeaders() }).then((r) => json<SourceInfo[]>(r)),
+
+  attachDatasetSource: (sid: string, name: string, datasetId: string) =>
+    fetch(`${BASE}/files/${sid}/sources/dataset`, {
+      method: "POST", headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ name, dataset_id: datasetId }),
+    }).then((r) => json<SourceInfo>(r)),
+
+  attachUploadSource: (sid: string, name: string, file: File) => {
+    const fd = new FormData();
+    fd.append("name", name);
+    fd.append("file", file);
+    return fetch(`${BASE}/files/${sid}/sources/upload`, { method: "POST", body: fd, headers: authHeaders() })
+      .then((r) => json<SourceInfo>(r));
+  },
+
+  detachSource: (sid: string, name: string) =>
+    fetch(`${BASE}/files/${sid}/sources/${encodeURIComponent(name)}`,
+         { method: "DELETE", headers: authHeaders() }).then((r) => json<{ ok: boolean }>(r)),
 
   getRows: (
     sid: string,
@@ -234,6 +258,7 @@ export const api = {
   createArtefact: (kind: "config" | "computed" | "tco" | "edi_model" | "mapping" | "graph" | "function",
                    body: { name: string; description?: string; note?: string;
                            yaml?: string; computed?: { name: string; expression: string }[];
+                           sql_computed?: { name: string; expression: string }[];
                            csv?: string; environment?: string;
                            body?: Record<string, unknown> }) =>
     fetch(`${BASE}/artefacts/${kind}`, {
@@ -245,7 +270,8 @@ export const api = {
 
   addArtefactVersion: (kind: string, id: string,
                        body: { note?: string; yaml?: string;
-                               computed?: { name: string; expression: string }[]; csv?: string;
+                               computed?: { name: string; expression: string }[];
+                               sql_computed?: { name: string; expression: string }[]; csv?: string;
                                body?: Record<string, unknown> }) =>
     fetch(`${BASE}/artefacts/${kind}/${id}/versions`, {
       method: "POST", headers: authHeaders({ "Content-Type": "application/json" }),
@@ -608,6 +634,15 @@ export const api = {
                                    meta?: Record<string, unknown> }[];
                           preview: { columns: string[]; data: string[][];
                                      total_rows: number } }>(r)),
+
+  /** Run a flow and open its output as an ordinary working session — the
+   * flow equivalent of `openDataset`, for crossing several sources
+   * interactively (a `join`/`lookup`/`compute` with no sink). */
+  adoptGraph: (body: { yaml?: string; graph_id?: string; params?: Record<string, string> }) =>
+    fetch(`${BASE}/graphs/adopt`, {
+      method: "POST", headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify(body),
+    }).then((r) => json<FileResponse>(r)),
 
   /** The stored graph document, to reopen on the canvas. */
   loadGraph: (id: string) => fetch(`${BASE}/artefacts/graph/${id}`, { headers: authHeaders() })

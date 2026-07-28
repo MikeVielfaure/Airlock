@@ -83,6 +83,31 @@ def test_config_bad_yaml_rejected():
     assert "Invalid config YAML" in r.json()["detail"]
 
 
+def test_computed_set_with_only_sql_blocks_is_valid():
+    """A SQL block's `expression` is a DuckDB query, not a `[Col]` formula —
+    it must not go through the expression validator, and a set made purely
+    of SQL blocks (no plain computed columns) is still a valid save."""
+    r = client.post("/api/artefacts/computed", json={
+        "name": "comp-sql-only", "computed": [],
+        "sql_computed": [{"name": "total", "expression":
+            "SELECT _row_id, COUNT(*) OVER () AS total FROM self"}]})
+    assert r.status_code == 201, r.text
+    body = client.get(f"/api/artefacts/computed/{r.json()['id']}/versions/1").json()
+    assert body["body"]["sql_computed"][0]["name"] == "total"
+    assert body["body"]["computed"] == []
+
+
+def test_a_version_can_add_sql_blocks_to_an_existing_computed_set():
+    a = _mk_computed("comp-plus-sql")
+    r = client.post(f"/api/artefacts/computed/{a['id']}/versions", json={
+        "computed": [{"name": "salutation", "expression": 'CONCAT("Bonjour ", [SIRET])'}],
+        "sql_computed": [{"name": "rang", "expression":
+            "SELECT _row_id, RANK() OVER (ORDER BY SIRET) AS rang FROM self"}]})
+    assert r.status_code == 200, r.text
+    body = client.get(f"/api/artefacts/computed/{a['id']}/versions/2").json()
+    assert body["body"]["sql_computed"][0]["name"] == "rang"
+
+
 def test_computed_invalid_expression_rejected():
     r = client.post("/api/artefacts/computed", json={
         "name": "comp-bad",

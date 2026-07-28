@@ -478,12 +478,7 @@ def open_dataset(dataset_id: str, limit: int = 50_000, env: str = "",
                 df[c] = ""
         df = df[cols]
     df = df.astype("string").fillna("")
-
-    from app.services import crypto_service as _cs
-    masked = [c for c in df.columns
-              if any(_cs.is_encrypted(v) for v in df[c].head(200))]
-    for c in masked:
-        df[c] = [_cs.MASK if _cs.is_encrypted(v) else v for v in df[c]]
+    df, masked = ds.mask_encrypted_columns(df)
 
     sid = store.create(df, file_type="TABLE", encoding="N/A", delimiter="N/A")
     sess = store.get(sid)

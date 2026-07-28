@@ -28,6 +28,10 @@ class ArtefactCreate(BaseModel):
     body: Optional[Dict[str, Any]] = None      # generic (config dict, {csv:...})
     yaml: Optional[str] = None                 # config: raw YAML (parsed + revalidated)
     computed: Optional[List[Dict[str, str]]] = None   # computed: [{name, expression}]
+    # computed: [{name, expression}] where expression is a DuckDB query, not
+    # a `[Col]` formula — same artefact, same library, a second engine
+    # underneath for the one thing `computed` structurally cannot do.
+    sql_computed: Optional[List[Dict[str, str]]] = None
     csv: Optional[str] = None                  # tco: raw CSV text
 
 
@@ -37,6 +41,7 @@ class ArtefactUpdate(BaseModel):
     body: Optional[Dict[str, Any]] = None
     yaml: Optional[str] = None
     computed: Optional[List[Dict[str, str]]] = None
+    sql_computed: Optional[List[Dict[str, str]]] = None
     csv: Optional[str] = None
 
 

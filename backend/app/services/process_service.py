@@ -448,6 +448,9 @@ class ProcessService:
         tco_df: pd.DataFrame | None = None,
         identifier_fields: list[str] | None = None,
         computed: list[tuple[str, str]] | None = None,
+        sql_computed: list[tuple[str, str]] | None = None,
+        attached: dict[str, pd.DataFrame] | None = None,
+        sensitive_cols: frozenset = frozenset(),
         report_flagged_only: bool = False,
         variables: dict[str, str] | None = None,
     ) -> dict:
@@ -458,9 +461,19 @@ class ProcessService:
         df_post, validation, warnings = self.apply_field_configs(df_edited.copy(), fields, tco_df, variables=variables)
         clean_mask          = self.compute_clean_mask(df_edited, df_post, fields)
 
-        # Computed columns — evaluated on cleaned values, appended to the frame.
+        # Cross-source SQL — the one thing the expression engine below cannot
+        # do (it sees exactly one frame). Runs first so a plain computed
+        # column can reference a column a SQL block just added.
         computed_names: list[str] = []
         compute_errors: dict[str, str] = {}
+        if sql_computed:
+            from app.services.duck_compute import run_sql_computed
+            df_post, sql_cols, sql_errors = run_sql_computed(
+                df_post, attached or {}, sql_computed, sensitive_cols=sensitive_cols)
+            computed_names.extend(sql_cols)
+            compute_errors.update(sql_errors)
+
+        # Computed columns — evaluated on cleaned values, appended to the frame.
         if computed:
             from app.services.compute_service import ComputeService, ComputeError
             cs = ComputeService()

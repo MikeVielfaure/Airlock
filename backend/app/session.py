@@ -29,6 +29,9 @@ class Session:
     encoding: str = "utf-8"
     delimiter: str = ";"
     tco_df: Optional[pd.DataFrame] = None
+    # Extra sources joined against this session's own data for cross-source
+    # SQL (name -> frame) — attached explicitly, never a second session.
+    attached: dict = field(default_factory=dict)
     last_df: Optional[pd.DataFrame] = None      # last processed frame (for export)
     last_cols: Optional[list] = None            # displayed columns of last run
     last_validation: Optional[dict] = None      # final col -> status Series (full file)

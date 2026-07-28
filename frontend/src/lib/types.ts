@@ -18,6 +18,13 @@ export interface ComputedColumn {
   expression: string;
 }
 
+/** An extra frame attached to a session for cross-source SQL. */
+export interface SourceInfo {
+  name: string;
+  columns: string[];
+  row_count: number;
+}
+
 export interface FieldConfig {
   name?: string[] | null;
   type: FieldType;
@@ -507,7 +514,7 @@ export interface VariableRow {
   node_id: string;
   secret: boolean;
   description: string;
-  kind: "value" | "hotfolder" | "smtp";
+  kind: "value" | "hotfolder" | "smtp" | "external_db" | "sftp" | "api";
 }
 
 /** Parsed shape of a "hotfolder" kind connection's JSON value. */
@@ -526,6 +533,33 @@ export interface SmtpConnection {
   password?: string;
   use_tls?: boolean;
   from?: string;
+}
+
+/** Parsed shape of an "external_db" kind connection's JSON value — a full
+ * SQLAlchemy DSN, no dialect hard-coded. */
+export interface ExternalDbConnection {
+  url: string;
+}
+
+/** Parsed shape of an "sftp" kind connection's JSON value — the remote
+ * sibling of hotfolder's archive/error pair. */
+export interface SftpConnection {
+  host: string;
+  port?: number;
+  user: string;
+  password?: string;
+  private_key?: string;
+  remote_dir: string;
+  archive_dir: string;
+  error_dir: string;
+}
+
+/** Parsed shape of an "api" kind connection's JSON value — a shared,
+ * maskable base url and optional bearer/token credential. */
+export interface ApiConnection {
+  base_url: string;
+  auth_header?: string;
+  token?: string;
 }
 
 export interface RunStep {

@@ -103,6 +103,35 @@ def test_only_a_global_variable_can_be_restricted():
     assert r.status_code == 409
 
 
+# ── the newer connection kinds (external_db, sftp, api) ────────────────
+def test_an_external_db_connection_only_needs_a_url():
+    r = _var(name="entrepot_v2", value=json.dumps({"url": "sqlite:///:memory:"}),
+             scope="global", kind="external_db")
+    assert r.status_code == 200, r.text
+    r2 = _var(name="entrepot_sans_url_v2", value=json.dumps({}), scope="global", kind="external_db")
+    assert r2.status_code == 409
+
+
+def test_an_sftp_connection_needs_all_five_directories():
+    incomplete = json.dumps({"host": "sftp.exemple.fr", "user": "fx", "remote_dir": "/in"})
+    r = _var(name="depot_distant_v2", value=incomplete, scope="global", kind="sftp")
+    assert r.status_code == 409
+    assert "archive_dir" in r.json()["detail"]
+
+    complete = json.dumps({"host": "sftp.exemple.fr", "user": "fx", "remote_dir": "/in",
+                           "archive_dir": "/ok", "error_dir": "/ko"})
+    r2 = _var(name="depot_distant_v2", value=complete, scope="global", kind="sftp")
+    assert r2.status_code == 200, r2.text
+
+
+def test_an_api_connection_only_needs_a_base_url():
+    r = _var(name="service_externe_v2", value=json.dumps({"base_url": "https://api.exemple.fr"}),
+             scope="global", kind="api")
+    assert r.status_code == 200, r.text
+    r2 = _var(name="service_sans_url_v2", value=json.dumps({}), scope="global", kind="api")
+    assert r2.status_code == 409
+
+
 def test_resolve_variable_kinds_matches_the_resolved_value():
     _var(name="depot_kind_v2", value=json.dumps({"path": "/a", "archive_dir": "/b",
                                                  "error_dir": "/c"}),

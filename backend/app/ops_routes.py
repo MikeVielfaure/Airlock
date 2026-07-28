@@ -47,7 +47,7 @@ class VariableIn(BaseModel):
     node_id: str = ""
     secret: bool = False
     description: str = ""
-    kind: str = "value"                 # value | hotfolder | smtp
+    kind: str = "value"                 # value | hotfolder | smtp | external_db | sftp | api
 
 
 def _var_out(v, reveal: bool = False) -> dict:
@@ -168,6 +168,45 @@ def _finalize_hotfolder_file(src_path: str, dest_dir: str) -> str:
     return dest
 
 
+def _finalize_sftp_file(conn_value: str, remote_path: str, dest_dir: str) -> str:
+    """Move a picked-up SFTP file to its connection's archive or error folder —
+    the remote sibling of `_finalize_hotfolder_file`. Reconnects rather than
+    keeping the brick's own session open for the whole run, since the run's
+    outcome is only known well after the brick already returned. Never
+    overwrites: a same-named file already there keeps its place, and the
+    incoming one gets a millisecond timestamp suffixed onto its name."""
+    import io
+    import json as _json
+
+    import paramiko
+
+    data = _json.loads(conn_value)
+    transport = paramiko.Transport((data["host"], int(data.get("port") or 22)))
+    try:
+        if data.get("private_key"):
+            pkey = paramiko.RSAKey.from_private_key(io.StringIO(data["private_key"]))
+            transport.connect(username=data["user"], pkey=pkey)
+        else:
+            transport.connect(username=data["user"], password=data.get("password") or "")
+        sftp = paramiko.SFTPClient.from_transport(transport)
+        try:
+            sftp.mkdir(dest_dir)
+        except IOError:
+            pass  # already exists — that is the common case, not a problem
+        base = os.path.basename(remote_path)
+        dest = dest_dir.rstrip("/") + "/" + base
+        try:
+            sftp.stat(dest)
+            stem, ext = os.path.splitext(base)
+            dest = dest_dir.rstrip("/") + "/" + f"{stem}_{int(time.time() * 1000)}{ext}"
+        except IOError:
+            pass  # nothing there yet — the plain name is free
+        sftp.rename(remote_path, dest)
+        return dest
+    finally:
+        transport.close()
+
+
 def run_and_record(s: Session, graph: FlowGraph, *, params: Dict[str, str],
                    environment: str, graph_id: str = "",
                    snapshot: Optional[dict] = None, replay_mode: str = "",
@@ -218,6 +257,16 @@ def run_and_record(s: Session, graph: FlowGraph, *, params: Dict[str, str],
                 "node": pick["node"], "level": "error",
                 "text": f"Impossible de déplacer « {os.path.basename(pick['path'])} » "
                         f"vers {dest_dir} : {e}"})
+
+    for pick in ctx.sftp_picks:
+        dest_dir = pick["archive_dir"] if failed is None else pick["error_dir"]
+        try:
+            _finalize_sftp_file(variables[pick["connection"]], pick["path"], dest_dir)
+        except Exception as e:  # noqa: BLE001 — same rule as hotfolder above
+            ctx.messages.append({
+                "node": pick["node"], "level": "error",
+                "text": f"Impossible de déplacer « {os.path.basename(pick['path'])} » "
+                        f"vers {dest_dir} sur '{pick['connection']}' : {e}"})
 
     run.ms = int((time.perf_counter() - started) * 1000)
     run.finished_at = datetime.now(timezone.utc)

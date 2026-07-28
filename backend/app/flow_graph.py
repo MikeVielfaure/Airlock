@@ -33,17 +33,19 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 # halfway through a run.
 NodeType = Literal[
     # sources — produce records from nothing upstream
-    "api", "dataset", "session", "inline", "hotfolder",
+    "api", "dataset", "session", "inline", "hotfolder", "external_db", "sftp",
     "log",
     # transforms — records in, records out
     "mapping", "compute", "filter", "validate", "config", "graph",
     "aggregate", "join", "lookup",
     # sinks — records in, a result out
     "response", "dataset_write", "file", "http", "email",
+    "external_db_write", "sftp_write",
 ]
 
-SOURCE_TYPES = {"api", "dataset", "session", "inline", "hotfolder"}
-SINK_TYPES = {"response", "dataset_write", "file", "http", "email"}
+SOURCE_TYPES = {"api", "dataset", "session", "inline", "hotfolder", "external_db", "sftp"}
+SINK_TYPES = {"response", "dataset_write", "file", "http", "email",
+              "external_db_write", "sftp_write"}
 
 
 class FlowParam(BaseModel):

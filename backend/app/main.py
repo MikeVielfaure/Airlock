@@ -27,11 +27,13 @@ from app.models import (
     ExportRequest, ExportResponse, ExpressionCheck, ExpressionResult,
     FieldConfig, FileResponse, HeaderRequest, ImportRequest, ImportResponse,
     MatchInfo, Presets, ProcessRequest, ProcessResponse, ProcessStats, RowsResponse, TablePreview, TcoResponse,
-    PipelineResponse,
+    PipelineResponse, SourceInfo, AttachDatasetSource,
 )
 from app.services.config_service import ConfigService
 from app.services.file_service import FileService
 from app.services import crypto_service as _crypto
+from app.services import dataset_service as _ds
+from app.services import auth_service as _auth
 from app.services.function_service import (
     REGEX_PRESETS, UI_DATE_FORMATS, FunctionService,
 )
@@ -54,7 +56,7 @@ from app.auth_routes import router as auth_router, admin_router
 from app.crypto_routes import router as crypto_router
 from app.load_routes import router as load_router
 from app.run_routes import router as run_router
-from app.auth_routes import require_capability
+from app.auth_routes import require_capability, require_user
 from app.services.pipeline_engine import PipelineEngine
 
 from contextlib import asynccontextmanager
@@ -351,6 +353,83 @@ async def upload_file(
         table_count=table_count,
         preview=_preview(df, preview_limit),
     )
+
+
+# ══════════════════════════════════════════════════════════════════════
+# Attached sources — extra frames a session can cross-reference in SQL
+# ══════════════════════════════════════════════════════════════════════
+MAX_SOURCE_ROWS = 200_000    # a source lives in memory next to the session
+
+
+@app.get("/api/files/{sid}/sources", response_model=list[SourceInfo])
+def list_sources(sid: str):
+    sess = _session(sid)
+    return [SourceInfo(name=n, columns=list(df.columns), row_count=int(len(df)))
+            for n, df in sess.attached.items()]
+
+
+@app.post("/api/files/{sid}/sources/dataset", response_model=SourceInfo)
+def attach_dataset_source(sid: str, req: AttachDatasetSource,
+                          user=Depends(require_user), s: DbSession = Depends(get_session)):
+    sess = _session(sid)
+    name = req.name.strip()
+    if not name:
+        raise HTTPException(422, "La source a besoin d'un nom.")
+    try:
+        d = repo.get_dataset(s, req.dataset_id)
+    except repo.NotFound as e:
+        raise HTTPException(404, str(e))
+    scope = d.environment or repo.DEFAULT_ENV
+    perm = repo.dataset_permission(s, d, user, _auth.role_in(s, user, scope), environment=scope)
+    if not repo.can_on_dataset(perm, "read"):
+        raise HTTPException(403, f"Aucun accès en lecture à la table « {d.name} ».")
+
+    total = repo.count_rows(s, req.dataset_id)
+    if total > MAX_SOURCE_ROWS:
+        raise HTTPException(413, f"La table « {d.name} » contient {total} lignes, "
+                                 f"au-delà de la limite de {MAX_SOURCE_ROWS} pour une "
+                                 f"source attachée.")
+    rows = [r.data for r in repo.read_rows(s, req.dataset_id, offset=0, limit=MAX_SOURCE_ROWS)]
+    cols = list((d.schema_json or {}).get("columns", []))
+    df = pd.DataFrame(rows)
+    if cols:
+        for c in cols:
+            if c not in df.columns:
+                df[c] = ""
+        df = df[cols]
+    df = df.astype("string").fillna("")
+    df, _masked = _ds.mask_encrypted_columns(df)
+
+    sess.attached[name] = df
+    return SourceInfo(name=name, columns=list(df.columns), row_count=int(len(df)))
+
+
+@app.post("/api/files/{sid}/sources/upload", response_model=SourceInfo)
+async def attach_upload_source(sid: str, name: str = Form(...), file: UploadFile = File(...)):
+    sess = _session(sid)
+    name = name.strip()
+    if not name:
+        raise HTTPException(422, "La source a besoin d'un nom.")
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(400, "Fichier vide.")
+    try:
+        if (file.filename or "").lower().endswith((".xlsx", ".xls")):
+            df = _files.load_xlsx_raw(raw, sheet=0)
+        else:
+            df, _enc, _delim = _files.load_csv_raw(raw, _AUTO, None)
+    except Exception as e:  # noqa: BLE001 — surface load errors to the client
+        raise HTTPException(422, f"Impossible de lire le fichier : {e}")
+
+    sess.attached[name] = df
+    return SourceInfo(name=name, columns=list(df.columns), row_count=int(len(df)))
+
+
+@app.delete("/api/files/{sid}/sources/{name}")
+def detach_source(sid: str, name: str):
+    sess = _session(sid)
+    sess.attached.pop(name, None)
+    return {"ok": True}
 
 
 @app.post("/api/files/{sid}/header", response_model=TablePreview)
@@ -735,6 +814,9 @@ def process(sid: str, req: ProcessRequest,
     # One or more identifier fields (every field marked as identifier).
     id_fields = [c for c in req.visible_cols
                  if fields.get(c) and getattr(fields[c], "identifiant", False)]
+    # Known *before* the SQL step runs: a cross-source query must never see a
+    # declared-confidential column's real value, only its mask.
+    declared_sensitive = frozenset(c for c, f in fields.items() if getattr(f, "sensitive", None))
 
     try:
         result = _process.run_pipeline(
@@ -744,6 +826,9 @@ def process(sid: str, req: ProcessRequest,
             tco_df=sess.tco_df,
             identifier_fields=id_fields,
             computed=[(c.name, c.expression) for c in req.computed],
+            sql_computed=[(c.name, c.expression) for c in req.sql_computed],
+            attached=sess.attached,
+            sensitive_cols=declared_sensitive,
             report_flagged_only=True,
             variables=req.variables,
         )
@@ -790,9 +875,15 @@ def process(sid: str, req: ProcessRequest,
         sess.history.append({"op": "validate", "columns": list(cols),
                              "rules": {c: fields[c].model_dump(exclude_none=True)
                                        for c in cols if c in fields}})
-        if computed_names:
+        sql_names = [n for n in computed_names
+                    if n in {c.name for c in req.sql_computed}]
+        plain_names = [n for n in computed_names if n not in sql_names]
+        if plain_names:
             sess.history = [h for h in sess.history if h.get("op") != "compute"]
-            sess.history.append({"op": "compute", "columns": list(computed_names)})
+            sess.history.append({"op": "compute", "columns": list(plain_names)})
+        if sql_names:
+            sess.history = [h for h in sess.history if h.get("op") != "sql_compute"]
+            sess.history.append({"op": "sql_compute", "columns": list(sql_names)})
         head = df_post[cols].head(req.preview_limit) if cols else df_post.head(0)
 
         data, status, row_index = [], [], []

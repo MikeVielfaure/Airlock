@@ -93,6 +93,10 @@ class ProcessRequest(BaseModel):
     fields: Dict[str, FieldConfig]          # keyed by current column name
     identifier_field: Optional[str] = None
     computed: List[ComputedColumn] = Field(default_factory=list)
+    # Cross-source SQL blocks — `expression` here holds a DuckDB query, not a
+    # `[Col]` formula. Same shape as `computed` on purpose: one library, one
+    # save/load path, just a different engine underneath.
+    sql_computed: List[ComputedColumn] = Field(default_factory=list)
     variables: Dict[str, str] = Field(default_factory=dict)   # config variables -> value
     preview_limit: int = 150
 
@@ -182,6 +186,18 @@ class ProcessResponse(BaseModel):
     sensitivity: Dict[str, str] = Field(default_factory=dict)
     # Keys this run depends on that no longer exist: the config cannot be used.
     missing_keys: List[str] = Field(default_factory=list)
+
+
+class SourceInfo(BaseModel):
+    """An extra frame attached to a session for cross-source SQL."""
+    name: str
+    columns: List[str]
+    row_count: int
+
+
+class AttachDatasetSource(BaseModel):
+    name: str
+    dataset_id: str
 
 
 class RowsResponse(BaseModel):

@@ -1,13 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { ComputedColumn } from "../lib/types";
+import type { ComputedColumn, DatasetInfo, SourceInfo } from "../lib/types";
 import { api } from "../lib/api";
 import type { ArtefactInfo } from "../lib/types";
 import { IconCode, IconReset, IconUpload, IconDownload } from "../lib/icons";
 
 interface Props {
+  sid: string | null;
   columns: string[];
   computed: ComputedColumn[];
   setComputed: (c: ComputedColumn[]) => void;
+  sqlComputed: ComputedColumn[];
+  setSqlComputed: (c: ComputedColumn[]) => void;
   variables: Record<string, string>;
   setVariables: (v: Record<string, string>) => void;
   errors: Record<string, string>;   // server-side errors from the last run
@@ -87,23 +90,65 @@ function Row({ col, columns, onChange, onRemove, serverError }: {
   );
 }
 
-export function ComputedPanel({ columns, computed, setComputed, variables, setVariables, errors, notify }: Props) {
+export function ComputedPanel({ sid, columns, computed, setComputed, sqlComputed, setSqlComputed,
+                               variables, setVariables, errors, notify }: Props) {
   const [lib, setLib] = useState<ArtefactInfo[]>([]);
   const [saveName, setSaveName] = useState("");
   const [saveTarget, setSaveTarget] = useState("");
   const refreshLib = useCallback(() => { api.listArtefacts("computed").then(setLib).catch(() => {}); }, []);
   useEffect(() => { refreshLib(); }, [refreshLib]);
 
+  // ── attached sources (for cross-source SQL) ──────────────────────
+  const [sources, setSources] = useState<SourceInfo[]>([]);
+  const [datasets, setDatasets] = useState<DatasetInfo[]>([]);
+  const [attachName, setAttachName] = useState("");
+  const [attachDatasetId, setAttachDatasetId] = useState("");
+  const uploadRef = useRef<HTMLInputElement>(null);
+  const refreshSources = useCallback(() => {
+    if (sid) api.listSources(sid).then(setSources).catch(() => {});
+  }, [sid]);
+  useEffect(() => { refreshSources(); }, [refreshSources]);
+  useEffect(() => { api.listDatasets().then(setDatasets).catch(() => {}); }, []);
+
+  const attachDataset = async () => {
+    if (!sid || !attachName.trim() || !attachDatasetId) return;
+    try {
+      await api.attachDatasetSource(sid, attachName.trim(), attachDatasetId);
+      setAttachName(""); setAttachDatasetId("");
+      refreshSources();
+      notify(`Source « ${attachName.trim()} » attachée.`, "ok");
+    } catch (e) { notify(e instanceof Error ? e.message : "Échec de l'attachement.", "err"); }
+  };
+
+  const attachUpload = async (file: File) => {
+    if (!sid) return;
+    const name = attachName.trim() || file.name.replace(/\.[^.]+$/, "");
+    try {
+      await api.attachUploadSource(sid, name, file);
+      setAttachName("");
+      refreshSources();
+      notify(`Source « ${name} » attachée.`, "ok");
+    } catch (e) { notify(e instanceof Error ? e.message : "Échec de l'attachement.", "err"); }
+  };
+
+  const detachSource = async (name: string) => {
+    if (!sid) return;
+    try { await api.detachSource(sid, name); refreshSources(); }
+    catch (e) { notify(e instanceof Error ? e.message : "Échec du détachement.", "err"); }
+  };
+
   const valid = computed.filter((c) => c.name.trim() && c.expression.trim());
+  const validSql = sqlComputed.filter((c) => c.name.trim() && c.expression.trim());
   const saveToLibrary = async () => {
-    if (!valid.length) { notify("No computed column to save.", "err"); return; }
+    if (!valid.length && !validSql.length) { notify("No computed column to save.", "err"); return; }
+    const body = { computed: valid, ...(validSql.length ? { sql_computed: validSql } : {}) };
     try {
       if (saveTarget) {
-        const a = await api.addArtefactVersion("computed", saveTarget, { computed: valid });
+        const a = await api.addArtefactVersion("computed", saveTarget, body);
         notify(`Saved as version ${a.latest_version_no} of « ${a.name} ».`, "ok");
       } else {
         if (!saveName.trim()) { notify("Give the set a name.", "err"); return; }
-        await api.createArtefact("computed", { name: saveName.trim(), computed: valid });
+        await api.createArtefact("computed", { name: saveName.trim(), ...body });
         notify(`Computed set « ${saveName.trim()} » saved.`, "ok");
         setSaveName("");
       }
@@ -114,9 +159,13 @@ export function ComputedPanel({ columns, computed, setComputed, variables, setVa
   const loadFromLibrary = async (a: ArtefactInfo) => {
     try {
       const v = await api.getArtefactVersion("computed", a.id, a.latest_version_no);
-      const items = (v.body as { computed?: ComputedColumn[] }).computed ?? [];
+      const body = v.body as { computed?: ComputedColumn[]; sql_computed?: ComputedColumn[] };
+      const items = body.computed ?? [];
+      const sqlItems = body.sql_computed ?? [];
       setComputed(items);
-      notify(`Computed set « ${a.name} » (v${a.latest_version_no}) loaded — ${items.length} column(s).`, "ok");
+      setSqlComputed(sqlItems);
+      notify(`Computed set « ${a.name} » (v${a.latest_version_no}) loaded — ${items.length} column(s)`
+            + (sqlItems.length ? `, ${sqlItems.length} bloc(s) SQL.` : "."), "ok");
     } catch (e) { notify(e instanceof Error ? e.message : "Load failed.", "err"); }
   };
   const importRef = useRef<HTMLInputElement>(null);
@@ -138,8 +187,13 @@ export function ComputedPanel({ columns, computed, setComputed, variables, setVa
   const add = (expr = "") =>
     setComputed([...computed, { name: `computed_${computed.length + 1}`, expression: expr }]);
 
+  const addSql = () =>
+    setSqlComputed([...sqlComputed,
+      { name: `sql_${sqlComputed.length + 1}`, expression: "SELECT self._row_id\nFROM self" }]);
+
   const exportFns = () => {
-    const blob = new Blob([JSON.stringify({ computed }, null, 2)], { type: "application/json" });
+    const blob = new Blob([JSON.stringify({ computed, sql_computed: sqlComputed }, null, 2)],
+                          { type: "application/json" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
     a.download = "computed-columns.json";
@@ -153,9 +207,18 @@ export function ComputedPanel({ columns, computed, setComputed, variables, setVa
       const list = Array.isArray(parsed) ? parsed : parsed.computed;
       if (!Array.isArray(list)) throw new Error("bad shape");
       const clean = list
-        .filter((c) => c && typeof c.name === "string" && typeof c.expression === "string")
+        .filter((c: unknown): c is ComputedColumn =>
+          !!c && typeof (c as ComputedColumn).name === "string" && typeof (c as ComputedColumn).expression === "string")
         .map((c) => ({ name: c.name, expression: c.expression }));
       setComputed([...computed, ...clean]);
+      const sqlList = Array.isArray(parsed) ? [] : (parsed.sql_computed ?? []);
+      if (Array.isArray(sqlList) && sqlList.length) {
+        const cleanSql = sqlList
+          .filter((c: unknown): c is ComputedColumn =>
+            !!c && typeof (c as ComputedColumn).name === "string" && typeof (c as ComputedColumn).expression === "string")
+          .map((c) => ({ name: c.name, expression: c.expression }));
+        setSqlComputed([...sqlComputed, ...cleanSql]);
+      }
     } catch {
       alert("Could not read this functions file (expected JSON with a 'computed' array).");
     }
@@ -216,6 +279,85 @@ export function ComputedPanel({ columns, computed, setComputed, variables, setVa
           ))
         )}
       </div>
+
+      <div className="sec-h" style={{ marginTop: 20 }}>
+        <h3>Sources attachées</h3>
+        <span className="sub">Une table interne ou un fichier, croisé avec cette session dans une requête SQL — sans construire de flux.</span>
+      </div>
+      {!sid ? (
+        <div className="banner"><span>Chargez d'abord une session.</span></div>
+      ) : (
+        <>
+          <div className="flowform">
+            <div className="frow"><label>Nom</label>
+              <input className="mono-input" value={attachName} placeholder="ex. referentiel_clients"
+                onChange={(e) => setAttachName(e.target.value.replace(/\s+/g, "_"))} /></div>
+            <div className="frow"><label>Table interne</label>
+              <select value={attachDatasetId} onChange={(e) => setAttachDatasetId(e.target.value)}>
+                <option value="">— choisir —</option>
+                {datasets.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+              </select></div>
+            <button className="btn sm" disabled={!attachName.trim() || !attachDatasetId} onClick={attachDataset}>
+              Attacher la table
+            </button>
+            <span style={{ marginLeft: 8 }}>ou</span>
+            <button className="btn sm" onClick={() => uploadRef.current?.click()}>
+              <IconUpload size={13} /> Importer un fichier
+            </button>
+            <input ref={uploadRef} type="file" accept=".csv,.xlsx,.xls" hidden
+              onChange={(e) => { const f = e.target.files?.[0]; if (f) attachUpload(f); e.target.value = ""; }} />
+          </div>
+          {sources.length === 0 ? (
+            <p className="hint">Aucune source attachée pour l'instant.</p>
+          ) : (
+            <div className="libcol" style={{ marginTop: 6 }}>
+              {sources.map((s) => (
+                <div key={s.name} className="libitem">
+                  <span><code>{s.name}</code> <span className="csub">{s.row_count} ligne(s), {s.columns.length} colonne(s)</span></span>
+                  <button className="btn sm" onClick={() => detachSource(s.name)}>Détacher</button>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+
+      <div className="sec-h" style={{ marginTop: 20 }}>
+        <h3>SQL avancé</h3>
+        <span className="sub">
+          Requêtes DuckDB contre <code>self</code> (cette session, colonne <code>_row_id</code> incluse) et les
+          sources ci-dessus — jointures, fenêtres, agrégations que les colonnes calculées ne peuvent pas faire.
+          Le résultat doit renvoyer <code>_row_id</code> ; sans lui, la requête est refusée.
+        </span>
+      </div>
+      <div className="filterbar">
+        <button className="btn primary sm" onClick={addSql}><IconCode size={14} /> Ajouter un bloc SQL</button>
+        {sqlComputed.length > 0 && (
+          <button className="btn sm" onClick={() => setSqlComputed([])}><IconReset size={13} /> Clear</button>
+        )}
+      </div>
+      {sqlComputed.length === 0 ? (
+        <div className="banner"><span>Aucun bloc SQL pour l'instant.</span></div>
+      ) : (
+        sqlComputed.map((c, i) => (
+          <div className="computed-row" key={i}>
+            <div className="computed-head">
+              <input className="mono-input" placeholder="nom_du_bloc" value={c.name}
+                onChange={(e) => setSqlComputed(sqlComputed.map((x, j) =>
+                  (j === i ? { ...x, name: e.target.value.replace(/\s+/g, "_") } : x)))}
+                style={{ maxWidth: 220 }} />
+              <button className="btn sm" style={{ marginLeft: "auto" }}
+                onClick={() => setSqlComputed(sqlComputed.filter((_, j) => j !== i))} title="Remove">✕</button>
+            </div>
+            <textarea className="mono-input" rows={4}
+              placeholder="SELECT self._row_id, ext.libelle FROM self LEFT JOIN referentiel_clients ext ON self.code = ext.code"
+              value={c.expression}
+              onChange={(e) => setSqlComputed(sqlComputed.map((x, j) =>
+                (j === i ? { ...x, expression: e.target.value } : x)))} />
+            {errors[c.name] && <div className="valid err" style={{ marginTop: 4 }}>Last run: {errors[c.name]}</div>}
+          </div>
+        ))
+      )}
 
       <div className="sec-h" style={{ marginTop: 20 }}>
         <h3>Library</h3>

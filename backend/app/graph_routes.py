@@ -128,6 +128,39 @@ def run(req: RunRequest, s: Session = Depends(get_session),
             "preview": _preview(result["records"], req.limit)}
 
 
+@router.post("/adopt")
+def adopt(req: RunRequest, s: Session = Depends(get_session),
+          _cap=Depends(require_capability("flow.run"))):
+    """
+    Run a flow and open its output as an ordinary working session — the same
+    bridge `POST /api/datasets/{id}/open` gives a stored table. A flow that
+    ends in a `join`/`lookup`/`compute` (no sink) is how several sources get
+    cross-referenced interactively: once adopted, Schéma & Règles, Calculs,
+    Rapport and Correspondances apply exactly as they would to an uploaded
+    file, because none of them know or care where a session came from.
+    """
+    from app.dataset_routes import _table_preview
+    from app.models import FileResponse
+    from app.session import store
+
+    graph = _resolve_graph(s, req)
+    params = _bind_params(graph, req.params)
+    from app.ops_routes import run_and_record
+    result, _run = run_and_record(
+        s, graph, params=params, environment=req.environment or "default",
+        graph_id=req.graph_id or "", loaders=_loaders(s))
+
+    df = pivot_service.records_to_frame(result["records"]).drop(columns=["_doc"], errors="ignore")
+    if len(df) > 200_000:
+        raise HTTPException(
+            413, f"Le résultat contient {len(df)} lignes, au-delà de la limite "
+                 f"de 200 000. Utilisez une brique `dataset_write` pour l'écrire par lots.")
+
+    sid = store.create(df, file_type="FLOW", encoding="N/A", delimiter="N/A")
+    return FileResponse(session_id=sid, type="FLOW", encoding="N/A",
+                        delimiter="N/A", preview=_table_preview(df))
+
+
 @router.post("/{graph_id}/call")
 def call_as_api(graph_id: str,
                 params: Dict[str, Any] = Body(default_factory=dict),

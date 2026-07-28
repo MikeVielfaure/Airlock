@@ -39,7 +39,8 @@ class BadBody(Exception):
 
 # ── body normalisation per kind (validate before storing) ─────────────
 def normalise_body(kind: str, *, body: Optional[dict], yaml: Optional[str],
-                   computed: Optional[list], csv: Optional[str]) -> dict:
+                   computed: Optional[list], csv: Optional[str],
+                   sql_computed: Optional[list] = None) -> dict:
     if kind == "config":
         if yaml is not None:
             try:
@@ -57,8 +58,10 @@ def normalise_body(kind: str, *, body: Optional[dict], yaml: Optional[str],
 
     if kind == "computed":
         items = computed if computed is not None else (body or {}).get("computed")
-        if not isinstance(items, list):
+        sql_items = sql_computed if sql_computed is not None else (body or {}).get("sql_computed")
+        if not isinstance(items, list) and not isinstance(sql_items, list):
             raise BadBody("A computed set needs `computed`: [{name, expression}].")
+        items = items if isinstance(items, list) else []
         clean = []
         for it in items:
             name, expr = it.get("name"), it.get("expression")
@@ -68,9 +71,21 @@ def normalise_body(kind: str, *, body: Optional[dict], yaml: Optional[str],
             if err:
                 raise BadBody(f"Expression for '{name}' is invalid: {err}")
             clean.append({"name": name, "expression": expr})
-        if not clean:
+        # SQL blocks are not run through the expression validator — a DuckDB
+        # query cannot be checked without real attached data, so it is only
+        # ever verified by actually running it.
+        clean_sql = []
+        if isinstance(sql_items, list):
+            for it in sql_items:
+                name, expr = it.get("name"), it.get("expression")
+                if name and expr:
+                    clean_sql.append({"name": name, "expression": expr})
+        if not clean and not clean_sql:
             raise BadBody("No valid computed columns provided.")
-        return {"computed": clean}
+        out = {"computed": clean}
+        if clean_sql:
+            out["sql_computed"] = clean_sql
+        return out
 
     if kind == "edi_model":
         if yaml is not None and yaml.strip():

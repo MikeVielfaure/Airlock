@@ -269,3 +269,18 @@ def schema_of(df: pd.DataFrame, key_fields: list[str],
     return {"columns": [str(c) for c in df.columns],
             "types": {str(c): (types or {}).get(str(c), "string") for c in df.columns},
             "key": list(key_fields)}
+
+
+def mask_encrypted_columns(df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
+    """Replace any column whose stored values look like ciphertext with the
+    mask sentinel, in place of the real value — shared by every route that
+    turns a stored table into something else (a session, a joined source),
+    so a confidential column can't come back in clear by a second path."""
+    from app.services import crypto_service as _cs
+
+    out = df.copy()
+    masked = [c for c in out.columns
+             if any(_cs.is_encrypted(v) for v in out[c].head(200))]
+    for c in masked:
+        out[c] = [_cs.MASK if _cs.is_encrypted(v) else v for v in out[c]]
+    return out, masked

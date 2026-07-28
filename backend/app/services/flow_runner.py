@@ -77,6 +77,10 @@ class RunContext:
     # is known — a brick runs once, in the middle of the graph, and has no way
     # to know yet whether a later node will fail.
     hotfolder_picks: List[dict] = field(default_factory=list)
+    # Same idea as `hotfolder_picks`, for files picked up over SFTP — kept
+    # apart because the finalisation step moves them on a remote server
+    # instead of the local filesystem.
+    sftp_picks: List[dict] = field(default_factory=list)
     # What each source brick produced, kept so a failed run can be replayed on
     # the very same data instead of calling the world again.
     snapshot: Dict[str, List[dict]] = field(default_factory=dict)
@@ -238,11 +242,22 @@ def _brick_api(node: FlowNode, inputs: List[dict], ctx: RunContext) -> NodeResul
     import urllib.request
 
     cfg = _resolve(node.config, _subs(ctx))
-    url = (cfg.get("url") or "").strip()
+    headers = dict(cfg.get("headers") or {})
+    # An `api`-kind connection is optional: it exists so a base url and
+    # credential can be shared/masked/restricted across nodes, but a one-off
+    # call with nothing to reuse can still just type a plain `url`.
+    if (cfg.get("connection") or "").strip():
+        conn = _connection(node, ctx, cfg, "api")
+        base = (conn.get("base_url") or "").rstrip("/")
+        rel = str(cfg.get("path") or "").lstrip("/")
+        url = f"{base}/{rel}" if rel else base
+        if conn.get("token"):
+            headers.setdefault(conn.get("auth_header") or "Authorization", conn["token"])
+    else:
+        url = (cfg.get("url") or "").strip()
     if not url:
-        raise FlowError(node.id, "an api node needs a `url`")
+        raise FlowError(node.id, "an api node needs a `url` or a `connection`")
     method = (cfg.get("method") or "GET").upper()
-    headers = cfg.get("headers") or {}
     body = cfg.get("body")
     timeout = float(cfg.get("timeout") or 20)
 
@@ -440,6 +455,7 @@ def _brick_graph(node: FlowNode, inputs: List[dict], ctx: RunContext) -> NodeRes
     # A hotfolder picked up inside the nested flow is still this run's
     # responsibility to archive or error out once the whole run concludes.
     ctx.hotfolder_picks.extend(inner.hotfolder_picks)
+    ctx.sftp_picks.extend(inner.sftp_picks)
     return NodeResult(records=result["records"], meta={"sub_flow": sub.name})
 
 
@@ -837,11 +853,19 @@ def _brick_http(node: FlowNode, inputs: List[dict], ctx: RunContext) -> NodeResu
     import urllib.request
 
     cfg = _resolve(node.config, _subs(ctx))
-    url = (cfg.get("url") or "").strip()
-    if not url:
-        raise FlowError(node.id, "an http node needs a `url`")
-    method = (cfg.get("method") or "POST").upper()
     headers = {str(k): str(v) for k, v in (cfg.get("headers") or {}).items()}
+    if (cfg.get("connection") or "").strip():
+        conn = _connection(node, ctx, cfg, "api")
+        base = (conn.get("base_url") or "").rstrip("/")
+        rel = str(cfg.get("path") or "").lstrip("/")
+        url = f"{base}/{rel}" if rel else base
+        if conn.get("token"):
+            headers.setdefault(conn.get("auth_header") or "Authorization", conn["token"])
+    else:
+        url = (cfg.get("url") or "").strip()
+    if not url:
+        raise FlowError(node.id, "an http node needs a `url` or a `connection`")
+    method = (cfg.get("method") or "POST").upper()
     headers.setdefault("Content-Type", "application/json")
     timeout = float(cfg.get("timeout") or 30)
     field = cfg.get("field") or ""          # wrap rows: {"orders": [...]}
@@ -924,6 +948,227 @@ def _brick_email(node: FlowNode, inputs: List[dict], ctx: RunContext) -> NodeRes
     return NodeResult(records=_merge(inputs), meta={"to": to, "subject": subject})
 
 
+def _brick_external_db(node: FlowNode, inputs: List[dict], ctx: RunContext) -> NodeResult:
+    """
+    Read from an external database — a parameterised query, nothing else.
+
+    The connection stores only a DSN; `query`/`params` are the node's own
+    config. Parameters are always bound through SQLAlchemy, never spliced
+    into the SQL text — the same "no textual substitution" rule already
+    decided for a SQL source, so a value coming from anywhere upstream can
+    never turn into an injection.
+    """
+    import sqlalchemy
+
+    cfg = _resolve(node.config, _subs(ctx))
+    conn = _connection(node, ctx, cfg, "external_db")
+    url = conn.get("url")
+    if not url:
+        raise FlowError(node.id, f"connection '{conn['_name']}' is missing a url")
+    query = (cfg.get("query") or "").strip()
+    if not query:
+        raise FlowError(node.id, "an external_db node needs a `query`")
+    params = {str(k): v for k, v in (cfg.get("params") or {}).items()}
+
+    engine = sqlalchemy.create_engine(url)
+    try:
+        with engine.connect() as c:
+            result = c.execute(sqlalchemy.text(query), params)
+            cols = list(result.keys())
+            rows = [dict(zip(cols, r)) for r in result.fetchmany(MAX_ROWS + 1)]
+    except FlowError:
+        raise
+    except Exception as e:  # noqa: BLE001 — a bad DSN/query must name the node
+        raise FlowError(node.id, f"{type(e).__name__} querying '{conn['_name']}': {e}")
+    finally:
+        engine.dispose()
+
+    if len(rows) > MAX_ROWS:
+        raise FlowError(node.id, f"the query returned more than {MAX_ROWS} rows — "
+                                 f"add a LIMIT or narrow the `params`")
+    if not rows:
+        # A genuinely empty list of records, not one record with empty items:
+        # `records_to_frame` treats the latter as one blank row (`or [{}]`),
+        # which would misreport "no match" as "one empty row".
+        return NodeResult(records=[], meta={"rows": 0})
+    rows = [{k: ("" if v is None else str(v)) for k, v in r.items()} for r in rows]
+    return NodeResult(records=[{"head": {}, "items": rows}], meta={"rows": len(rows)})
+
+
+def _brick_external_db_write(node: FlowNode, inputs: List[dict], ctx: RunContext) -> NodeResult:
+    """
+    Terminal: write into a table of an external database.
+
+    The target table is reflected from the database itself, so column types
+    come from there rather than being guessed, and the whole write happens
+    inside one transaction — a failure partway through must never leave the
+    external table half-written, the same "a partial load writes nothing"
+    rule the internal `dataset_write` brick follows.
+    """
+    import sqlalchemy
+
+    cfg = _resolve(node.config, _subs(ctx))
+    conn = _connection(node, ctx, cfg, "external_db")
+    url = conn.get("url")
+    if not url:
+        raise FlowError(node.id, f"connection '{conn['_name']}' is missing a url")
+    table_name = (cfg.get("table") or "").strip()
+    if not table_name:
+        raise FlowError(node.id, "an external_db_write node needs a `table`")
+    mode = (cfg.get("mode") or "insert").lower()
+    if mode not in ("insert", "upsert"):
+        raise FlowError(node.id, f"unknown mode '{mode}' (insert or upsert)")
+    key_fields = [str(c) for c in (cfg.get("key_fields") or [])]
+    if mode == "upsert" and not key_fields:
+        raise FlowError(node.id, "upsert needs `key_fields`")
+
+    records = _merge(inputs)
+    df = pivot_service.records_to_frame(records).drop(columns=["_doc"], errors="ignore")
+    columns = [str(c) for c in (cfg.get("columns") or df.columns.tolist())]
+    missing = [c for c in columns if c not in df.columns]
+    if missing:
+        raise FlowError(node.id, f"column(s) not in the data: {', '.join(missing)}")
+    rows = df[columns].to_dict(orient="records")
+
+    engine = sqlalchemy.create_engine(url)
+    try:
+        metadata = sqlalchemy.MetaData()
+        try:
+            table = sqlalchemy.Table(table_name, metadata, autoload_with=engine)
+        except Exception as e:  # noqa: BLE001
+            raise FlowError(node.id, f"table '{table_name}' not found: {e}")
+        with engine.begin() as tx:
+            if mode == "upsert" and rows:
+                for batch in _chunks(rows, 500):
+                    cond = sqlalchemy.or_(*[
+                        sqlalchemy.and_(*[table.c[k] == r[k] for k in key_fields])
+                        for r in batch])
+                    tx.execute(table.delete().where(cond))
+            if rows:
+                tx.execute(table.insert(), rows)
+    except FlowError:
+        raise
+    except Exception as e:  # noqa: BLE001
+        raise FlowError(node.id, f"{type(e).__name__} writing to '{table_name}': {e}")
+    finally:
+        engine.dispose()
+    return NodeResult(records=records,
+                      meta={"table": table_name, "written": len(rows), "mode": mode})
+
+
+def _brick_sftp(node: FlowNode, inputs: List[dict], ctx: RunContext) -> NodeResult:
+    """
+    Pick up the oldest file waiting on an SFTP connection and parse it — the
+    remote sibling of `hotfolder`. Same FIFO pick (oldest mtime), same parser
+    (`FileService`), so the two behave identically apart from where the file
+    lives. Which file was taken is remembered on `ctx.sftp_picks` so the
+    caller can move it once the whole run's outcome is known.
+    """
+    import fnmatch
+    import io
+    import stat
+
+    import paramiko
+
+    from app.services.file_service import FileService
+
+    cfg = _resolve(node.config, _subs(ctx))
+    conn = _connection(node, ctx, cfg, "sftp")
+    host, user = conn.get("host"), conn.get("user")
+    remote_dir, archive_dir, error_dir = (conn.get("remote_dir"), conn.get("archive_dir"),
+                                          conn.get("error_dir"))
+    if not (host and user and remote_dir and archive_dir and error_dir):
+        raise FlowError(node.id, f"connection '{conn['_name']}' is missing "
+                                 f"host/user/remote_dir/archive_dir/error_dir")
+    port = int(conn.get("port") or 22)
+    pattern = cfg.get("pattern") or "*"
+    required = cfg.get("required", True)
+
+    transport = paramiko.Transport((host, port))
+    try:
+        if conn.get("private_key"):
+            pkey = paramiko.RSAKey.from_private_key(io.StringIO(conn["private_key"]))
+            transport.connect(username=user, pkey=pkey)
+        else:
+            transport.connect(username=user, password=conn.get("password") or "")
+        sftp = paramiko.SFTPClient.from_transport(transport)
+        try:
+            entries = [e for e in sftp.listdir_attr(remote_dir)
+                      if not stat.S_ISDIR(e.st_mode) and fnmatch.fnmatch(e.filename, pattern)]
+            if not entries:
+                if required:
+                    raise FlowError(node.id, f"no file matching '{pattern}' in '{remote_dir}'")
+                return NodeResult(records=[], meta={"rows": 0, "picked": None})
+            picked = min(entries, key=lambda e: e.st_mtime)
+            remote_path = remote_dir.rstrip("/") + "/" + picked.filename
+            buf = io.BytesIO()
+            sftp.getfo(remote_path, buf)
+            raw = buf.getvalue()
+        finally:
+            sftp.close()
+    except FlowError:
+        raise
+    except Exception as e:  # noqa: BLE001
+        raise FlowError(node.id, f"{type(e).__name__} on connection '{conn['_name']}': {e}")
+    finally:
+        transport.close()
+
+    file_type = (cfg.get("file_type") or "csv").lower()
+    files = FileService()
+    if file_type == "csv":
+        df, _enc, _delim = files.load_csv_raw(raw, cfg.get("encoding") or "AUTO",
+                                              cfg.get("delimiter") or None)
+    elif file_type == "xlsx":
+        df = files.load_xlsx_raw(raw, cfg.get("sheet") or 0)
+    else:
+        raise FlowError(node.id, f"unsupported file_type '{file_type}' (csv or xlsx)")
+
+    ctx.sftp_picks.append({"node": node.id, "connection": conn["_name"], "path": remote_path,
+                          "archive_dir": archive_dir, "error_dir": error_dir})
+    rows = df.astype(str).to_dict(orient="records")
+    return NodeResult(records=[{"head": {}, "items": rows}],
+                      meta={"picked": picked.filename, "rows": len(rows)})
+
+
+def _brick_sftp_write(node: FlowNode, inputs: List[dict], ctx: RunContext) -> NodeResult:
+    """Terminal: upload the current data as a CSV to an SFTP connection —
+    the remote sibling of `file`/`dataset_write`."""
+    import io
+
+    import paramiko
+
+    cfg = _resolve(node.config, _subs(ctx))
+    conn = _connection(node, ctx, cfg, "sftp")
+    host, user = conn.get("host"), conn.get("user")
+    remote_dir = conn.get("remote_dir")
+    if not (host and user and remote_dir):
+        raise FlowError(node.id, f"connection '{conn['_name']}' is missing host/user/remote_dir")
+    port = int(conn.get("port") or 22)
+    filename = cfg.get("filename") or "flow.csv"
+
+    records = _merge(inputs)
+    df = pivot_service.records_to_frame(records).drop(columns=["_doc"], errors="ignore")
+    content = df.to_csv(sep=cfg.get("sep") or ";", index=False).encode("utf-8-sig")
+
+    transport = paramiko.Transport((host, port))
+    try:
+        if conn.get("private_key"):
+            pkey = paramiko.RSAKey.from_private_key(io.StringIO(conn["private_key"]))
+            transport.connect(username=user, pkey=pkey)
+        else:
+            transport.connect(username=user, password=conn.get("password") or "")
+        sftp = paramiko.SFTPClient.from_transport(transport)
+        try:
+            sftp.putfo(io.BytesIO(content), remote_dir.rstrip("/") + "/" + str(filename))
+        finally:
+            sftp.close()
+    except Exception as e:  # noqa: BLE001
+        raise FlowError(node.id, f"{type(e).__name__} uploading to '{conn['_name']}': {e}")
+    finally:
+        transport.close()
+    return NodeResult(records=records, meta={"filename": filename, "rows": int(len(df))})
+
+
 BRICKS: Dict[str, Callable[[FlowNode, List[dict], RunContext], NodeResult]] = {
     "inline": _brick_inline,
     "hotfolder": _brick_hotfolder,
@@ -945,6 +1190,10 @@ BRICKS: Dict[str, Callable[[FlowNode, List[dict], RunContext], NodeResult]] = {
     "file": _brick_file,
     "http": _brick_http,
     "email": _brick_email,
+    "external_db": _brick_external_db,
+    "external_db_write": _brick_external_db_write,
+    "sftp": _brick_sftp,
+    "sftp_write": _brick_sftp_write,
 }
 
 
@@ -956,6 +1205,10 @@ def _merge(inputs: List[dict]) -> List[dict]:
     is a different operation and deserves its own brick rather than being an
     implicit surprise here."""
     return list(inputs)
+
+
+def _chunks(rows: List[dict], size: int) -> List[List[dict]]:
+    return [rows[i:i + size] for i in range(0, len(rows), size)]
 
 
 def _load_mapping(node: FlowNode, cfg: dict, ctx: RunContext) -> Mapping:

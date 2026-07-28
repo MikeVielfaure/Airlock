@@ -376,12 +376,19 @@ def list_writes(s: Session, dataset_id: Optional[str] = None, limit: int = 30) -
 # ══════════════════════════════════════════════════════════════════
 SCOPES = ("global", "environment", "flow", "brick")
 # "value" is a plain string. Anything else means the stored value is a JSON
-# object with these keys, all required — sftp/sharepoint/api are reserved
-# names for later, not yet backed by a brick.
-KINDS = ("value", "hotfolder", "smtp")
+# object with these keys, all required (other kind-specific fields — port,
+# password, private_key… — are optional and validated by the brick that uses
+# them, not here).
+KINDS = ("value", "hotfolder", "smtp", "external_db", "sftp", "api")
 KIND_SCHEMAS: dict[str, tuple[str, ...]] = {
     "hotfolder": ("path", "archive_dir", "error_dir"),
     "smtp": ("host",),
+    # A full SQLAlchemy DSN — no dialect hard-coded, so the brick reuses
+    # create_engine() exactly as app/db.py does for the app's own database.
+    # The operator installs whichever driver the DSN's dialect needs.
+    "external_db": ("url",),
+    "sftp": ("host", "user", "remote_dir", "archive_dir", "error_dir"),
+    "api": ("base_url",),
 }
 _MASK = "••••••"
 

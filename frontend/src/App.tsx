@@ -78,6 +78,7 @@ export default function App() {
   const [fields, setFields] = useState<Record<string, FieldConfig>>({});
   const [tco, setTco] = useState<TcoResponse | null>(null);
   const [computed, setComputed] = useState<ComputedColumn[]>([]);
+  const [sqlComputed, setSqlComputed] = useState<ComputedColumn[]>([]);
   const [result, setResult] = useState<ProcessResponse | null>(null);
 
   const [tab, setTab] = useState<Tab>(() => {
@@ -352,7 +353,8 @@ export default function App() {
       const idField = visible.find((c) => fields[c]?.identifiant) ?? null;
       const visFields = Object.fromEntries(visible.filter((c) => fields[c]).map((c) => [c, fields[c]]));
       const validComputed = computed.filter((c) => c.name.trim() && c.expression.trim());
-      const res = await api.process(sid, { visible_cols: visible, fields: visFields, identifier_field: idField, computed: validComputed, variables: configVariables });
+      const validSqlComputed = sqlComputed.filter((c) => c.name.trim() && c.expression.trim());
+      const res = await api.process(sid, { visible_cols: visible, fields: visFields, identifier_field: idField, computed: validComputed, sql_computed: validSqlComputed, variables: configVariables });
       setResult(res);
       setTab("data");
       (res.warnings ?? []).forEach((w) => toast(w, "info"));
@@ -361,7 +363,7 @@ export default function App() {
       else toast(`Validated — ${res.stats.rows_err} rows with errors, ${res.stats.rows_clean} cleaned.`, res.stats.rows_err ? "info" : "ok");
     } catch (e) { toast(String((e as Error).message), "err"); }
     finally { setRunning(false); }
-  }, [sid, visible, fields, computed, configVariables, toast]);
+  }, [sid, visible, fields, computed, sqlComputed, configVariables, toast]);
 
   // ── yaml import ──────────────────────────────────────────
   const onImportYaml = useCallback(async (text: string) => {
@@ -770,12 +772,14 @@ export default function App() {
                     : tab === "admin" ? <AdminPanel me={me} notify={toast}
                                                      onIdentityChange={() => window.location.reload()} />
                     : tab === "ops" ? <OpsPanel notify={toast} />
-                    : tab === "canvas" ? <FlowCanvas notify={toast} />
+                    : tab === "canvas" ? <FlowCanvas notify={toast}
+                        onOpenSession={(res) => { adoptSession(res, "flux"); setTab("schema"); }} />
                     : tab === "functions" ? <FunctionsPanel notify={toast} />
                     : tab === "report" ? <ReportPanel result={result} sid={sid} notify={toast} onLoadReport={loadReport} />
                     : tab === "computed" ? (
-                        <ComputedPanel notify={toast} columns={effectiveColumns} computed={computed}
-                          setComputed={setComputed} variables={configVariables}
+                        <ComputedPanel sid={sid} notify={toast} columns={effectiveColumns} computed={computed}
+                          setComputed={setComputed} sqlComputed={sqlComputed} setSqlComputed={setSqlComputed}
+                          variables={configVariables}
                           setVariables={setConfigVariables} errors={result?.compute_errors ?? {}} />
                       )
                     : tab === "yaml" ? (
@@ -824,7 +828,8 @@ export default function App() {
                   />
                 )}
                 {tab === "computed" && (
-                  <ComputedPanel notify={toast} columns={effectiveColumns} computed={computed} setComputed={setComputed}
+                  <ComputedPanel sid={sid} notify={toast} columns={effectiveColumns} computed={computed} setComputed={setComputed}
+                    sqlComputed={sqlComputed} setSqlComputed={setSqlComputed}
                     variables={configVariables} setVariables={setConfigVariables}
                     errors={result?.compute_errors ?? {}} />
                 )}
@@ -842,7 +847,8 @@ export default function App() {
                 {tab === "report" && <ReportPanel result={result} sid={sid} notify={toast} onLoadReport={loadReport} />}
                 {tab === "flows" && <FlowsPanel notify={toast} onOpenReport={loadReport} />}
                 {tab === "edi" && <EdiPanel notify={toast} onSession={adoptSession} />}
-                {tab === "canvas" && <FlowCanvas notify={toast} />}
+                {tab === "canvas" && <FlowCanvas notify={toast}
+                    onOpenSession={(res) => { adoptSession(res, "flux"); setTab("schema"); }} />}
                 {tab === "functions" && <FunctionsPanel notify={toast} />}
                 {tab === "ops" && <OpsPanel notify={toast} />}
                 {tab === "admin" && (
