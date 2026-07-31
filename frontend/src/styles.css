@@ -841,11 +841,19 @@ pre.yaml .k { color: #8db4ff; }
 .ds-writes tr.ko td { background: var(--err-bg); color: var(--err); }
 
 /* per-row delete, inside the row-number gutter */
+.rowops { display: flex; gap: 2px; align-items: center; }
 .rowdel {
   border: none; background: transparent; color: var(--err); cursor: pointer;
   font-size: 12px; line-height: 1; padding: 2px 4px; border-radius: 4px;
 }
 .rowdel:hover { background: var(--err-bg); }
+.rowdup {
+  border: none; background: transparent; color: var(--ink-soft); cursor: pointer;
+  font-size: 12px; line-height: 1; padding: 2px 4px; border-radius: 4px;
+}
+.rowdup:hover { background: var(--panel-2); color: var(--accent); }
+.vtd.rownum[draggable="true"] { cursor: grab; }
+.vtd.rownum.dragging { opacity: .4; }
 .btn.sm.danger { color: var(--err); border-color: var(--err-line); }
 .btn.sm.danger:hover { background: var(--err-bg); }
 

@@ -430,6 +430,7 @@ export interface RowsMutationResponse {
   deleted_total: number;
   added_total: number;
   stale: boolean;              // a run happened before this change
+  new_indices: number[];       // stable index of each row just added, in order
 }
 
 

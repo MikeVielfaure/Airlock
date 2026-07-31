@@ -261,6 +261,15 @@ class RowsMutationResponse(BaseModel):
     deleted_total: int                      # logically removed, still restorable
     added_total: int
     stale: bool
+    # The stable index of each row just added, in order — lets a caller (e.g.
+    # a table paste) fill their cells right after, without guessing which
+    # indices `new_index()` handed out.
+    new_indices: List[int] = Field(default_factory=list)
+
+
+class ReorderRowRequest(BaseModel):
+    index: int
+    after: Optional[int] = None             # None = move to the very start
 
 
 class ExpressionCheck(BaseModel):

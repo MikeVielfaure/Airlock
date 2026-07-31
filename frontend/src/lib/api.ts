@@ -709,6 +709,14 @@ export const api = {
       body: JSON.stringify({ indices }),
     }).then((r) => json<RowsMutationResponse>(r)),
 
+  /** Move a row to sit right after another (or to the start when `after` is
+   * null) — a real permutation of the session's row order. */
+  reorderRow: (sid: string, index: number, after: number | null) =>
+    fetch(`${BASE}/files/${sid}/rows/reorder`, {
+      method: "POST", headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ index, after }),
+    }).then((r) => json<TablePreview>(r)),
+
   // ── datasets ──────────────────────────────────────────────────
   /** Open a stored table as an ordinary working session. */
   openDataset: (id: string) =>

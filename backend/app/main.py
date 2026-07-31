@@ -27,7 +27,7 @@ from app.models import (
     ExportRequest, ExportResponse, ExpressionCheck, ExpressionResult,
     FieldConfig, FileResponse, HeaderRequest, ImportRequest, ImportResponse,
     MatchInfo, Presets, ProcessRequest, ProcessResponse, ProcessStats, RowsResponse, TablePreview, TcoResponse,
-    PipelineResponse, SourceInfo, AttachDatasetSource,
+    PipelineResponse, SourceInfo, AttachDatasetSource, ReorderRowRequest,
 )
 from app.services.config_service import ConfigService
 from app.services.file_service import FileService
@@ -719,7 +719,7 @@ def add_rows(sid: str, req: AddRowsRequest,
     block = pd.DataFrame([template] * n, index=new_idx).astype(str)
     sess.work_df = pd.concat([sess.work_df, block])
     sess.added.update(new_idx)
-    return _rows_state(sess, added=n)
+    return _rows_state(sess, added=n, new_indices=new_idx)
 
 
 @app.post("/api/files/{sid}/rows/delete", response_model=RowsMutationResponse)
@@ -777,12 +777,37 @@ def restore_rows(sid: str, req: DeleteRowsRequest):
     return _rows_state(sess, restored=len(back))
 
 
-def _rows_state(sess, *, added: int = 0, deleted: int = 0, restored: int = 0) -> RowsMutationResponse:
+@app.post("/api/files/{sid}/rows/reorder", response_model=TablePreview)
+def reorder_row(sid: str, req: ReorderRowRequest, preview_limit: int = 500):
+    """
+    Move one row to sit right after another (or to the very start). A real
+    permutation of `work_df`'s row order — not a display trick — so the new
+    order survives export and writing to a table, exactly like a hand-typed
+    or reloaded file would read back in whatever order its rows were in.
+    """
+    sess = _session(sid)
+    order = list(sess.work_df.index)
+    if req.index not in order:
+        raise HTTPException(404, f"Row {req.index} does not exist.")
+    order.remove(req.index)
+    if req.after is None:
+        order.insert(0, req.index)
+    else:
+        if req.after not in order:
+            raise HTTPException(404, f"Row {req.after} does not exist.")
+        order.insert(order.index(req.after) + 1, req.index)
+    sess.work_df = sess.work_df.loc[order]
+    return _preview(sess.active_df(), preview_limit)
+
+
+def _rows_state(sess, *, added: int = 0, deleted: int = 0, restored: int = 0,
+                new_indices: list | None = None) -> RowsMutationResponse:
     return RowsMutationResponse(
         added=added, deleted=deleted, restored=restored,
         total_rows=int(len(sess.active_df())),
         deleted_total=len(sess.deleted), added_total=len(sess.added),
         stale=sess.last_df is not None,
+        new_indices=list(new_indices or []),
     )
 
 
@@ -1154,6 +1179,22 @@ def export_table(
         out_df = _apply_filters(out_df, fmap or {})
 
     safe = "".join(ch for ch in filename if ch.isalnum() or ch in (" ", "-", "_")).strip() or "export"
+
+    if fmt.lower() == "pivot":
+        # No mapping to build by hand for a plain export: every visible column
+        # becomes an item-scope link and nothing groups into a head, so
+        # flat_to_pivot folds the whole table into one head-less document —
+        # exactly the generic {head, items} shape, reusing the real engine.
+        from app.mapping_models import Mapping, MappingLink
+        from app.services import pivot_service
+        identity = Mapping(name="export", links=[
+            MappingLink(pivot=str(c), source=str(c), scope="item") for c in out_df.columns])
+        records = pivot_service.flat_to_pivot(out_df, identity, group_by="")
+        content = json.dumps(records, ensure_ascii=False, indent=2)
+        return StreamingResponse(
+            io.BytesIO(content.encode("utf-8")), media_type="application/json",
+            headers={"Content-Disposition": f'attachment; filename="{safe}.json"'},
+        )
 
     if fmt.lower() == "xlsx":
         buf = io.BytesIO()

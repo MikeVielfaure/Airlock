@@ -75,6 +75,28 @@ function matchFilter(value: string, expr: string): boolean {
   return low.includes(sl);
 }
 
+/** Which delimiter a pasted block actually uses: whichever of tab / `;` / `,`
+ * splits every non-empty line into the same (>1) number of fields, tab
+ * winning ties — the standard shape a spreadsheet's own copy produces. */
+function detectDelimiter(text: string): string {
+  const lines = text.split(/\r\n|\n/).filter((l) => l.length > 0).slice(0, 20);
+  if (lines.length === 0) return "\t";
+  let best = "\t", bestScore = 0;
+  for (const d of ["\t", ";", ","]) {
+    const counts = lines.map((l) => l.split(d).length);
+    const consistent = counts.every((c) => c === counts[0]) && counts[0] > 1;
+    const score = consistent ? counts[0] : 0;
+    if (score > bestScore) { bestScore = score; best = d; }
+  }
+  return best;
+}
+
+/** Parse a clipboard table into rows of cells using the detected delimiter. */
+function parsePastedTable(text: string): string[][] {
+  const delim = detectDelimiter(text);
+  return text.split(/\r\n|\n/).filter((l) => l.length > 0).map((l) => l.split(delim));
+}
+
 export function DataTable(props: Props) {
   const { preview, result, fieldTypes, onRun, running, canRun, sid, defaultName, originEncoding, originDelimiter, filters, setFilters, srcOf, notify, onResetEdits, onRowsChanged, deletedTotal } = props;
   const columns = result ? result.columns : preview?.columns ?? [];
@@ -85,6 +107,7 @@ export function DataTable(props: Props) {
   const [sort, setSort] = useState<Sort>(null);
   const [order, setOrder] = useState<number[]>([]);
   const [drag, setDrag] = useState<number | null>(null);
+  const [dragRow, setDragRow] = useState<number | null>(null);
   const [scrollTop, setScrollTop] = useState(0);
   const [viewH, setViewH] = useState(440);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -93,7 +116,7 @@ export function DataTable(props: Props) {
   const validEnc = ENCODINGS.includes(originEncoding) ? originEncoding : "utf-8";
   const validDelim = originDelimiter in DELIMS ? originDelimiter : ";";
   const [name, setName] = useState(defaultName);
-  const [fmt, setFmt] = useState<"csv" | "xlsx">("csv");
+  const [fmt, setFmt] = useState<"csv" | "xlsx" | "pivot">("csv");
   const [enc, setEnc] = useState(validEnc);
   const [delim, setDelim] = useState(validDelim);
   const [onlyFiltered, setOnlyFiltered] = useState(false);
@@ -258,6 +281,54 @@ export function DataTable(props: Props) {
     setDrag(null);
   };
 
+  const onDropRow = async (target: number) => {
+    const from = dragRow;
+    setDragRow(null);
+    if (from === null || from === target || !sid) return;
+    try {
+      await api.reorderRow(sid, from, target);
+      await onRowsChanged();
+    } catch (e) { notify(e instanceof Error ? e.message : "Reorder failed", "err"); }
+  };
+
+  const duplicateRow = async (idx: number) => {
+    if (!sid) return;
+    try {
+      const r = await api.addRows(sid, 1, idx);
+      await onRowsChanged(r);
+      notify("Ligne dupliquée.", "ok");
+    } catch (e) { notify(e instanceof Error ? e.message : String(e), "err"); }
+  };
+
+  // Paste always appends new rows at the end — never overwrites existing
+  // ones — so pasting a large block never depends on knowing which row
+  // visually follows which once sorting/filtering/pagination are involved.
+  const pasteIntoTable = async (startCi: number, text: string) => {
+    if (!sid) return;
+    const grid = parsePastedTable(text);
+    if (grid.length === 0 || (grid.length === 1 && grid[0].length <= 1)) return false;
+    const targetCols = colIdx.slice(colIdx.indexOf(startCi))
+      .slice(0, grid[0].length)
+      .map((ci) => columns[ci]);
+    if (targetCols.length === 0) return false;
+    try {
+      const added = await api.addRows(sid, grid.length);
+      const edits: { index: number; column: string; value: string }[] = [];
+      grid.forEach((row, ri) => {
+        const idx = added.new_indices[ri];
+        if (idx === undefined) return;
+        targetCols.forEach((col, ci) => {
+          if (row[ci] === undefined || !editableCol(col)) return;
+          edits.push({ index: idx, column: srcOf[col], value: row[ci] });
+        });
+      });
+      if (edits.length) await api.editCells(sid, edits);
+      await onRowsChanged(added);
+      notify(`${grid.length} ligne(s) collée(s).`, "ok");
+    } catch (e) { notify(e instanceof Error ? e.message : "Paste failed", "err"); }
+    return true;
+  };
+
   const doExport = () => {
     if (!sid) return;
     const qs = new URLSearchParams({ fmt, encoding: enc, delimiter: delim, filename: name || "export" });
@@ -419,16 +490,23 @@ export function DataTable(props: Props) {
           <div style={{ height: start * ROW_H }} />
           {rows.slice(start, end).map((row, k) => (
             <div key={start + k} className="vtr" style={{ gridTemplateColumns: gridCols, height: ROW_H }}>
-              <div className="vtd rownum">
+              <div className={`vtd rownum ${dragRow === row.idx ? "dragging" : ""}`}
+                draggable={editMode && row.idx >= 0}
+                onDragStart={() => setDragRow(row.idx)}
+                onDragOver={(e) => { if (editMode) e.preventDefault(); }}
+                onDrop={() => onDropRow(row.idx)}>
                 {editMode && row.idx >= 0 ? (
-                  <button className="rowdel" title="Supprimer cette ligne (réversible)"
-                    onClick={async () => {
-                      if (!sid) return;
-                      try {
-                        const st = await api.deleteRows(sid, [row.idx]);
-                        await onRowsChanged(st);
-                      } catch (e) { notify(e instanceof Error ? e.message : String(e), "err"); }
-                    }}>✕</button>
+                  <span className="rowops">
+                    <button className="rowdup" title="Dupliquer cette ligne" onClick={() => duplicateRow(row.idx)}>⧉</button>
+                    <button className="rowdel" title="Supprimer cette ligne (réversible)"
+                      onClick={async () => {
+                        if (!sid) return;
+                        try {
+                          const st = await api.deleteRows(sid, [row.idx]);
+                          await onRowsChanged(st);
+                        } catch (e) { notify(e instanceof Error ? e.message : String(e), "err"); }
+                      }}>✕</button>
+                  </span>
                 ) : row.num}
               </div>
               {colIdx.map((ci) => {
@@ -447,6 +525,15 @@ export function DataTable(props: Props) {
                         onKeyDown={(e) => {
                           if (e.key === "Enter") commitEdit(editing.idx, ci, editing.val);
                           else if (e.key === "Escape") setEditing(null);
+                        }}
+                        onPaste={(e) => {
+                          const text = e.clipboardData.getData("text");
+                          const grid = parsePastedTable(text);
+                          if (grid.length > 1 || grid[0]?.length > 1) {
+                            e.preventDefault();
+                            setEditing(null);
+                            pasteIntoTable(ci, text);
+                          }
                         }}
                         onBlur={() => commitEdit(editing.idx, ci, editing.val)} />
                     </div>
@@ -503,16 +590,17 @@ export function DataTable(props: Props) {
             <div className="frow"><label>File name</label>
               <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="export" /></div>
             <div className="frow"><label>Format</label>
-              <select value={fmt} onChange={(e) => setFmt(e.target.value as "csv" | "xlsx")}>
+              <select value={fmt} onChange={(e) => setFmt(e.target.value as "csv" | "xlsx" | "pivot")}>
                 <option value="csv">CSV</option>
                 <option value="xlsx">Excel (.xlsx)</option>
+                <option value="pivot">Pivot (.json)</option>
               </select></div>
             <div className="frow"><label>Encoding</label>
-              <select value={enc} onChange={(e) => setEnc(e.target.value)} disabled={fmt === "xlsx"}>
+              <select value={enc} onChange={(e) => setEnc(e.target.value)} disabled={fmt !== "csv"}>
                 {ENCODINGS.map((x) => <option key={x} value={x}>{x}</option>)}
               </select></div>
             <div className="frow"><label>Delimiter</label>
-              <select value={delim} onChange={(e) => setDelim(e.target.value)} disabled={fmt === "xlsx"}>
+              <select value={delim} onChange={(e) => setDelim(e.target.value)} disabled={fmt !== "csv"}>
                 {Object.entries(DELIMS).map(([v, lbl]) => <option key={v} value={v}>{lbl}</option>)}
               </select></div>
             <label className="check" style={{ alignSelf: "end", opacity: anyFilter ? 1 : 0.5 }}>
