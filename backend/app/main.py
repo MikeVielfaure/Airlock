@@ -851,7 +851,8 @@ def process(sid: str, req: ProcessRequest,
             tco_df=sess.tco_df,
             identifier_fields=id_fields,
             computed=[(c.name, c.expression) for c in req.computed],
-            sql_computed=[(c.name, c.expression) for c in req.sql_computed],
+            sql_computed=[(c.name, c.expression, c.mode) for c in req.sql_computed],
+            style_rules=[(r.column, r.expression) for r in req.style_rules],
             attached=sess.attached,
             sensitive_cols=declared_sensitive,
             report_flagged_only=True,
@@ -874,6 +875,7 @@ def process(sid: str, req: ProcessRequest,
         sess.last_validation = validation                         # for paginated row fetches
         sess.last_clean_mask = clean_mask
         sess.last_computed = computed_names
+        sess.last_styles = result.get("styles", {})               # for paginated row fetches
         sess.last_report = result["report"]                       # full report for /report
         sess.identifier_fields = id_fields
 
@@ -911,11 +913,13 @@ def process(sid: str, req: ProcessRequest,
             sess.history.append({"op": "sql_compute", "columns": list(sql_names)})
         head = df_post[cols].head(req.preview_limit) if cols else df_post.head(0)
 
-        data, status, row_index = [], [], []
+        styles_by_col = result.get("styles") or {}
+        data, status, styles, row_index = [], [], [], []
         for idx, row in zip(head.index, head.itertuples(index=False, name=None)):
             row_index.append(int(idx))
             data.append([_cell(v) for v in row])
             row_status = []
+            row_styles = []
             for col in cols:
                 if col in computed_names:
                     row_status.append("COMPUTED")
@@ -924,7 +928,11 @@ def process(sid: str, req: ProcessRequest,
                 res = v_series.get(idx, "OK") if v_series is not None else "OK"
                 clean = bool(clean_mask.get(col, pd.Series(dtype=bool)).get(idx, False))
                 row_status.append(_status_of(str(res), clean))
+            for col in cols:
+                tok = styles_by_col.get(col)
+                row_styles.append(str(tok.get(idx, "")) if tok is not None else "")
             status.append(row_status)
+            styles.append(row_styles)
 
         report = result["report"]
         if len(report) > _REPORT_CAP:
@@ -956,6 +964,8 @@ def process(sid: str, req: ProcessRequest,
         columns=cols,
         data=data,
         status=status,
+        styles=styles,
+        style_errors=result.get("style_errors", {}),
         index=row_index,
         computed=computed_names,
         compute_errors=result["compute_errors"],
@@ -1021,12 +1031,14 @@ def get_rows(
     validation = sess.last_validation or {}
     clean_mask = sess.last_clean_mask or {}
     computed = set(sess.last_computed or [])
+    styles_by_col = sess.last_styles or {}    # cached at /process — never recomputed here
 
-    data, status, row_index = [], [], []
+    data, status, styles, row_index = [], [], [], []
     for idx, row in zip(page.index, page.itertuples(index=False, name=None)):
         row_index.append(int(idx))
         data.append([_cell(v) for v in row])
         row_status = []
+        row_styles = []
         for col in cols:
             if col in computed:
                 row_status.append("COMPUTED")
@@ -1035,10 +1047,14 @@ def get_rows(
             res = v_series.get(idx, "OK") if v_series is not None else "OK"
             clean = bool(clean_mask.get(col, pd.Series(dtype=bool)).get(idx, False))
             row_status.append(_status_of(str(res), clean))
+        for col in cols:
+            tok = styles_by_col.get(col)
+            row_styles.append(str(tok.get(idx, "")) if tok is not None else "")
         status.append(row_status)
+        styles.append(row_styles)
 
     return RowsResponse(
-        columns=cols, data=data, status=status,
+        columns=cols, data=data, status=status, styles=styles,
         total=total, total_all=total_all, offset=offset, limit=limit,
         index=row_index,
     )

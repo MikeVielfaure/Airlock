@@ -66,6 +66,33 @@ def test_a_sql_block_result_is_available_to_a_plain_expression_afterwards():
     assert "fr-france-brut" in str(body["data"]).lower()
 
 
+def test_fill_empty_completes_a_gap_without_overwriting_existing_values():
+    """The nom/prénom/âge case: age is known for one row and missing for
+    another; completing from a source must never clobber the row that
+    already had a real value."""
+    csv = "NOM;PRENOM;AGE\nDupont;Alice;34\nMartin;Bob;\n"
+    sid = _upload(csv)
+    r = client.post(f"/api/files/{sid}/sources/upload", data={"name": "annuaire"},
+                    files={"file": ("a.csv", io.BytesIO(
+                        b"NOM;PRENOM;AGE\nDupont;Alice;99\nMartin;Bob;41\n"), "text/csv")})
+    assert r.status_code == 200, r.text
+
+    fields = {"NOM": {"name": ["NOM"], "type": "string", "identifiant": True},
+             "PRENOM": {"name": ["PRENOM"], "type": "string"},
+             "AGE": {"name": ["AGE"], "type": "string"}}
+    r = client.post(f"/api/files/{sid}/process", json={
+        "visible_cols": ["NOM", "PRENOM", "AGE"], "fields": fields,
+        "sql_computed": [{"name": "age", "mode": "fill_empty", "expression":
+            "SELECT self._row_id, annuaire.AGE FROM self "
+            "LEFT JOIN annuaire ON self.NOM = annuaire.NOM AND self.PRENOM = annuaire.PRENOM"}]})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert not body["compute_errors"]
+    age_col = body["columns"].index("AGE")
+    ages = [row[age_col] for row in body["data"]]
+    assert ages == ["34", "41"]   # Dupont's real age survives, Martin's gap is filled
+
+
 def test_a_sql_block_leaves_a_reproducible_history_entry():
     sid = _upload()
     client.post(f"/api/files/{sid}/process", json={

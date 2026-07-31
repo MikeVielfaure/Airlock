@@ -16,6 +16,9 @@ export type CellStatus =
 export interface ComputedColumn {
   name: string;
   expression: string;
+  // Only meaningful for a SQL block: "replace" (default) overwrites the
+  // target column row by row; "fill_empty" only touches blank cells.
+  mode?: "replace" | "fill_empty";
 }
 
 /** An extra frame attached to a session for cross-source SQL. */
@@ -101,6 +104,10 @@ export interface ProcessResponse {
   columns: string[];
   data: string[][];
   status: CellStatus[][];
+  // Per-cell style token ("color:x;bold:1;italic:0" or a bare color name),
+  // aligned to `data` like `status` — "" means no rule applied.
+  styles?: string[][];
+  style_errors?: Record<string, string>;
   computed: string[];
   compute_errors: Record<string, string>;
   stats: ProcessStats;
@@ -114,11 +121,18 @@ export interface RowsResponse {
   columns: string[];
   data: string[][];
   status: CellStatus[][];
+  styles?: string[][];
   total: number;
   total_all: number;
   offset: number;
   limit: number;
   index: number[];               // df index per row of the page
+}
+
+/** How an existing column should look, not what it should contain. */
+export interface StyleRule {
+  column: string;
+  expression: string;
 }
 
 export interface TcoResponse {

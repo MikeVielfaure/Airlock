@@ -515,6 +515,12 @@ pre.yaml .k { color: #8db4ff; }
 .valid { font-size: 11.5px; font-family: var(--mono); }
 .valid.ok { color: var(--ok); }
 .valid.err { color: var(--err); }
+.sql-assistant {
+  border: 1px dashed var(--line-strong); border-radius: var(--r-sm);
+  padding: 10px; margin-bottom: 10px; display: flex; flex-direction: column; gap: 6px;
+}
+.sql-pair { display: flex; align-items: center; gap: 6px; }
+.sql-pair select { flex: 1; min-width: 0; }
 .chipbar { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; margin-top: 9px; }
 .chiplabel { font-size: 11px; color: var(--ink-faint); }
 .microchip {

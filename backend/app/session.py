@@ -37,6 +37,7 @@ class Session:
     last_validation: Optional[dict] = None      # final col -> status Series (full file)
     last_clean_mask: Optional[dict] = None      # final col -> bool Series (full file)
     last_computed: Optional[list] = None        # names of computed columns
+    last_styles: Optional[dict] = None          # col -> per-row style token Series, of last run
     last_report: Optional[pd.DataFrame] = None  # full report DataFrame of last run
     identifier_fields: Optional[list] = None     # id columns used in last run
     last_field_types: Optional[dict] = None      # col -> declared type; the config IS the schema

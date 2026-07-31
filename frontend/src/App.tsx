@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, setEnvironment, setToken } from "./lib/api";
 import {
   defaultField, defaultHeader,
-  type ComputedColumn,
+  type ComputedColumn, type StyleRule,
   type FieldConfig, type FieldType, type HeaderConfig, type Presets,
   type EnvProfile,
   type FileResponse, type RowsMutationResponse,
@@ -79,6 +79,7 @@ export default function App() {
   const [tco, setTco] = useState<TcoResponse | null>(null);
   const [computed, setComputed] = useState<ComputedColumn[]>([]);
   const [sqlComputed, setSqlComputed] = useState<ComputedColumn[]>([]);
+  const [styleRules, setStyleRules] = useState<StyleRule[]>([]);
   const [result, setResult] = useState<ProcessResponse | null>(null);
 
   const [tab, setTab] = useState<Tab>(() => {
@@ -354,7 +355,8 @@ export default function App() {
       const visFields = Object.fromEntries(visible.filter((c) => fields[c]).map((c) => [c, fields[c]]));
       const validComputed = computed.filter((c) => c.name.trim() && c.expression.trim());
       const validSqlComputed = sqlComputed.filter((c) => c.name.trim() && c.expression.trim());
-      const res = await api.process(sid, { visible_cols: visible, fields: visFields, identifier_field: idField, computed: validComputed, sql_computed: validSqlComputed, variables: configVariables });
+      const validStyleRules = styleRules.filter((r) => r.column.trim() && r.expression.trim());
+      const res = await api.process(sid, { visible_cols: visible, fields: visFields, identifier_field: idField, computed: validComputed, sql_computed: validSqlComputed, style_rules: validStyleRules, variables: configVariables });
       setResult(res);
       setTab("data");
       (res.warnings ?? []).forEach((w) => toast(w, "info"));
@@ -363,7 +365,7 @@ export default function App() {
       else toast(`Validated — ${res.stats.rows_err} rows with errors, ${res.stats.rows_clean} cleaned.`, res.stats.rows_err ? "info" : "ok");
     } catch (e) { toast(String((e as Error).message), "err"); }
     finally { setRunning(false); }
-  }, [sid, visible, fields, computed, sqlComputed, configVariables, toast]);
+  }, [sid, visible, fields, computed, sqlComputed, styleRules, configVariables, toast]);
 
   // ── yaml import ──────────────────────────────────────────
   const onImportYaml = useCallback(async (text: string) => {
@@ -779,8 +781,10 @@ export default function App() {
                     : tab === "computed" ? (
                         <ComputedPanel sid={sid} notify={toast} columns={effectiveColumns} computed={computed}
                           setComputed={setComputed} sqlComputed={sqlComputed} setSqlComputed={setSqlComputed}
+                          styleRules={styleRules} setStyleRules={setStyleRules}
                           variables={configVariables}
-                          setVariables={setConfigVariables} errors={result?.compute_errors ?? {}} />
+                          setVariables={setConfigVariables} errors={result?.compute_errors ?? {}}
+                          styleErrors={result?.style_errors ?? {}} />
                       )
                     : tab === "yaml" ? (
                         <YamlPanel yaml={yaml} generating={yamlGen} onCopy={copyYaml}
@@ -830,8 +834,9 @@ export default function App() {
                 {tab === "computed" && (
                   <ComputedPanel sid={sid} notify={toast} columns={effectiveColumns} computed={computed} setComputed={setComputed}
                     sqlComputed={sqlComputed} setSqlComputed={setSqlComputed}
+                    styleRules={styleRules} setStyleRules={setStyleRules}
                     variables={configVariables} setVariables={setConfigVariables}
-                    errors={result?.compute_errors ?? {}} />
+                    errors={result?.compute_errors ?? {}} styleErrors={result?.style_errors ?? {}} />
                 )}
                 {tab === "data" && (
                   <DataTable preview={preview} result={result} fieldTypes={fieldTypes}

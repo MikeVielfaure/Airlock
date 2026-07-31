@@ -40,7 +40,8 @@ class BadBody(Exception):
 # ── body normalisation per kind (validate before storing) ─────────────
 def normalise_body(kind: str, *, body: Optional[dict], yaml: Optional[str],
                    computed: Optional[list], csv: Optional[str],
-                   sql_computed: Optional[list] = None) -> dict:
+                   sql_computed: Optional[list] = None,
+                   style_rules: Optional[list] = None) -> dict:
     if kind == "config":
         if yaml is not None:
             try:
@@ -80,11 +81,22 @@ def normalise_body(kind: str, *, body: Optional[dict], yaml: Optional[str],
                 name, expr = it.get("name"), it.get("expression")
                 if name and expr:
                     clean_sql.append({"name": name, "expression": expr})
-        if not clean and not clean_sql:
+        # A style rule's `expression` may itself be a DuckDB query — not run
+        # through the expression validator either, same reasoning as sql_computed.
+        style_items = style_rules if style_rules is not None else (body or {}).get("style_rules")
+        clean_style = []
+        if isinstance(style_items, list):
+            for it in style_items:
+                column, expr = it.get("column"), it.get("expression")
+                if column and expr:
+                    clean_style.append({"column": column, "expression": expr})
+        if not clean and not clean_sql and not clean_style:
             raise BadBody("No valid computed columns provided.")
         out = {"computed": clean}
         if clean_sql:
             out["sql_computed"] = clean_sql
+        if clean_style:
+            out["style_rules"] = clean_style
         return out
 
     if kind == "edi_model":

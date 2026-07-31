@@ -116,7 +116,8 @@ def create_artefact(kind: str, req: ArtefactCreate, env: str = "",
     try:
         body = store.normalise_body(kind, body=req.body, yaml=req.yaml,
                                     computed=req.computed, csv=req.csv,
-                                    sql_computed=req.sql_computed)
+                                    sql_computed=req.sql_computed,
+                                    style_rules=req.style_rules)
     except store.BadBody as e:
         raise HTTPException(422, str(e))
     try:
@@ -310,7 +311,8 @@ def add_version(kind: str, artefact_id: str, req: ArtefactUpdate, env: str = "",
     try:
         body = store.normalise_body(kind, body=req.body, yaml=req.yaml,
                                     computed=req.computed, csv=req.csv,
-                                    sql_computed=req.sql_computed)
+                                    sql_computed=req.sql_computed,
+                                    style_rules=req.style_rules)
     except store.BadBody as e:
         raise HTTPException(422, str(e))
     repo.add_version(s, artefact_id, body, req.note)

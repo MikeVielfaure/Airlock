@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties } from "react";
 import type { CellStatus, FieldType, ProcessResponse, RowsMutationResponse, TablePreview } from "../lib/types";
 import { api } from "../lib/api";
 import { IconPlay, IconReset, IconSave } from "../lib/icons";
@@ -73,6 +74,28 @@ function matchFilter(value: string, expr: string): boolean {
   if (s.startsWith("=")) return low === s.slice(1).trim().toLowerCase();
   if (s.startsWith("!")) return !low.includes(s.slice(1).trim().toLowerCase());
   return low.includes(sl);
+}
+
+/** A conditional-formatting rule's token — either the full
+ * "color:x;bold:1;italic:0" shape `STYLE()` produces, or a bare color name
+ * (no `:`/`;`) a cross-source SQL rule can return without knowing the full
+ * format. Never touches the background — that stays the validation status's,
+ * so the two channels never fight over the same pixels. */
+function parseStyleToken(token?: string): CSSProperties | undefined {
+  if (!token) return undefined;
+  const t = token.trim();
+  if (!t) return undefined;
+  if (!t.includes(":") && !t.includes(";")) {
+    return { color: t };
+  }
+  const out: CSSProperties = {};
+  for (const part of t.split(";")) {
+    const [k, v] = part.split(":").map((s) => s.trim());
+    if (k === "color" && v) out.color = v;
+    if (k === "bold" && v === "1") out.fontWeight = "bold";
+    if (k === "italic" && v === "1") out.fontStyle = "italic";
+  }
+  return Object.keys(out).length ? out : undefined;
 }
 
 /** Which delimiter a pasted block actually uses: whichever of tab / `;` / `,`
@@ -162,7 +185,7 @@ export function DataTable(props: Props) {
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(100);
   const [srvSort, setSrvSort] = useState<{ col: string; dir: "asc" | "desc" } | null>(null);
-  const [srv, setSrv] = useState<{ rows: string[][]; status: CellStatus[][]; total: number; totalAll: number; index: number[] } | null>(null);
+  const [srv, setSrv] = useState<{ rows: string[][]; status: CellStatus[][]; styles: string[][]; total: number; totalAll: number; index: number[] } | null>(null);
   const [srvLoading, setSrvLoading] = useState(false);
 
   // reset paging when the result, filters, sort or page size change
@@ -180,7 +203,7 @@ export function DataTable(props: Props) {
           filters: Object.keys(named).length ? JSON.stringify(named) : "",
           sortCol: srvSort?.col ?? "", sortDir: srvSort?.dir ?? "asc",
         });
-        if (!cancelled) setSrv({ rows: res.data, status: res.status, total: res.total, totalAll: res.total_all, index: res.index ?? [] });
+        if (!cancelled) setSrv({ rows: res.data, status: res.status, styles: res.styles ?? [], total: res.total, totalAll: res.total_all, index: res.index ?? [] });
       } catch { /* keep previous page on error */ }
       finally { if (!cancelled) setSrvLoading(false); }
     }, 250);
@@ -241,11 +264,11 @@ export function DataTable(props: Props) {
   }, [serverMode, data, activeFilters, sort, fieldTypes, columns]);
 
   // Unified list of rows to render (server page, or filtered preview).
-  const rows = useMemo<{ cells: string[]; status?: CellStatus[]; num: number; idx: number }[]>(() => {
+  const rows = useMemo<{ cells: string[]; status?: CellStatus[]; styles?: string[]; num: number; idx: number }[]>(() => {
     if (serverMode) {
       const base = page * pageSize;
       return (srv?.rows ?? []).map((cells, i) => ({
-        cells, status: srv?.status[i], num: base + i + 1, idx: srv?.index[i] ?? -1,
+        cells, status: srv?.status[i], styles: srv?.styles[i], num: base + i + 1, idx: srv?.index[i] ?? -1,
       }));
     }
     return previewIdx.map((oi) => ({ cells: data[oi], num: oi + 1, idx: preview?.index?.[oi] ?? oi }));
@@ -515,6 +538,7 @@ export function DataTable(props: Props) {
                 const edited = key in pending;
                 const cell = edited ? pending[key] : row.cells[ci] ?? "";
                 const st: CellStatus | undefined = edited ? "EDITED" : row.status?.[ci];
+                const sty = edited ? undefined : row.styles?.[ci];
                 const canEdit = editMode && row.idx >= 0 && editableCol(name);
                 const isEditing = editing && editing.idx === row.idx && editing.ci === ci;
                 if (isEditing) {
@@ -541,6 +565,7 @@ export function DataTable(props: Props) {
                 }
                 return (
                   <div key={ci} className={`vtd ${st ? `cell-${st}` : ""} ${canEdit ? "editable" : ""}`} title={canEdit ? `${cell || "(empty)"} — click to edit` : cell}
+                    style={parseStyleToken(sty)}
                     onClick={canEdit ? () => setEditing({ idx: row.idx, ci, val: cell }) : undefined}>
                     {cell === "" ? <span className="nullv">null</span> : cell}
                   </div>

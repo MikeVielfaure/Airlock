@@ -30,14 +30,20 @@ _ROW_ID = "_row_id"
 
 
 def run_sql_computed(df_post: pd.DataFrame, attached: Dict[str, pd.DataFrame],
-                     blocks: List[Tuple[str, str]],
+                     blocks: List[Tuple[str, str, str]],
                      sensitive_cols: frozenset = frozenset()
                      ) -> Tuple[pd.DataFrame, List[str], Dict[str, str]]:
-    """Run each `(name, query)` block against `self` (the session's own rows)
-    plus every attached source, and merge the result back onto `df_post` by
-    `_row_id`. Returns the (possibly widened) frame, the new column names,
-    and one error message per failing block name — never a raised
-    exception, so one bad block cannot take the whole run down.
+    """Run each `(name, query, mode)` block against `self` (the session's own
+    rows) plus every attached source, and merge the result back onto
+    `df_post` by `_row_id`. Returns the (possibly widened) frame, the new
+    column names, and one error message per failing block name — never a
+    raised exception, so one bad block cannot take the whole run down.
+
+    `mode` is either `"replace"` (overwrite the target column row by row —
+    the only behaviour before this existed) or `"fill_empty"` (only a blank
+    cell in `df_post` is ever written, so a value already there — say, an
+    age filled in for one row but not another — is never clobbered by a
+    stale or mismatched value from the source).
 
     Columns declared confidential (`sensitive_cols`) are masked in the `self`
     view before DuckDB ever sees them — masking the obvious field is not
@@ -47,7 +53,7 @@ def run_sql_computed(df_post: pd.DataFrame, attached: Dict[str, pd.DataFrame],
     new_cols: List[str] = []
     errors: Dict[str, str] = {}
 
-    for name, query in blocks:
+    for name, query, mode in blocks:
         text = (query or "").strip()
         if not text:
             errors[name] = "requête vide"
@@ -95,10 +101,28 @@ def run_sql_computed(df_post: pd.DataFrame, attached: Dict[str, pd.DataFrame],
                 errors[name] = "la requête ne retourne aucune colonne à ajouter"
                 continue
 
-            for col in added:
-                df_post[col] = result[col].reindex(df_post.index)
-                df_post[col] = df_post[col].fillna("").astype(str)
-            new_cols.extend(added)
+            if mode == "fill_empty":
+                missing = [c for c in added if c not in df_post.columns]
+                if missing:
+                    errors[name] = (f"le mode « compléter » exige que "
+                                    f"{', '.join(missing)} existe déjà — utilisez "
+                                    f"« remplacer » pour créer une nouvelle colonne")
+                    continue
+                for col in added:
+                    incoming = result[col].reindex(df_post.index).fillna("").astype(str)
+                    # `.astype(str)` on a nullable dtype turns a real NaN into
+                    # the *text* "<NA>", not "" — fillna() first or a blank
+                    # cell is missed entirely, exactly the bug this mode
+                    # exists to avoid.
+                    blank = df_post[col].fillna("").astype(str).str.strip() == ""
+                    fillable = blank & (incoming.str.strip() != "")
+                    df_post.loc[fillable, col] = incoming[fillable]
+                new_cols.extend(added)
+            else:
+                for col in added:
+                    df_post[col] = result[col].reindex(df_post.index)
+                    df_post[col] = df_post[col].fillna("").astype(str)
+                new_cols.extend(added)
         finally:
             con.close()
 

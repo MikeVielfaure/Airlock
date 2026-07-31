@@ -181,6 +181,7 @@ export const api = {
       identifier_field: string | null;
       computed: { name: string; expression: string }[];
       sql_computed?: { name: string; expression: string }[];
+      style_rules?: { column: string; expression: string }[];
       variables?: Record<string, string>;
     },
   ) =>
@@ -259,6 +260,7 @@ export const api = {
                    body: { name: string; description?: string; note?: string;
                            yaml?: string; computed?: { name: string; expression: string }[];
                            sql_computed?: { name: string; expression: string }[];
+                           style_rules?: { column: string; expression: string }[];
                            csv?: string; environment?: string;
                            body?: Record<string, unknown> }) =>
     fetch(`${BASE}/artefacts/${kind}`, {
@@ -271,7 +273,8 @@ export const api = {
   addArtefactVersion: (kind: string, id: string,
                        body: { note?: string; yaml?: string;
                                computed?: { name: string; expression: string }[];
-                               sql_computed?: { name: string; expression: string }[]; csv?: string;
+                               sql_computed?: { name: string; expression: string }[];
+                               style_rules?: { column: string; expression: string }[]; csv?: string;
                                body?: Record<string, unknown> }) =>
     fetch(`${BASE}/artefacts/${kind}/${id}/versions`, {
       method: "POST", headers: authHeaders({ "Content-Type": "application/json" }),

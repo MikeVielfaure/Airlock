@@ -32,6 +32,8 @@ class ArtefactCreate(BaseModel):
     # a `[Col]` formula — same artefact, same library, a second engine
     # underneath for the one thing `computed` structurally cannot do.
     sql_computed: Optional[List[Dict[str, str]]] = None
+    # [{column, expression}] — how a column should look, not what it holds.
+    style_rules: Optional[List[Dict[str, str]]] = None
     csv: Optional[str] = None                  # tco: raw CSV text
 
 
@@ -42,6 +44,7 @@ class ArtefactUpdate(BaseModel):
     yaml: Optional[str] = None
     computed: Optional[List[Dict[str, str]]] = None
     sql_computed: Optional[List[Dict[str, str]]] = None
+    style_rules: Optional[List[Dict[str, str]]] = None
     csv: Optional[str] = None
 
 

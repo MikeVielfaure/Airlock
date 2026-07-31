@@ -157,6 +157,14 @@ def _fn_datediff(a, b):
         return ""
 
 
+def _fn_style(color="", bold="", italic=""):
+    """A conditional-formatting cell rule's whole point: return a small,
+    engine-agnostic token — the same format a cross-source SQL rule
+    produces by hand with a bare CASE WHEN, since DuckDB has no access to
+    this function at all (a separate engine, deliberately)."""
+    return f"color:{color};bold:{1 if bold else 0};italic:{1 if italic else 0}"
+
+
 def _fn_lookup_noop(_value, default=""):
     """Placeholder — replaced per request with the session's TCO map."""
     return default
@@ -204,6 +212,7 @@ FUNCTIONS: dict[str, Callable] = {
     "NOTNULL": lambda x="": "" if _is_blank(x) else "1",
     "NOTBLANK": lambda x="": "" if _is_blank(x) else "1",
     "DATEDIFF": _fn_datediff,
+    "STYLE": _fn_style,
     "LOOKUP": _fn_lookup_noop,
     "EXISTS": _fn_exists_noop,
     "COL": _fn_col_noop,

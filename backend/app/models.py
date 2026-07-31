@@ -86,6 +86,21 @@ class HeaderRequest(BaseModel):
 class ComputedColumn(BaseModel):
     name: str
     expression: str
+    # Only meaningful for a SQL block: "replace" (default, today's behaviour)
+    # overwrites the target column row by row; "fill_empty" only touches a
+    # session's blank cells, never overwriting a value already there. An
+    # ordinary computed column ignores this field.
+    mode: str = "replace"
+
+
+class StyleRule(BaseModel):
+    """How an existing column should *look*, not what it should contain.
+    `expression` is either a plain `[Col]` condition (evaluated per row via
+    `ComputeService`, using the `STYLE()` builtin) or a DuckDB query
+    (several sources) — detected by the same `SELECT`/`WITH` prefix test
+    `sql_computed` already uses. Never overwrites the column's value."""
+    column: str
+    expression: str
 
 
 class ProcessRequest(BaseModel):
@@ -97,6 +112,7 @@ class ProcessRequest(BaseModel):
     # `[Col]` formula. Same shape as `computed` on purpose: one library, one
     # save/load path, just a different engine underneath.
     sql_computed: List[ComputedColumn] = Field(default_factory=list)
+    style_rules: List[StyleRule] = Field(default_factory=list)
     variables: Dict[str, str] = Field(default_factory=dict)   # config variables -> value
     preview_limit: int = 150
 
@@ -176,6 +192,10 @@ class ProcessResponse(BaseModel):
     status: List[List[str]]                 # per-cell status, aligned to data
     computed: List[str] = Field(default_factory=list)         # names of computed columns
     compute_errors: Dict[str, str] = Field(default_factory=dict)
+    # Per-cell style token ("color:x;bold:1;italic:0" or a bare color name),
+    # aligned to `data` exactly like `status` — "" means no rule applied.
+    styles: List[List[str]] = Field(default_factory=list)
+    style_errors: Dict[str, str] = Field(default_factory=dict)
     stats: ProcessStats
     report: List[ReportRow]
     tco_uncovered: Dict[str, List[Dict[str, Any]]] = Field(default_factory=dict)  # col -> [{value, count}]
@@ -204,6 +224,7 @@ class RowsResponse(BaseModel):
     columns: List[str]
     data: List[List[str]]
     status: List[List[str]]
+    styles: List[List[str]] = Field(default_factory=list)   # aligned to data, like status
     total: int                              # rows after filtering
     total_all: int                          # rows before filtering
     offset: int

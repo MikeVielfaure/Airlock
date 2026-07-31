@@ -448,7 +448,8 @@ class ProcessService:
         tco_df: pd.DataFrame | None = None,
         identifier_fields: list[str] | None = None,
         computed: list[tuple[str, str]] | None = None,
-        sql_computed: list[tuple[str, str]] | None = None,
+        sql_computed: list[tuple[str, str, str]] | None = None,
+        style_rules: list[tuple[str, str]] | None = None,
         attached: dict[str, pd.DataFrame] | None = None,
         sensitive_cols: frozenset = frozenset(),
         report_flagged_only: bool = False,
@@ -493,6 +494,17 @@ class ProcessService:
                 except ComputeError as e:
                     compute_errors[name] = str(e)
 
+        # Conditional formatting — how a column should *look*, evaluated only
+        # once df_post has its final values (both SQL and plain computed
+        # columns already ran), and kept apart from df_post: a rule never
+        # changes what a cell contains.
+        styles: dict[str, pd.Series] = {}
+        style_errors: dict[str, str] = {}
+        if style_rules:
+            from app.services.style_rules import run_style_rules
+            styles, style_errors = run_style_rules(
+                df_post, attached or {}, style_rules, sensitive_cols=sensitive_cols)
+
         stats               = self.compute_stats(df_post, validation, clean_mask)
         report              = self.generate_report(
             df_edited, df_post, validation, clean_mask, fields, identifier_fields,
@@ -518,6 +530,8 @@ class ProcessService:
             "report":          report,
             "computed_names":  computed_names,
             "compute_errors":  compute_errors,
+            "styles":          styles,
+            "style_errors":    style_errors,
             "tco_uncovered":   tco_uncovered,
             "warnings":        warnings,
         }
