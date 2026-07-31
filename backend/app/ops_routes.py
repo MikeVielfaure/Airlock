@@ -25,9 +25,11 @@ from sqlalchemy.orm import Session
 
 from app import repository as repo
 from app.db import commit, get_session
-from app.auth_routes import require_capability
-from app.db_models import FlowRun, FlowRunStep
+from app.auth_routes import require_capability, require_user
+from app.db_models import FlowRun, FlowRunStep, User
 from app.flow_graph import FlowGraph
+from app.services import auth_service as auth
+from app.services import permissions as perms
 from app.services.flow_runner import FlowError, RunContext, run_graph
 
 router = APIRouter(prefix="/api", tags=["ops"])
@@ -89,9 +91,56 @@ def resolved_variable_kinds(env: str = "", graph_id: str = "", node_id: str = ""
                                                  node_id=node_id)}
 
 
+def _require_variable_write(s: Session, user: User, scope: str, environment: str) -> None:
+    """Sharing is not creating: a global variable needs genuine cross-
+    environment authority (superadmin), not just being admin of whichever
+    environment happens to be asked for — and an environment/flow/brick
+    variable needs admin of THAT environment specifically, the one the
+    request actually declares, not an unrelated one passed elsewhere."""
+    if not user.id:
+        return                                          # setup mode: no accounts yet
+    if scope == "global":
+        if not user.is_superadmin:
+            raise HTTPException(403, "Seul un administrateur de la plateforme peut "
+                                     "créer, modifier ou partager une variable globale.")
+        return
+    env = environment or repo.DEFAULT_ENV
+    role = auth.role_in(s, user, env)
+    if role is None or not perms.can(role, "variables.write"):
+        raise HTTPException(403, f"« Modifier les points de connexion » demande le "
+                                 f"rôle 'admin' dans '{env}'.")
+
+
+class VariableTestIn(BaseModel):
+    kind: str
+    value: str = ""
+
+
+@router.post("/variables/test")
+def test_variable_connection(req: VariableTestIn,
+        _cap=Depends(require_capability("variables.write"))):
+    """
+    Try a draft connection before it is even saved. Gated the same as
+    creating one: without that, this route would let anyone with an account
+    make the server dial an arbitrary host/port of their choosing — an SSRF
+    door dressed up as a connection tester.
+    """
+    import json
+
+    try:
+        data = json.loads(req.value) if req.value else {}
+    except ValueError:
+        return {"ok": False, "message": "La valeur n'est pas un JSON valide."}
+    if not isinstance(data, dict):
+        return {"ok": False, "message": "La valeur doit être un objet JSON."}
+    from app.services.connection_probe import test_connection
+    return test_connection(req.kind, data)
+
+
 @router.post("/variables")
 def upsert_variable(req: VariableIn, s: Session = Depends(get_session),
-        _cap=Depends(require_capability("variables.write"))):
+        user: User = Depends(require_user)):
+    _require_variable_write(s, user, req.scope, req.environment)
     try:
         v = repo.upsert_variable(s, name=req.name, value=req.value, scope=req.scope,
                                  environment=req.environment, graph_id=req.graph_id,
@@ -105,11 +154,13 @@ def upsert_variable(req: VariableIn, s: Session = Depends(get_session),
 
 @router.delete("/variables/{variable_id}")
 def delete_variable(variable_id: str, s: Session = Depends(get_session),
-        _cap=Depends(require_capability("variables.read"))):
+        user: User = Depends(require_user)):
     try:
-        repo.delete_variable(s, variable_id)
+        v = repo.get_variable(s, variable_id)
     except repo.NotFound as e:
         raise HTTPException(404, str(e))
+    _require_variable_write(s, user, v.scope, v.environment)
+    repo.delete_variable(s, variable_id)
     commit(s)
     return {"deleted": variable_id}
 
@@ -117,6 +168,16 @@ def delete_variable(variable_id: str, s: Session = Depends(get_session),
 # ── restricting a global to a handful of environments ─────────────────
 class RestrictionIn(BaseModel):
     environment: str
+
+
+def _require_superadmin(user: User) -> None:
+    """Sharing a global — deciding which environments may see it — is a
+    decision about a cross-environment resource, so it takes the same
+    authority as creating one, not the admin of whichever environment is
+    being granted access."""
+    if user.id and not user.is_superadmin:
+        raise HTTPException(403, "Seul un administrateur de la plateforme peut "
+                                 "partager une variable globale.")
 
 
 @router.get("/variables/{variable_id}/restrictions")
@@ -128,7 +189,8 @@ def list_variable_restrictions(variable_id: str, s: Session = Depends(get_sessio
 @router.post("/variables/{variable_id}/restrictions")
 def set_variable_restriction(variable_id: str, req: RestrictionIn,
                              s: Session = Depends(get_session),
-        _cap=Depends(require_capability("variables.write"))):
+        user: User = Depends(require_user)):
+    _require_superadmin(user)
     try:
         repo.set_variable_restriction(s, variable_id, req.environment)
     except repo.NotFound as e:
@@ -143,7 +205,8 @@ def set_variable_restriction(variable_id: str, req: RestrictionIn,
 @router.delete("/variables/{variable_id}/restrictions/{environment}")
 def remove_variable_restriction(variable_id: str, environment: str,
                                 s: Session = Depends(get_session),
-        _cap=Depends(require_capability("variables.write"))):
+        user: User = Depends(require_user)):
+    _require_superadmin(user)
     repo.remove_variable_restriction(s, variable_id, environment)
     commit(s)
     return {"environments": sorted(r.environment for r in

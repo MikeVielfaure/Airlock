@@ -468,11 +468,15 @@ def list_variables(s: Session, environment: Optional[str] = None,
     return sorted(s.scalars(q), key=lambda v: (order.get(v.scope, 9), v.name))
 
 
-def delete_variable(s: Session, variable_id: str) -> None:
+def get_variable(s: Session, variable_id: str) -> Variable:
     v = s.get(Variable, variable_id)
     if v is None:
         raise NotFound(f"Variable {variable_id} not found.")
-    s.delete(v)
+    return v
+
+
+def delete_variable(s: Session, variable_id: str) -> None:
+    s.delete(get_variable(s, variable_id))
 
 
 def _resolve_variable_rows(s: Session, *, environment: str = "", graph_id: str = "",
@@ -541,9 +545,7 @@ def list_variable_restrictions(s: Session, variable_id: str) -> list[VariableRes
 
 def set_variable_restriction(s: Session, variable_id: str, environment: str,
                              granted_by: str = "") -> VariableRestriction:
-    v = s.get(Variable, variable_id)
-    if v is None:
-        raise NotFound(f"Variable {variable_id} not found.")
+    v = get_variable(s, variable_id)
     if v.scope != "global":
         raise Conflict("Only a global variable can be restricted.")
     environment = (environment or "").strip()

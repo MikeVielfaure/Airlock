@@ -1199,6 +1199,48 @@ pre.yaml .k { color: #8db4ff; }
 .ops-kv code { font-family: var(--mono); font-size: 11px; color: var(--accent); margin-right: 5px; }
 .ops-secret { font-family: var(--mono); color: var(--ink-faint); letter-spacing: .1em; }
 
+/* ---------- référentiel: kinds sidebar + editor ---------- */
+.ops-referentiel { display: flex; gap: 16px; align-items: flex-start; }
+.ops-kinds {
+  width: 240px; flex: 0 0 240px; display: flex; flex-direction: column; gap: 2px;
+  max-height: 520px; overflow-y: auto; border: 1px solid var(--line); border-radius: var(--r-sm);
+  padding: 8px; background: var(--panel);
+}
+.ops-kinds-search { width: 100%; margin-bottom: 4px; box-sizing: border-box; }
+.ops-kind-node { border-bottom: 1px solid var(--line); }
+.ops-kind-node:last-child { border-bottom: none; }
+.ops-kind-head {
+  display: flex; align-items: center; gap: 6px; padding: 6px 4px; cursor: pointer;
+  font-size: 12.5px; font-weight: 600; color: var(--ink-soft); user-select: none;
+}
+.ops-kind-head:hover { color: var(--ink); }
+.ops-kind-head .btn.sm { margin-left: auto; padding: 1px 7px; }
+.ops-kind-caret { width: 12px; color: var(--ink-faint); font-size: 10px; }
+.ops-kind-count { font-size: 10.5px; color: var(--ink-faint); background: var(--panel-2);
+  border-radius: 999px; padding: 1px 7px; }
+.ops-kind-list { display: flex; flex-direction: column; padding: 2px 0 6px 18px; }
+.ops-kind-empty { padding: 2px 0 4px; font-size: 11.5px; }
+.ops-kind-item {
+  display: flex; align-items: center; gap: 7px; padding: 5px 6px; border-radius: var(--r-sm);
+  cursor: pointer; font-size: 12px;
+}
+.ops-kind-item:hover { background: var(--panel-2); }
+.ops-kind-item.on { background: var(--accent-tint); color: var(--accent); }
+.ops-kind-item .ops-badge { width: 8px; height: 8px; padding: 0; border-radius: 999px; flex: 0 0 8px; }
+.ops-kind-item-text { display: flex; flex-direction: column; overflow: hidden; }
+.ops-kind-item-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ops-kind-item-sub { font-size: 10.5px; color: var(--ink-faint); overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
+.ops-kind-item.on .ops-kind-item-sub { color: var(--accent); opacity: .8; }
+
+.ops-editor { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+.ops-test { display: flex; align-items: center; gap: 10px; }
+.ops-test-result { font-size: 12.5px; }
+.ops-test-result.ok { color: var(--ok); }
+.ops-test-result.err { color: var(--err); }
+.ops-share { border-top: 1px solid var(--line); padding-top: 10px; }
+.ops-share h4 { margin: 0 0 6px; font-size: 12.5px; }
+
 
 /* ── environment profiles & the mapping-fix path (v23) ───────────── */
 .tf { display: flex; flex-direction: column; gap: 10px; }

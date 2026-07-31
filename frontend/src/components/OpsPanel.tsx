@@ -190,6 +190,10 @@ function Vars({ notify }: Props) {
   const [connUseTls, setConnUseTls] = useState(true);
   const [restrictFor, setRestrictFor] = useState<string>("");   // variable id
   const [restrictions, setRestrictions] = useState<string[]>([]);
+  const [search, setSearch] = useState("");
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({ value: true });
+  const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
+  const [testing, setTesting] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -200,11 +204,19 @@ function Vars({ notify }: Props) {
   }, [notify]);
   useEffect(() => { refresh(); }, [refresh]);
 
-  const resetDraft = (scope = draft.scope) =>
+  const resetDraft = (scope = draft.scope) => {
     setDraft({ name: "", value: "", scope, secret: false, kind: "value" });
+    setTestResult(null);
+  };
+
+  const startNew = (kind: VariableRow["kind"]) => {
+    setDraft({ name: "", value: "", scope: "environment", secret: false, kind });
+    setConn({}); setConnUseTls(true); setTestResult(null);
+  };
 
   const edit = (v: VariableRow) => {
     setDraft({ ...v });
+    setTestResult(null);
     if (v.kind !== "value") {
       try {
         const data = JSON.parse(v.value) as Record<string, unknown>;
@@ -256,6 +268,20 @@ function Vars({ notify }: Props) {
     } catch (e) { notify(e instanceof Error ? e.message : String(e), "err"); }
   };
 
+  const testConn = async () => {
+    setTesting(true); setTestResult(null);
+    try {
+      setTestResult(await api.testConnection(draft.kind ?? "value", buildValue()));
+    } catch (e) {
+      setTestResult({ ok: false, message: e instanceof Error ? e.message : String(e) });
+    } finally { setTesting(false); }
+  };
+
+  const itemsFor = (kind: VariableRow["kind"]) => {
+    const q = search.trim().toLowerCase();
+    return rows.filter((v) => v.kind === kind && (!q || v.name.toLowerCase().includes(q)));
+  };
+
   return (
     <div className="ops-body">
       <p className="ops-hint">
@@ -266,114 +292,212 @@ function Vars({ notify }: Props) {
         has to be renamed to be specialised.
       </p>
 
-      <div className="ops-form">
-        <input placeholder="name" value={draft.name ?? ""}
-               onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
-        <select value={draft.kind} onChange={(e) => {
-          setDraft({ ...draft, kind: e.target.value as VariableRow["kind"] });
-          setConn({}); setConnUseTls(true);
-        }}>
-          {KINDS.map((k) => <option key={k} value={k}>{k}</option>)}
-        </select>
-        {draft.kind === "value" && (
-          <input placeholder="value" value={draft.value ?? ""}
-                 onChange={(e) => setDraft({ ...draft, value: e.target.value })} />
-        )}
-        <select value={draft.scope} onChange={(e) =>
-          setDraft({ ...draft, scope: e.target.value as VariableRow["scope"] })}>
-          {SCOPES.map((sc) => <option key={sc} value={sc}>{sc}</option>)}
-        </select>
-        {(draft.scope === "flow" || draft.scope === "brick") && (
-          <input placeholder="graph id" value={draft.graph_id ?? ""}
-                 onChange={(e) => setDraft({ ...draft, graph_id: e.target.value })} />
-        )}
-        {draft.scope === "brick" && (
-          <input placeholder="node id" value={draft.node_id ?? ""}
-                 onChange={(e) => setDraft({ ...draft, node_id: e.target.value })} />
-        )}
-        <label className="ops-check">
-          <input type="checkbox" checked={!!draft.secret}
-                 onChange={(e) => setDraft({ ...draft, secret: e.target.checked })} /> secret
-        </label>
-        <button className="btn sm" disabled={!draft.name?.trim()}
-                onClick={async () => {
-                  try {
-                    await api.saveVariable({ ...draft, value: buildValue() });
-                    resetDraft();
-                    await refresh();
-                    notify("Connection point saved.", "ok");
-                  } catch (e) { notify(e instanceof Error ? e.message : String(e), "err"); }
-                }}><IconSave size={12} /> Save</button>
-        {draft.name && (
-          <button className="btn sm" onClick={() => resetDraft()}>Clear</button>
-        )}
-      </div>
+      <div className="ops-referentiel">
+        <aside className="ops-kinds">
+          <input className="mono-input ops-kinds-search" placeholder="Rechercher…"
+                 value={search} onChange={(e) => setSearch(e.target.value)} />
+          {KINDS.map((k) => {
+            const items = itemsFor(k);
+            const isOpen = search.trim() !== "" || (expanded[k] ?? false);
+            return (
+              <div key={k} className="ops-kind-node">
+                <div className="ops-kind-head" onClick={() => setExpanded((x) => ({ ...x, [k]: !isOpen }))}>
+                  <span className="ops-kind-caret">{isOpen ? "▾" : "▸"}</span>
+                  <span className="ops-kind-name">{k}</span>
+                  <span className="ops-kind-count">{items.length}</span>
+                  <button className="btn sm" title={`Nouvelle variable « ${k} »`}
+                          onClick={(e) => { e.stopPropagation(); startNew(k); }}>+</button>
+                </div>
+                {isOpen && (
+                  <div className="ops-kind-list">
+                    {items.length === 0 ? (
+                      <p className="ops-hint ops-kind-empty">Aucune.</p>
+                    ) : items.map((v) => (
+                      <div key={v.id}
+                           className={`ops-kind-item ${draft.id === v.id ? "on" : ""}`}
+                           onClick={() => edit(v)} title={summarize(v)}>
+                        <span className={`ops-badge scope-${v.scope}`} title={v.scope} />
+                        <span className="ops-kind-item-text">
+                          <span className="ops-kind-item-name">{v.name}</span>
+                          <span className="ops-kind-item-sub">{summarize(v)}</span>
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </aside>
 
-      {draft.kind === "hotfolder" && (
-        <div className="ops-form">
-          <input placeholder="path" value={conn.path ?? ""}
-                 onChange={(e) => setConn({ ...conn, path: e.target.value })} />
-          <input placeholder="archive_dir" value={conn.archive_dir ?? ""}
-                 onChange={(e) => setConn({ ...conn, archive_dir: e.target.value })} />
-          <input placeholder="error_dir" value={conn.error_dir ?? ""}
-                 onChange={(e) => setConn({ ...conn, error_dir: e.target.value })} />
+        <div className="ops-editor">
+          <div className="ops-form">
+            <input placeholder="name" value={draft.name ?? ""}
+                   onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
+            <select value={draft.kind} onChange={(e) => {
+              setDraft({ ...draft, kind: e.target.value as VariableRow["kind"] });
+              setConn({}); setConnUseTls(true); setTestResult(null);
+            }}>
+              {KINDS.map((k) => <option key={k} value={k}>{k}</option>)}
+            </select>
+            {draft.kind === "value" && (
+              <input placeholder="value" value={draft.value ?? ""}
+                     onChange={(e) => setDraft({ ...draft, value: e.target.value })} />
+            )}
+            <select value={draft.scope} onChange={(e) =>
+              setDraft({ ...draft, scope: e.target.value as VariableRow["scope"] })}>
+              {SCOPES.map((sc) => <option key={sc} value={sc}>{sc}</option>)}
+            </select>
+            {(draft.scope === "flow" || draft.scope === "brick") && (
+              <input placeholder="graph id" value={draft.graph_id ?? ""}
+                     onChange={(e) => setDraft({ ...draft, graph_id: e.target.value })} />
+            )}
+            {draft.scope === "brick" && (
+              <input placeholder="node id" value={draft.node_id ?? ""}
+                     onChange={(e) => setDraft({ ...draft, node_id: e.target.value })} />
+            )}
+            <label className="ops-check">
+              <input type="checkbox" checked={!!draft.secret}
+                     onChange={(e) => setDraft({ ...draft, secret: e.target.checked })} /> secret
+            </label>
+            <button className="btn sm primary" disabled={!draft.name?.trim()}
+                    onClick={async () => {
+                      try {
+                        await api.saveVariable({ ...draft, value: buildValue() });
+                        resetDraft();
+                        await refresh();
+                        notify("Connection point saved.", "ok");
+                      } catch (e) { notify(e instanceof Error ? e.message : String(e), "err"); }
+                    }}><IconSave size={12} /> Save</button>
+            {draft.name && (
+              <button className="btn sm" onClick={() => resetDraft()}>Clear</button>
+            )}
+            {draft.id && (
+              <button className="btn sm danger" onClick={async () => {
+                try {
+                  await api.deleteVariable(draft.id!);
+                  resetDraft();
+                  await refresh();
+                } catch (e) { notify(e instanceof Error ? e.message : String(e), "err"); }
+              }}>Delete</button>
+            )}
+          </div>
+
+          {draft.kind === "hotfolder" && (
+            <div className="ops-form">
+              <input placeholder="path" value={conn.path ?? ""}
+                     onChange={(e) => setConn({ ...conn, path: e.target.value })} />
+              <input placeholder="archive_dir" value={conn.archive_dir ?? ""}
+                     onChange={(e) => setConn({ ...conn, archive_dir: e.target.value })} />
+              <input placeholder="error_dir" value={conn.error_dir ?? ""}
+                     onChange={(e) => setConn({ ...conn, error_dir: e.target.value })} />
+            </div>
+          )}
+          {draft.kind === "smtp" && (
+            <div className="ops-form">
+              <input placeholder="host" value={conn.host ?? ""}
+                     onChange={(e) => setConn({ ...conn, host: e.target.value })} />
+              <input placeholder="port (587)" value={conn.port ?? ""}
+                     onChange={(e) => setConn({ ...conn, port: e.target.value })} />
+              <input placeholder="user" value={conn.user ?? ""}
+                     onChange={(e) => setConn({ ...conn, user: e.target.value })} />
+              <input placeholder="password" type="password" value={conn.password ?? ""}
+                     onChange={(e) => setConn({ ...conn, password: e.target.value })} />
+              <input placeholder="from" value={conn.from ?? ""}
+                     onChange={(e) => setConn({ ...conn, from: e.target.value })} />
+              <label className="ops-check">
+                <input type="checkbox" checked={connUseTls}
+                       onChange={(e) => setConnUseTls(e.target.checked)} /> tls
+              </label>
+            </div>
+          )}
+          {draft.kind === "external_db" && (
+            <div className="ops-form">
+              <input placeholder="postgresql+psycopg2://user:pass@host:5432/db" value={conn.url ?? ""}
+                     style={{ minWidth: 340 }}
+                     onChange={(e) => setConn({ ...conn, url: e.target.value })} />
+            </div>
+          )}
+          {draft.kind === "sftp" && (
+            <div className="ops-form">
+              <input placeholder="host" value={conn.host ?? ""}
+                     onChange={(e) => setConn({ ...conn, host: e.target.value })} />
+              <input placeholder="port (22)" value={conn.port ?? ""}
+                     onChange={(e) => setConn({ ...conn, port: e.target.value })} />
+              <input placeholder="user" value={conn.user ?? ""}
+                     onChange={(e) => setConn({ ...conn, user: e.target.value })} />
+              <input placeholder="password" type="password" value={conn.password ?? ""}
+                     onChange={(e) => setConn({ ...conn, password: e.target.value })} />
+              <input placeholder="private_key (optional, PEM text)" value={conn.private_key ?? ""}
+                     onChange={(e) => setConn({ ...conn, private_key: e.target.value })} />
+              <input placeholder="remote_dir" value={conn.remote_dir ?? ""}
+                     onChange={(e) => setConn({ ...conn, remote_dir: e.target.value })} />
+              <input placeholder="archive_dir" value={conn.archive_dir ?? ""}
+                     onChange={(e) => setConn({ ...conn, archive_dir: e.target.value })} />
+              <input placeholder="error_dir" value={conn.error_dir ?? ""}
+                     onChange={(e) => setConn({ ...conn, error_dir: e.target.value })} />
+            </div>
+          )}
+          {draft.kind === "api" && (
+            <div className="ops-form">
+              <input placeholder="base_url" value={conn.base_url ?? ""} style={{ minWidth: 260 }}
+                     onChange={(e) => setConn({ ...conn, base_url: e.target.value })} />
+              <input placeholder="auth_header (Authorization)" value={conn.auth_header ?? ""}
+                     onChange={(e) => setConn({ ...conn, auth_header: e.target.value })} />
+              <input placeholder="token" type="password" value={conn.token ?? ""}
+                     onChange={(e) => setConn({ ...conn, token: e.target.value })} />
+            </div>
+          )}
+
+          {draft.kind !== "value" && (
+            <div className="ops-test">
+              <button className="btn sm" disabled={testing} onClick={testConn}>
+                {testing ? "Test en cours…" : "Tester la connexion"}
+              </button>
+              {testResult && (
+                <span className={`ops-test-result ${testResult.ok ? "ok" : "err"}`}>
+                  {testResult.message}
+                </span>
+              )}
+            </div>
+          )}
+
+          {draft.id && draft.scope === "global" && (
+            <div className="ops-share">
+              <h4>Partage</h4>
+              <p className="ops-hint">
+                Sans restriction, « {draft.name} » est visible partout. Cochez
+                des environnements pour la limiter à ceux-là uniquement.
+              </p>
+              <button className="btn sm" onClick={() => openRestrictions(draft as VariableRow)}>
+                {restrictFor === draft.id ? "Masquer" : "Gérer le partage"}
+              </button>
+              {restrictFor === draft.id && (
+                <div className="ops-resolved">
+                  {envs.map((e) => (
+                    <label key={e} className="ops-check">
+                      <input type="checkbox" checked={restrictions.includes(e)}
+                             onChange={async (ev) => {
+                               try {
+                                 if (ev.target.checked) {
+                                   await api.setVariableRestriction(draft.id!, e);
+                                 } else {
+                                   await api.removeVariableRestriction(draft.id!, e);
+                                 }
+                                 setRestrictions((await api.listVariableRestrictions(draft.id!)).environments);
+                               } catch (err) {
+                                 notify(err instanceof Error ? err.message : String(err), "err");
+                               }
+                             }} />
+                      {e}
+                    </label>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
-      )}
-      {draft.kind === "smtp" && (
-        <div className="ops-form">
-          <input placeholder="host" value={conn.host ?? ""}
-                 onChange={(e) => setConn({ ...conn, host: e.target.value })} />
-          <input placeholder="port (587)" value={conn.port ?? ""}
-                 onChange={(e) => setConn({ ...conn, port: e.target.value })} />
-          <input placeholder="user" value={conn.user ?? ""}
-                 onChange={(e) => setConn({ ...conn, user: e.target.value })} />
-          <input placeholder="password" type="password" value={conn.password ?? ""}
-                 onChange={(e) => setConn({ ...conn, password: e.target.value })} />
-          <input placeholder="from" value={conn.from ?? ""}
-                 onChange={(e) => setConn({ ...conn, from: e.target.value })} />
-          <label className="ops-check">
-            <input type="checkbox" checked={connUseTls}
-                   onChange={(e) => setConnUseTls(e.target.checked)} /> tls
-          </label>
-        </div>
-      )}
-      {draft.kind === "external_db" && (
-        <div className="ops-form">
-          <input placeholder="postgresql+psycopg2://user:pass@host:5432/db" value={conn.url ?? ""}
-                 style={{ minWidth: 340 }}
-                 onChange={(e) => setConn({ ...conn, url: e.target.value })} />
-        </div>
-      )}
-      {draft.kind === "sftp" && (
-        <div className="ops-form">
-          <input placeholder="host" value={conn.host ?? ""}
-                 onChange={(e) => setConn({ ...conn, host: e.target.value })} />
-          <input placeholder="port (22)" value={conn.port ?? ""}
-                 onChange={(e) => setConn({ ...conn, port: e.target.value })} />
-          <input placeholder="user" value={conn.user ?? ""}
-                 onChange={(e) => setConn({ ...conn, user: e.target.value })} />
-          <input placeholder="password" type="password" value={conn.password ?? ""}
-                 onChange={(e) => setConn({ ...conn, password: e.target.value })} />
-          <input placeholder="private_key (optional, PEM text)" value={conn.private_key ?? ""}
-                 onChange={(e) => setConn({ ...conn, private_key: e.target.value })} />
-          <input placeholder="remote_dir" value={conn.remote_dir ?? ""}
-                 onChange={(e) => setConn({ ...conn, remote_dir: e.target.value })} />
-          <input placeholder="archive_dir" value={conn.archive_dir ?? ""}
-                 onChange={(e) => setConn({ ...conn, archive_dir: e.target.value })} />
-          <input placeholder="error_dir" value={conn.error_dir ?? ""}
-                 onChange={(e) => setConn({ ...conn, error_dir: e.target.value })} />
-        </div>
-      )}
-      {draft.kind === "api" && (
-        <div className="ops-form">
-          <input placeholder="base_url" value={conn.base_url ?? ""} style={{ minWidth: 260 }}
-                 onChange={(e) => setConn({ ...conn, base_url: e.target.value })} />
-          <input placeholder="auth_header (Authorization)" value={conn.auth_header ?? ""}
-                 onChange={(e) => setConn({ ...conn, auth_header: e.target.value })} />
-          <input placeholder="token" type="password" value={conn.token ?? ""}
-                 onChange={(e) => setConn({ ...conn, token: e.target.value })} />
-        </div>
-      )}
+      </div>
 
       <h4><IconCheck size={13} /> What a brick would see here</h4>
       <div className="ops-resolved">
@@ -382,67 +506,6 @@ function Vars({ notify }: Props) {
           <span key={k} className="ops-kv"><code>{k}</code> {v}</span>
         ))}
       </div>
-
-      <table className="ops-table">
-        <thead><tr><th>Name</th><th>Kind</th><th>Scope</th><th>Value</th><th>Where</th><th /></tr></thead>
-        <tbody>
-          {rows.map((v) => (
-            <>
-              <tr key={v.id} className="ops-row" onClick={() => edit(v)}>
-                <td><code>{v.name}</code></td>
-                <td><span className="ops-badge">{v.kind}</span></td>
-                <td><span className={`ops-badge scope-${v.scope}`}>{v.scope}</span></td>
-                <td className={v.secret ? "ops-secret" : ""}>{summarize(v)}</td>
-                <td className="ops-when">
-                  {[v.environment, v.graph_id && `flow ${v.graph_id.slice(0, 6)}`, v.node_id]
-                    .filter(Boolean).join(" · ") || "—"}
-                </td>
-                <td onClick={(e) => e.stopPropagation()}>
-                  {v.scope === "global" && (
-                    <button className="btn sm" onClick={() => openRestrictions(v)}>
-                      restrict
-                    </button>
-                  )}
-                  <button className="btn sm" onClick={async () => {
-                    try { await api.deleteVariable(v.id); await refresh(); }
-                    catch (e) { notify(e instanceof Error ? e.message : String(e), "err"); }
-                  }}>×</button>
-                </td>
-              </tr>
-              {restrictFor === v.id && (
-                <tr key={`${v.id}-r`} className="ops-detail">
-                  <td colSpan={6}>
-                    <p className="ops-hint">
-                      Sans restriction, « {v.name} » est visible partout. Cochez
-                      des environnements pour la limiter à ceux-là uniquement.
-                    </p>
-                    <div className="ops-resolved">
-                      {envs.map((e) => (
-                        <label key={e} className="ops-check">
-                          <input type="checkbox" checked={restrictions.includes(e)}
-                                 onChange={async (ev) => {
-                                   try {
-                                     if (ev.target.checked) {
-                                       await api.setVariableRestriction(v.id, e);
-                                     } else {
-                                       await api.removeVariableRestriction(v.id, e);
-                                     }
-                                     setRestrictions((await api.listVariableRestrictions(v.id)).environments);
-                                   } catch (err) {
-                                     notify(err instanceof Error ? err.message : String(err), "err");
-                                   }
-                                 }} />
-                          {e}
-                        </label>
-                      ))}
-                    </div>
-                  </td>
-                </tr>
-              )}
-            </>
-          ))}
-        </tbody>
-      </table>
     </div>
   );
 }

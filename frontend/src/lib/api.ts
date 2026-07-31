@@ -573,6 +573,13 @@ export const api = {
       body: JSON.stringify({ environment: CURRENT_ENV, ...v }),
     }).then((r) => json<VariableRow>(r)),
 
+  /** Try a draft connection before it is even saved. */
+  testConnection: (kind: string, value: string) =>
+    fetch(`${BASE}/variables/test`, {
+      method: "POST", headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ kind, value }),
+    }).then((r) => json<{ ok: boolean; message: string }>(r)),
+
   deleteVariable: (id: string) =>
     fetch(`${BASE}/variables/${id}`, { method: "DELETE", headers: authHeaders() }).then((r) => json<unknown>(r)),
 
