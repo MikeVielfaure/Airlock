@@ -508,7 +508,10 @@ pre.yaml .k { color: #8db4ff; }
 .statustag.COMPUTED { color: var(--accent); background: var(--accent-tint); border: 1px solid #d6d3f5; }
 
 /* ---------- computed panel ---------- */
-.computed-wrap { display: grid; grid-template-columns: 1fr 280px; gap: 22px; margin-top: 14px; }
+.computed-wrap { display: grid; grid-template-columns: 1fr 280px; gap: 22px; margin-top: 14px; align-items: start; }
+.computed-tabs { margin-bottom: 16px; }
+.tab-panel { display: flex; flex-direction: column; gap: 12px; }
+.tab-panel > .filterbar { margin: 0; }
 .computed-row { border: 1px solid var(--line); border-radius: var(--r); background: var(--panel); padding: 14px; margin-bottom: 12px; }
 .computed-head { display: flex; align-items: center; gap: 10px; margin-bottom: 9px; }
 .computed-row textarea { font-size: 12.5px; }

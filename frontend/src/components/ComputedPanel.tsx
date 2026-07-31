@@ -244,9 +244,12 @@ function StyleRuleRow({ rule, columns, serverError, onChange, onRemove }: {
   );
 }
 
+type SubTab = "columns" | "sql" | "sources" | "style" | "library";
+
 export function ComputedPanel({ sid, columns, computed, setComputed, sqlComputed, setSqlComputed,
                                styleRules, setStyleRules, variables, setVariables, errors,
                                styleErrors, notify }: Props) {
+  const [tab, setTab] = useState<SubTab>("columns");
   const [lib, setLib] = useState<ArtefactInfo[]>([]);
   const [saveName, setSaveName] = useState("");
   const [saveTarget, setSaveTarget] = useState("");
@@ -398,196 +401,242 @@ export function ComputedPanel({ sid, columns, computed, setComputed, sqlComputed
     }
   };
 
+  const computedErrCount = computed.filter((c) => errors[c.name]).length;
+  const sqlErrCount = sqlComputed.filter((c) => errors[c.name]).length;
+  const styleErrCount = styleRules.filter((r) => (styleErrors ?? {})[r.column]).length;
+
+  const Badge = ({ n, err }: { n: number; err: number }) =>
+    n > 0 ? <span className={`count ${err > 0 ? "err" : ""}`}>{err > 0 ? err : n}</span> : null;
+
   return (
     <div className="computed-wrap">
       <div>
-        <div className="sec-h">
-          <h3>Computed columns</h3>
-          <span className="sub">Derive new columns from existing ones. Applied on cleaned values when you run validation.</span>
-        </div>
+        <nav className="ops-tabs computed-tabs">
+          <button className={`tab ${tab === "columns" ? "active" : ""}`} onClick={() => setTab("columns")}>
+            Colonnes calculées <Badge n={computed.length} err={computedErrCount} />
+          </button>
+          <button className={`tab ${tab === "sql" ? "active" : ""}`} onClick={() => setTab("sql")}>
+            SQL avancé <Badge n={sqlComputed.length} err={sqlErrCount} />
+          </button>
+          <button className={`tab ${tab === "style" ? "active" : ""}`} onClick={() => setTab("style")}>
+            Mise en forme <Badge n={styleRules.length} err={styleErrCount} />
+          </button>
+          <button className={`tab ${tab === "sources" ? "active" : ""}`} onClick={() => setTab("sources")}>
+            Sources <Badge n={sources.length} err={0} />
+          </button>
+          <button className={`tab ${tab === "library" ? "active" : ""}`} onClick={() => setTab("library")}>
+            Bibliothèque <Badge n={lib.length} err={0} />
+          </button>
+        </nav>
 
-        <div className="filterbar">
-          <button className="btn primary sm" onClick={() => add()}><IconCode size={14} /> Add column</button>
-          {TEMPLATES.map((t) => (
-            <button key={t.label} className="btn sm" onClick={() => add(t.expr(columns))}>{t.label}</button>
-          ))}
-          <span style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
-            <button className="btn sm" onClick={() => importRef.current?.click()}><IconUpload size={13} /> Import</button>
-            <button className="btn sm" onClick={exportFns} disabled={computed.length === 0}><IconDownload size={13} /> Export</button>
-            {computed.length > 0 && (
-              <button className="btn sm" onClick={() => setComputed([])}><IconReset size={13} /> Clear</button>
-            )}
-          </span>
-          <input ref={importRef} type="file" accept=".json" hidden
-            onChange={(e) => { const f = e.target.files?.[0]; if (f) importFns(f); e.target.value = ""; }} />
-        </div>
-
-        <div className="vars">
-          <div className="vars-h">
-            <span>Variables <span style={{ color: "var(--ink-faint)", fontWeight: 400 }}>— named values usable in expressions as <code>[name]</code></span></span>
-            <button className="btn sm" onClick={addVar}>+ Add variable</button>
-          </div>
-          {varEntries.length === 0 ? (
-            <p className="hint" style={{ margin: "4px 0 0" }}>e.g. <code>societe = italie</code>, then use <code>[societe]</code> in any expression.</p>
-          ) : (
-            varEntries.map(([k, v], i) => (
-              <div className="var-row" key={i}>
-                <input className="mono-input" value={k} placeholder="name"
-                  onChange={(e) => setVar(k, e.target.value.replace(/[^\w]/g, "_"), v)} />
-                <span className="var-eq">=</span>
-                <input className="mono-input" value={v} placeholder="value"
-                  onChange={(e) => setVar(k, k, e.target.value)} />
-                <button className="hclear" title="Remove" onClick={() => removeVar(k)}>×</button>
-              </div>
-            ))
-          )}
-        </div>
-
-        {computed.length === 0 ? (
-          <div className="banner"><span>No computed columns yet. Add one, or start from a template above.</span></div>
-        ) : (
-          computed.map((c, i) => (
-            <Row key={i} col={c} columns={columns} serverError={errors[c.name]}
-              onChange={(nc) => setComputed(computed.map((x, j) => (j === i ? nc : x)))}
-              onRemove={() => setComputed(computed.filter((_, j) => j !== i))} />
-          ))
-        )}
-      </div>
-
-      <div className="sec-h" style={{ marginTop: 20 }}>
-        <h3>Sources attachées</h3>
-        <span className="sub">Une table interne ou un fichier, croisé avec cette session dans une requête SQL — sans construire de flux.</span>
-      </div>
-      {!sid ? (
-        <div className="banner"><span>Chargez d'abord une session.</span></div>
-      ) : (
-        <>
-          <div className="flowform">
-            <div className="frow"><label>Nom</label>
-              <input className="mono-input" value={attachName} placeholder="ex. referentiel_clients"
-                onChange={(e) => setAttachName(e.target.value.replace(/\s+/g, "_"))} /></div>
-            <div className="frow"><label>Table interne</label>
-              <select value={attachDatasetId} onChange={(e) => setAttachDatasetId(e.target.value)}>
-                <option value="">— choisir —</option>
-                {datasets.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
-              </select></div>
-            <button className="btn sm" disabled={!attachName.trim() || !attachDatasetId} onClick={attachDataset}>
-              Attacher la table
-            </button>
-            <span style={{ marginLeft: 8 }}>ou</span>
-            <button className="btn sm" onClick={() => uploadRef.current?.click()}>
-              <IconUpload size={13} /> Importer un fichier
-            </button>
-            <input ref={uploadRef} type="file" accept=".csv,.xlsx,.xls" hidden
-              onChange={(e) => { const f = e.target.files?.[0]; if (f) attachUpload(f); e.target.value = ""; }} />
-          </div>
-          {sources.length === 0 ? (
-            <p className="hint">Aucune source attachée pour l'instant.</p>
-          ) : (
-            <div className="libcol" style={{ marginTop: 6 }}>
-              {sources.map((s) => (
-                <div key={s.name} className="libitem">
-                  <span><code>{s.name}</code> <span className="csub">{s.row_count} ligne(s), {s.columns.length} colonne(s)</span></span>
-                  <button className="btn sm" onClick={() => detachSource(s.name)}>Détacher</button>
-                </div>
+        {tab === "columns" && (
+          <div className="tab-panel">
+            <p className="hint">Derive new columns from existing ones. Applied on cleaned values when you run validation.</p>
+            <div className="filterbar">
+              <button className="btn primary sm" onClick={() => add()}><IconCode size={14} /> Add column</button>
+              {TEMPLATES.map((t) => (
+                <button key={t.label} className="btn sm" onClick={() => add(t.expr(columns))}>{t.label}</button>
               ))}
+              <span style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
+                <button className="btn sm" onClick={() => importRef.current?.click()}><IconUpload size={13} /> Import</button>
+                <button className="btn sm" onClick={exportFns} disabled={computed.length === 0}><IconDownload size={13} /> Export</button>
+                {computed.length > 0 && (
+                  <button className="btn sm" onClick={() => setComputed([])}><IconReset size={13} /> Clear</button>
+                )}
+              </span>
+              <input ref={importRef} type="file" accept=".json" hidden
+                onChange={(e) => { const f = e.target.files?.[0]; if (f) importFns(f); e.target.value = ""; }} />
             </div>
-          )}
-        </>
-      )}
 
-      <div className="sec-h" style={{ marginTop: 20 }}>
-        <h3>SQL avancé</h3>
-        <span className="sub">
-          Requêtes DuckDB contre <code>self</code> (cette session, colonne <code>_row_id</code> incluse) et les
-          sources ci-dessus — jointures, fenêtres, agrégations que les colonnes calculées ne peuvent pas faire.
-          Le résultat doit renvoyer <code>_row_id</code> ; sans lui, la requête est refusée.
-        </span>
-      </div>
-      <div className="filterbar">
-        <button className="btn primary sm" onClick={addSql}><IconCode size={14} /> Ajouter un bloc SQL</button>
-        {sqlComputed.length > 0 && (
-          <button className="btn sm" onClick={() => setSqlComputed([])}><IconReset size={13} /> Clear</button>
-        )}
-      </div>
-      {sqlComputed.length === 0 ? (
-        <div className="banner"><span>Aucun bloc SQL pour l'instant.</span></div>
-      ) : (
-        sqlComputed.map((c, i) => (
-          <SqlBlock key={i} col={c} columns={columns} sources={sources} serverError={errors[c.name]}
-            onChange={(nc) => setSqlComputed(sqlComputed.map((x, j) => (j === i ? nc : x)))}
-            onRemove={() => setSqlComputed(sqlComputed.filter((_, j) => j !== i))} />
-        ))
-      )}
-
-      <div className="sec-h" style={{ marginTop: 20 }}>
-        <h3>Mise en forme conditionnelle</h3>
-        <span className="sub">
-          Comment une colonne existante doit <em>paraître</em>, jamais ce qu'elle contient —
-          une condition simple avec <code>STYLE(color, bold, italic)</code>, ou une requête
-          multi-source (même préfixe SELECT/WITH que le SQL avancé) renvoyant directement une
-          couleur.
-        </span>
-      </div>
-      <div className="filterbar">
-        <button className="btn primary sm" onClick={addStyleRule}><IconCode size={14} /> Ajouter une règle</button>
-        {styleRules.length > 0 && (
-          <button className="btn sm" onClick={() => setStyleRules([])}><IconReset size={13} /> Clear</button>
-        )}
-      </div>
-      {styleRules.length === 0 ? (
-        <div className="banner"><span>Aucune règle de mise en forme pour l'instant.</span></div>
-      ) : (
-        styleRules.map((r, i) => (
-          <StyleRuleRow key={i} rule={r} columns={columns} serverError={(styleErrors ?? {})[r.column]}
-            onChange={(nr) => setStyleRules(styleRules.map((x, j) => (j === i ? nr : x)))}
-            onRemove={() => setStyleRules(styleRules.filter((_, j) => j !== i))} />
-        ))
-      )}
-
-      <div className="sec-h" style={{ marginTop: 20 }}>
-        <h3>Library</h3>
-        <span className="sub">Store this computed set server-side, versioned — reusable in flows.</span>
-      </div>
-      <div className="flowform">
-        <div className="frow"><label>Save as</label>
-          <select value={saveTarget} onChange={(e) => setSaveTarget(e.target.value)}>
-            <option value="">new set…</option>
-            {lib.map((a) => <option key={a.id} value={a.id}>new version of « {a.name} » (v{a.latest_version_no})</option>)}
-          </select></div>
-        {saveTarget === "" && (
-          <div className="frow"><label>Name</label>
-            <input value={saveName} onChange={(e) => setSaveName(e.target.value)} placeholder="e.g. colonnes-clients" /></div>
-        )}
-        <button className="btn primary" onClick={saveToLibrary}>Save to library</button>
-        {lib.length > 0 && (
-          <div className="libcol" style={{ marginTop: 6 }}>
-            {lib.map((a) => (
-              <div key={a.id} className="libitem">
-                <span>{a.name} <span className="csub">v{a.latest_version_no}</span></span>
-                <button className="btn sm" onClick={() => loadFromLibrary(a)}>Load</button>
+            <div className="vars">
+              <div className="vars-h">
+                <span>Variables <span style={{ color: "var(--ink-faint)", fontWeight: 400 }}>— named values usable in expressions as <code>[name]</code></span></span>
+                <button className="btn sm" onClick={addVar}>+ Add variable</button>
               </div>
-            ))}
+              {varEntries.length === 0 ? (
+                <p className="hint" style={{ margin: "4px 0 0" }}>e.g. <code>societe = italie</code>, then use <code>[societe]</code> in any expression.</p>
+              ) : (
+                varEntries.map(([k, v], i) => (
+                  <div className="var-row" key={i}>
+                    <input className="mono-input" value={k} placeholder="name"
+                      onChange={(e) => setVar(k, e.target.value.replace(/[^\w]/g, "_"), v)} />
+                    <span className="var-eq">=</span>
+                    <input className="mono-input" value={v} placeholder="value"
+                      onChange={(e) => setVar(k, k, e.target.value)} />
+                    <button className="hclear" title="Remove" onClick={() => removeVar(k)}>×</button>
+                  </div>
+                ))
+              )}
+            </div>
+
+            {computed.length === 0 ? (
+              <div className="banner"><span>No computed columns yet. Add one, or start from a template above.</span></div>
+            ) : (
+              computed.map((c, i) => (
+                <Row key={i} col={c} columns={columns} serverError={errors[c.name]}
+                  onChange={(nc) => setComputed(computed.map((x, j) => (j === i ? nc : x)))}
+                  onRemove={() => setComputed(computed.filter((_, j) => j !== i))} />
+              ))
+            )}
+          </div>
+        )}
+
+        {tab === "sql" && (
+          <div className="tab-panel">
+            <p className="hint">
+              Requêtes DuckDB contre <code>self</code> (cette session, colonne <code>_row_id</code> incluse) et les
+              sources attachées — jointures, fenêtres, agrégations que les colonnes calculées ne peuvent pas faire.
+              Le résultat doit renvoyer <code>_row_id</code> ; sans lui, la requête est refusée.
+            </p>
+            <div className="filterbar">
+              <button className="btn primary sm" onClick={addSql}><IconCode size={14} /> Ajouter un bloc SQL</button>
+              {sqlComputed.length > 0 && (
+                <button className="btn sm" onClick={() => setSqlComputed([])}><IconReset size={13} /> Clear</button>
+              )}
+            </div>
+            {sqlComputed.length === 0 ? (
+              <div className="banner"><span>Aucun bloc SQL pour l'instant. Attachez d'abord une source dans l'onglet « Sources » si besoin.</span></div>
+            ) : (
+              sqlComputed.map((c, i) => (
+                <SqlBlock key={i} col={c} columns={columns} sources={sources} serverError={errors[c.name]}
+                  onChange={(nc) => setSqlComputed(sqlComputed.map((x, j) => (j === i ? nc : x)))}
+                  onRemove={() => setSqlComputed(sqlComputed.filter((_, j) => j !== i))} />
+              ))
+            )}
+          </div>
+        )}
+
+        {tab === "style" && (
+          <div className="tab-panel">
+            <p className="hint">
+              Comment une colonne existante doit <em>paraître</em>, jamais ce qu'elle contient —
+              une condition simple avec <code>STYLE(color, bold, italic)</code>, ou une requête
+              multi-source (même préfixe SELECT/WITH que le SQL avancé) renvoyant directement une
+              couleur.
+            </p>
+            <div className="filterbar">
+              <button className="btn primary sm" onClick={addStyleRule}><IconCode size={14} /> Ajouter une règle</button>
+              {styleRules.length > 0 && (
+                <button className="btn sm" onClick={() => setStyleRules([])}><IconReset size={13} /> Clear</button>
+              )}
+            </div>
+            {styleRules.length === 0 ? (
+              <div className="banner"><span>Aucune règle de mise en forme pour l'instant.</span></div>
+            ) : (
+              styleRules.map((r, i) => (
+                <StyleRuleRow key={i} rule={r} columns={columns} serverError={(styleErrors ?? {})[r.column]}
+                  onChange={(nr) => setStyleRules(styleRules.map((x, j) => (j === i ? nr : x)))}
+                  onRemove={() => setStyleRules(styleRules.filter((_, j) => j !== i))} />
+              ))
+            )}
+          </div>
+        )}
+
+        {tab === "sources" && (
+          <div className="tab-panel">
+            <p className="hint">Une table interne ou un fichier, croisé avec cette session dans une requête SQL ou une règle de mise en forme — sans construire de flux.</p>
+            {!sid ? (
+              <div className="banner"><span>Chargez d'abord une session.</span></div>
+            ) : (
+              <>
+                <div className="flowform">
+                  <div className="frow"><label>Nom</label>
+                    <input className="mono-input" value={attachName} placeholder="ex. referentiel_clients"
+                      onChange={(e) => setAttachName(e.target.value.replace(/\s+/g, "_"))} /></div>
+                  <div className="frow"><label>Table interne</label>
+                    <select value={attachDatasetId} onChange={(e) => setAttachDatasetId(e.target.value)}>
+                      <option value="">— choisir —</option>
+                      {datasets.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+                    </select></div>
+                  <button className="btn sm" disabled={!attachName.trim() || !attachDatasetId} onClick={attachDataset}>
+                    Attacher la table
+                  </button>
+                  <span style={{ marginLeft: 8 }}>ou</span>
+                  <button className="btn sm" onClick={() => uploadRef.current?.click()}>
+                    <IconUpload size={13} /> Importer un fichier
+                  </button>
+                  <input ref={uploadRef} type="file" accept=".csv,.xlsx,.xls" hidden
+                    onChange={(e) => { const f = e.target.files?.[0]; if (f) attachUpload(f); e.target.value = ""; }} />
+                </div>
+                {sources.length === 0 ? (
+                  <p className="hint">Aucune source attachée pour l'instant.</p>
+                ) : (
+                  <div className="libcol" style={{ marginTop: 6 }}>
+                    {sources.map((s) => (
+                      <div key={s.name} className="libitem">
+                        <span><code>{s.name}</code> <span className="csub">{s.row_count} ligne(s), {s.columns.length} colonne(s)</span></span>
+                        <button className="btn sm" onClick={() => detachSource(s.name)}>Détacher</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        )}
+
+        {tab === "library" && (
+          <div className="tab-panel">
+            <p className="hint">Store this computed set server-side, versioned — reusable in flows.</p>
+            <div className="flowform">
+              <div className="frow"><label>Save as</label>
+                <select value={saveTarget} onChange={(e) => setSaveTarget(e.target.value)}>
+                  <option value="">new set…</option>
+                  {lib.map((a) => <option key={a.id} value={a.id}>new version of « {a.name} » (v{a.latest_version_no})</option>)}
+                </select></div>
+              {saveTarget === "" && (
+                <div className="frow"><label>Name</label>
+                  <input value={saveName} onChange={(e) => setSaveName(e.target.value)} placeholder="e.g. colonnes-clients" /></div>
+              )}
+              <button className="btn primary" onClick={saveToLibrary}>Save to library</button>
+            </div>
+            {lib.length === 0 ? (
+              <div className="banner"><span>Rien dans la bibliothèque pour l'instant.</span></div>
+            ) : (
+              <div className="libcol" style={{ marginTop: 6 }}>
+                {lib.map((a) => (
+                  <div key={a.id} className="libitem">
+                    <span>{a.name} <span className="csub">v{a.latest_version_no}</span></span>
+                    <button className="btn sm" onClick={() => loadFromLibrary(a)}>Load</button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </div>
 
       <aside className="reference">
-        <div className="ref-h">Syntax</div>
-        <p className="hint">Reference a column with <code>[name]</code>. Wrap text in <code>"quotes"</code>. Renamed columns use their new name.</p>
-        <div className="ref-list">
-          {FUNCS.map(([sig, desc]) => (
-            <div key={sig} className="ref-item"><code>{sig}</code><span>{desc}</span></div>
-          ))}
-        </div>
-        <div className="ref-h" style={{ marginTop: 16 }}>Dynamic tokens</div>
-        <p className="hint">Use like a column: <code>[DATENOW]</code>, <code>[MOIS]</code>, <code>[MOIS_NOM]</code>, <code>[MOIS_COURT]</code>, <code>[JOUR]</code>, <code>[ANNEE]</code>, <code>[JOUR_NOM]</code>.</p>
-        <div className="ref-h" style={{ marginTop: 16 }}>Examples</div>
-        <div className="ref-list">
-          <div className="ref-item"><code>CONCAT([nom], " ", [prenom])</code><span>full name</span></div>
-          <div className="ref-item"><code>IF([age] &gt; "18", "adult", "minor")</code><span>conditional label</span></div>
-          <div className="ref-item"><code>UPPER(TRIM([code]))</code><span>clean code</span></div>
-        </div>
+        {tab === "sources" ? (
+          <>
+            <div className="ref-h">Sources attachées</div>
+            <p className="hint">Une table interne déjà chargée dans l'application, ou un fichier importé à la volée — devient une table nommée utilisable dans une requête SQL avancée ou une règle de mise en forme.</p>
+            <p className="hint">Le nom donné ici est celui à utiliser dans vos requêtes, ex. <code>FROM self LEFT JOIN referentiel_clients ...</code>.</p>
+          </>
+        ) : tab === "library" ? (
+          <>
+            <div className="ref-h">Bibliothèque</div>
+            <p className="hint">Un ensemble enregistré regroupe colonnes calculées, blocs SQL et règles de mise en forme actuels — versionné, chargeable dans une autre session ou un flux.</p>
+          </>
+        ) : (
+          <>
+            <div className="ref-h">Syntax</div>
+            <p className="hint">Reference a column with <code>[name]</code>. Wrap text in <code>"quotes"</code>. Renamed columns use their new name.</p>
+            <div className="ref-list">
+              {FUNCS.map(([sig, desc]) => (
+                <div key={sig} className="ref-item"><code>{sig}</code><span>{desc}</span></div>
+              ))}
+            </div>
+            <div className="ref-h" style={{ marginTop: 16 }}>Dynamic tokens</div>
+            <p className="hint">Use like a column: <code>[DATENOW]</code>, <code>[MOIS]</code>, <code>[MOIS_NOM]</code>, <code>[MOIS_COURT]</code>, <code>[JOUR]</code>, <code>[ANNEE]</code>, <code>[JOUR_NOM]</code>.</p>
+            <div className="ref-h" style={{ marginTop: 16 }}>Examples</div>
+            <div className="ref-list">
+              <div className="ref-item"><code>CONCAT([nom], " ", [prenom])</code><span>full name</span></div>
+              <div className="ref-item"><code>IF([age] &gt; "18", "adult", "minor")</code><span>conditional label</span></div>
+              <div className="ref-item"><code>UPPER(TRIM([code]))</code><span>clean code</span></div>
+            </div>
+          </>
+        )}
       </aside>
     </div>
   );
