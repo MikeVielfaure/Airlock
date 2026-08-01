@@ -19,11 +19,40 @@ To add a function: write it, register it in FUNCTIONS. Nothing else changes.
 """
 
 import ast
+import json
 import math
 import re
 from typing import Callable
 
 import pandas as pd
+
+
+def _dot_lookup(const: dict, name: str) -> str | None:
+    """`[connexion.champ]` — one (or more, `a.b.c`) levels into a variable
+    whose value happens to be a JSON object, the shape every référentiel
+    connection point (and any hand-written structured `value`) already
+    stores. `None` for anything that doesn't resolve — a plain `[NOM]` with
+    no dot never reaches this function at all, so existing expressions are
+    untouched."""
+    if "." not in name:
+        return None
+    base, _, rest = name.partition(".")
+    raw = const.get(base)
+    if raw is None:
+        return None
+    try:
+        val = json.loads(raw)
+    except (TypeError, ValueError):
+        return None
+    for step in rest.split("."):
+        if not isinstance(val, dict):
+            return None
+        val = val.get(step)
+    if val is None:
+        return ""
+    if isinstance(val, (dict, list)):
+        return json.dumps(val)
+    return str(val)
 
 
 def _is_blank(v) -> bool:
@@ -308,7 +337,9 @@ class ComputeService:
 
         [NAME] resolves, in order, to: a column value, then a config variable,
         then a built-in dynamic token (DATENOW, MOIS, JOUR…). `lookup_map`
-        (source -> label) backs LOOKUP() against the loaded TCO.
+        (source -> label) backs LOOKUP() against the loaded TCO. [NAME.field]
+        reaches one level (or more, NAME.a.b) into a variable whose value is a
+        JSON object — the shape a référentiel connection point already stores.
         """
         code = self.compile_expr(expr)
         # Real nulls (NaN/NaT/None) become "" so [x] is empty rather than the
@@ -331,7 +362,9 @@ class ComputeService:
                 series = cols.get(name)
                 if series is not None:
                     return series[_i]
-                return const.get(name, "")
+                if name in const:
+                    return const[name]
+                return _dot_lookup(const, name) or ""
 
             def _col(name, default="", _i=i):
                 series = cols.get(str(name))

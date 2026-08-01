@@ -19,27 +19,27 @@ export function YamlPanel({ yaml, generating, onCopy, onImportYaml, notify }: Pr
   useEffect(() => { refreshLib(); }, [refreshLib]);
 
   const saveToLibrary = async () => {
-    if (!yaml.trim()) { notify("Nothing to save — build a config first.", "err"); return; }
+    if (!yaml.trim()) { notify("Rien à enregistrer — construisez d'abord une config.", "err"); return; }
     try {
       if (saveTarget) {
         const a = await api.addArtefactVersion("config", saveTarget, { yaml });
-        notify(`Saved as version ${a.latest_version_no} of « ${a.name} ».`, "ok");
+        notify(`Enregistré comme version ${a.latest_version_no} de « ${a.name} ».`, "ok");
       } else {
-        if (!saveName.trim()) { notify("Give the config a name.", "err"); return; }
+        if (!saveName.trim()) { notify("Donnez un nom à la config.", "err"); return; }
         await api.createArtefact("config", { name: saveName.trim(), yaml });
-        notify(`Config « ${saveName.trim() } » saved to the library.`, "ok");
+        notify(`Config « ${saveName.trim() } » enregistrée dans la bibliothèque.`, "ok");
         setSaveName("");
       }
       refreshLib();
-    } catch (e) { notify(e instanceof Error ? e.message : "Save failed.", "err"); }
+    } catch (e) { notify(e instanceof Error ? e.message : "Échec de l'enregistrement.", "err"); }
   };
 
   const loadFromLibrary = async (a: ArtefactInfo) => {
     try {
       const v = await api.getConfigYaml(a.id, a.latest_version_no);
       await onImportYaml(v.yaml);
-      notify(`Config « ${a.name} » (v${a.latest_version_no}) loaded.`, "ok");
-    } catch (e) { notify(e instanceof Error ? e.message : "Load failed.", "err"); }
+      notify(`Config « ${a.name} » (v${a.latest_version_no}) chargée.`, "ok");
+    } catch (e) { notify(e instanceof Error ? e.message : "Échec du chargement.", "err"); }
   };
   const [highlighted, setHighlighted] = useState("");
 
@@ -64,41 +64,41 @@ export function YamlPanel({ yaml, generating, onCopy, onImportYaml, notify }: Pr
     <div>
       <div className="sec-h">
         <h3>Configuration</h3>
-        <span className="sub">The declarative rules above, as portable YAML.</span>
+        <span className="sub">Les règles déclaratives ci-dessus, en YAML portable.</span>
       </div>
       <div className="yaml-actions">
-        <button className="btn sm" onClick={onCopy}><IconCopy size={14} /> Copy</button>
-        <button className="btn sm" onClick={download}><IconDownload size={14} /> Download .yaml</button>
+        <button className="btn sm" onClick={onCopy}><IconCopy size={14} /> Copier</button>
+        <button className="btn sm" onClick={download}><IconDownload size={14} /> Télécharger .yaml</button>
       </div>
       {generating ? (
-        <div className="banner"><span>Generating…</span></div>
+        <div className="banner"><span>Génération…</span></div>
       ) : (
         <pre className="yaml" dangerouslySetInnerHTML={{ __html: highlighted }} />
       )}
 
       <div className="sec-h" style={{ marginTop: 22 }}>
-        <h3>Library</h3>
-        <span className="sub">Store this config server-side, versioned — flows can then run it by id.</span>
+        <h3>Bibliothèque</h3>
+        <span className="sub">Enregistre cette config côté serveur, versionnée — les flux peuvent ensuite l'exécuter par son id.</span>
       </div>
       <div className="flowform">
-        <div className="frow"><label>Save as</label>
+        <div className="frow"><label>Enregistrer sous</label>
           <select value={saveTarget} onChange={(e) => setSaveTarget(e.target.value)}>
-            <option value="">new config…</option>
-            {lib.map((a) => <option key={a.id} value={a.id}>new version of « {a.name} » (v{a.latest_version_no})</option>)}
+            <option value="">nouvelle config…</option>
+            {lib.map((a) => <option key={a.id} value={a.id}>nouvelle version de « {a.name} » (v{a.latest_version_no})</option>)}
           </select></div>
         {saveTarget === "" && (
-          <div className="frow"><label>Name</label>
-            <input value={saveName} onChange={(e) => setSaveName(e.target.value)} placeholder="e.g. clients-fournisseur-x" /></div>
+          <div className="frow"><label>Nom</label>
+            <input value={saveName} onChange={(e) => setSaveName(e.target.value)} placeholder="ex. clients-fournisseur-x" /></div>
         )}
-        <button className="btn primary" onClick={saveToLibrary}>Save to library</button>
+        <button className="btn primary" onClick={saveToLibrary}>Enregistrer dans la bibliothèque</button>
       </div>
       {lib.length > 0 && (
         <div className="libcol" style={{ marginTop: 10 }}>
-          <div className="libcol-h">Stored configs</div>
+          <div className="libcol-h">Configs enregistrées</div>
           {lib.map((a) => (
             <div key={a.id} className="libitem">
               <span>{a.name} <span className="csub">v{a.latest_version_no}</span></span>
-              <button className="btn sm" onClick={() => loadFromLibrary(a)}>Load</button>
+              <button className="btn sm" onClick={() => loadFromLibrary(a)}>Charger</button>
             </div>
           ))}
         </div>

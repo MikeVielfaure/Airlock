@@ -47,3 +47,9 @@ export const IconEdit = ({ size, className }: P): JSX.Element => (
 export const IconSave = ({ size, className }: P): JSX.Element => (
   <svg {...s(size)} className={className}><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z" {...stroke} /><path d="M17 21v-8H7v8M7 3v5h8" {...stroke} /></svg>
 );
+export const IconMaximize = ({ size, className }: P): JSX.Element => (
+  <svg {...s(size)} className={className}><path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M21 16v3a2 2 0 0 1-2 2h-3M3 16v3a2 2 0 0 0 2 2h3" {...stroke} /></svg>
+);
+export const IconMinimize = ({ size, className }: P): JSX.Element => (
+  <svg {...s(size)} className={className}><path d="M9 3v3a2 2 0 0 1-2 2H4M15 3v3a2 2 0 0 0 2 2h3M21 15h-3a2 2 0 0 0-2 2v3M3 15h3a2 2 0 0 1 2 2v3" {...stroke} /></svg>
+);

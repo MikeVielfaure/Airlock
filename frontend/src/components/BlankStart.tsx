@@ -43,71 +43,73 @@ export function BlankStart({ onStart }: Props) {
   return (
     <div className="blank">
       <div className="blank-head">
-        <h2>Start from a schema</h2>
-        <p>No file needed: define the columns, then type rows by hand in Data — to
-          try a config, build a small reference, or seed an empty table.</p>
+        <h2>Démarrer à partir d'un schéma</h2>
+        <p>Aucun fichier nécessaire : définissez les colonnes, puis saisissez les lignes
+          à la main dans Données — pour essayer une config, construire une petite référence,
+          ou amorcer une table vide.</p>
       </div>
 
       <div className="blank-modes">
         <button className={`blank-mode ${mode === "scratch" ? "on" : ""}`}
                 onClick={() => setMode("scratch")}>
-          <IconList size={16} /> Columns by hand
+          <IconList size={16} /> Colonnes à la main
         </button>
         <button className={`blank-mode ${mode === "artefact" ? "on" : ""}`}
                 onClick={() => setMode("artefact")}>
-          <IconTable size={16} /> From a saved config
+          <IconTable size={16} /> Depuis une config enregistrée
         </button>
       </div>
 
       {mode === "scratch" ? (
         <div className="blank-body">
-          <label className="blank-label">Columns</label>
+          <label className="blank-label">Colonnes</label>
           <div className="blank-cols">
             {cols.map((c, i) => (
               <div key={i} className="blank-col">
-                <input value={c} placeholder={`column ${i + 1}`} autoFocus={i === 0}
+                <input value={c} placeholder={`colonne ${i + 1}`} autoFocus={i === 0}
                        onChange={(e) => setCol(i, e.target.value)}
                        onKeyDown={(e) => { if (e.key === "Enter" && scratchOk)
                          onStart({ columns: clean, rows }, "manual"); }} />
                 {cols.length > 1 && (
-                  <button className="blank-rm" title="Remove" onClick={() => rmCol(i)}>
+                  <button className="blank-rm" title="Retirer" onClick={() => rmCol(i)}>
                     <IconReset size={13} />
                   </button>
                 )}
               </div>
             ))}
           </div>
-          <button className="btn sm" onClick={addCol}><IconCode size={13} /> Add column</button>
+          <button className="btn sm" onClick={addCol}><IconCode size={13} /> Ajouter une colonne</button>
 
           {dupes.length > 0 && (
-            <p className="blank-warn">Duplicate column name: {[...new Set(dupes)].join(", ")}</p>
+            <p className="blank-warn">Nom de colonne en double : {[...new Set(dupes)].join(", ")}</p>
           )}
 
-          <label className="blank-label">Start with</label>
+          <label className="blank-label">Démarrer avec</label>
           <div className="blank-rows">
             {[0, 1, 3, 5].map((n) => (
               <button key={n} className={`blank-chip ${rows === n ? "on" : ""}`}
                       onClick={() => setRows(n)}>
-                {n === 0 ? "no rows" : `${n} blank row${n > 1 ? "s" : ""}`}
+                {n === 0 ? "aucune ligne" : `${n} ligne${n > 1 ? "s" : ""} vide${n > 1 ? "s" : ""}`}
               </button>
             ))}
           </div>
 
           <button className="btn primary blank-go" disabled={!scratchOk}
                   onClick={() => onStart({ columns: clean, rows }, "manual")}>
-            <IconPlay size={15} /> Create session
+            <IconPlay size={15} /> Créer la session
           </button>
         </div>
       ) : (
         <div className="blank-body">
           {all.length === 0 ? (
-            <p className="blank-empty">No saved config or EDI model yet. Save one from the
-              Schema or EDI view first, then seed a session from it here.</p>
+            <p className="blank-empty">Aucune config ou modèle EDI enregistré pour le moment.
+              Enregistrez-en un d'abord depuis la vue Schéma ou EDI, puis amorcez une session à
+              partir d'ici.</p>
           ) : (
             <>
-              <label className="blank-label">Seed columns and rules from</label>
+              <label className="blank-label">Amorcer les colonnes et règles depuis</label>
               <select value={pick} onChange={(e) => setPick(e.target.value)}>
-                <option value="">— pick a config or EDI model —</option>
+                <option value="">— choisir une config ou un modèle EDI —</option>
                 {configs.length > 0 && (
                   <optgroup label="Configs">
                     {configs.map((a) => (
@@ -116,7 +118,7 @@ export function BlankStart({ onStart }: Props) {
                   </optgroup>
                 )}
                 {ediModels.length > 0 && (
-                  <optgroup label="EDI models">
+                  <optgroup label="Modèles EDI">
                     {ediModels.map((a) => (
                       <option key={a.id} value={a.id}>{a.name} (v{a.latest_version_no})</option>
                     ))}
@@ -127,17 +129,17 @@ export function BlankStart({ onStart }: Props) {
               {picked && (
                 <p className="blank-note">
                   {picked.k === "config"
-                    ? "The column rules come with it — the session is ready to validate at once."
-                    : "The EDI model brings its flat column names; validation rules are yours to add."}
+                    ? "Les règles de colonnes sont incluses — la session est prête à valider immédiatement."
+                    : "Le modèle EDI apporte ses noms de colonnes à plat ; les règles de validation restent à ajouter."}
                 </p>
               )}
 
-              <label className="blank-label">Start with</label>
+              <label className="blank-label">Démarrer avec</label>
               <div className="blank-rows">
                 {[0, 1, 3, 5].map((n) => (
                   <button key={n} className={`blank-chip ${rows === n ? "on" : ""}`}
                           onClick={() => setRows(n)}>
-                    {n === 0 ? "no rows" : `${n} blank row${n > 1 ? "s" : ""}`}
+                    {n === 0 ? "aucune ligne" : `${n} ligne${n > 1 ? "s" : ""} vide${n > 1 ? "s" : ""}`}
                   </button>
                 ))}
               </div>
@@ -145,7 +147,7 @@ export function BlankStart({ onStart }: Props) {
               <button className="btn primary blank-go" disabled={!pick}
                       onClick={() => onStart({ artefact_id: pick, rows },
                                              picked?.name ?? "seeded")}>
-                <IconPlay size={15} /> Start from this schema
+                <IconPlay size={15} /> Démarrer depuis ce schéma
               </button>
             </>
           )}

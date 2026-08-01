@@ -61,6 +61,7 @@ export default function App() {
     if (v) setStrictHeaderRaw(false);
   }, []);
   const [configVariables, setConfigVariables] = useState<Record<string, string>>({});  // named values for expressions
+  const [refVariables, setRefVariables] = useState<string[]>([]);  // référentiel variables, resolved server-side by name
   const [tableMarker, setTableMarker] = useState("");          // Excel multi-table: row marker
   const [tableIndex, setTableIndex] = useState(0);             // which table (0-based)
   const [tableHeaderMode, setTableHeaderMode] = useState<"local" | "global">("local");
@@ -102,7 +103,7 @@ export default function App() {
 
   const rawFileRef = useRef<File | null>(null);   // last uploaded file (for sheet re-load)
 
-  useEffect(() => { api.presets().then(setPresets).catch(() => toast("Could not reach the API.", "err")); }, [toast]);
+  useEffect(() => { api.presets().then(setPresets).catch(() => toast("Impossible de joindre l'API.", "err")); }, [toast]);
 
   // Match a YAML config against a set of columns: rebuild fields from defaults,
   // overlay matched ones, and restrict visibility to the config's fields.
@@ -127,6 +128,7 @@ export default function App() {
       setStrictHeader(Boolean(fc.strict_header));
       setMinHeader(Boolean(fc.min_header));
       setConfigVariables(fc.variables ?? {});
+      setRefVariables(fc.ref_variables ?? []);
       setTableMarker(fc.table_marker ?? "");
       setTableIndex(fc.table_index ?? 0);
       setTableHeaderMode((fc.table_header_mode as "local" | "global") ?? "local");
@@ -264,9 +266,9 @@ export default function App() {
     try {
       const res = await api.createBlankSession(body);
       adoptSession(res, label);
-      toast(body.artefact_id ? "Session started from the schema." : "Blank session ready.", "ok");
+      toast(body.artefact_id ? "Session démarrée depuis le schéma." : "Session vierge prête.", "ok");
     } catch (e) {
-      toast(e instanceof Error ? e.message : "Could not start the session.", "err");
+      toast(e instanceof Error ? e.message : "Impossible de démarrer la session.", "err");
     }
   }, [adoptSession, toast]);
 
@@ -297,7 +299,7 @@ export default function App() {
         setVisible((prev) => newCols.filter((c) => prev.includes(c)));
         setFields((prev) => Object.fromEntries(newCols.map((c) => [c, prev[c] ?? defaultField(c)])));
       }
-      toast("Structure applied.", "ok");
+      toast("Structure appliquée.", "ok");
     } catch (e) { toast(String((e as Error).message), "err"); }
   }, [sid, header, configYaml, matchConfig, toast]);
 
@@ -327,13 +329,13 @@ export default function App() {
     setVisible((prev) => (prev.includes(col) ? prev : [...prev, col]));
     setUnmapped((prev) => prev.filter((c) => c !== col));
     setUnmatchedConfig((prev) => prev.filter((f) => (f.mapping || (f.name && f.name[0])) !== label));
-    toast(`“${col}” linked to config field “${label}”.`, "ok");
+    toast(`« ${col} » liée au champ de config « ${label} ».`, "ok");
   }, [toast]);
 
   const resetFields = useCallback(() => {
     setFields(Object.fromEntries(columns.map((c) => [c, defaultField(c)])));
     setResult(null);
-    toast("Field rules reset.", "info");
+    toast("Règles de champ réinitialisées.", "info");
   }, [columns, toast]);
 
   // ── tco ──────────────────────────────────────────────────
@@ -356,7 +358,7 @@ export default function App() {
       const validComputed = computed.filter((c) => c.name.trim() && c.expression.trim());
       const validSqlComputed = sqlComputed.filter((c) => c.name.trim() && c.expression.trim());
       const validStyleRules = styleRules.filter((r) => r.column.trim() && r.expression.trim());
-      const res = await api.process(sid, { visible_cols: visible, fields: visFields, identifier_field: idField, computed: validComputed, sql_computed: validSqlComputed, style_rules: validStyleRules, variables: configVariables });
+      const res = await api.process(sid, { visible_cols: visible, fields: visFields, identifier_field: idField, computed: validComputed, sql_computed: validSqlComputed, style_rules: validStyleRules, variables: configVariables, ref_variables: refVariables });
       setResult(res);
       setTab("data");
       (res.warnings ?? []).forEach((w) => toast(w, "info"));
@@ -365,7 +367,7 @@ export default function App() {
       else toast(`Validated — ${res.stats.rows_err} rows with errors, ${res.stats.rows_clean} cleaned.`, res.stats.rows_err ? "info" : "ok");
     } catch (e) { toast(String((e as Error).message), "err"); }
     finally { setRunning(false); }
-  }, [sid, visible, fields, computed, sqlComputed, styleRules, configVariables, toast]);
+  }, [sid, visible, fields, computed, sqlComputed, styleRules, configVariables, refVariables, toast]);
 
   // ── yaml import ──────────────────────────────────────────
   const onImportYaml = useCallback(async (text: string) => {
@@ -380,11 +382,11 @@ export default function App() {
         if ((sheetDiff || tableDiff) && rawFileRef.current) {
           await onUpload(rawFileRef.current, { sheet: r.sheet ?? sheet ?? undefined, marker: r.marker ?? "", index: r.index ?? 0, headerMode: r.headerMode ?? "local" });
         }
-        toast(`Config applied — ${r.matched} field(s) active.`, "ok");
+        toast(`Config appliquée — ${r.matched} champ(s) actif(s).`, "ok");
       } else {
         // No file yet — remember sheet/table for the next upload, apply config then.
         await matchConfig(text, [], true);
-        toast("Config saved — it will apply automatically when you load a file.", "info");
+        toast("Config enregistrée — elle s'appliquera automatiquement au chargement d'un fichier.", "info");
       }
     } catch (e) { toast(String((e as Error).message), "err"); }
   }, [columns, sheet, sheets, tableMarker, tableIndex, tableHeaderMode, matchConfig, onUpload, toast]);
@@ -398,7 +400,7 @@ export default function App() {
     setFields({}); setComputed([]); setResult(null);
     setTco(null); setConfigYaml(null); setConfigFields({}); setUnmatchedConfig([]);
     setTableFilters({}); setHeader(defaultHeader()); setTab("schema");
-    setConfigVariables({}); setStrictHeader(false); setMinHeader(false);
+    setConfigVariables({}); setRefVariables([]); setStrictHeader(false); setMinHeader(false);
     setTableMarker(""); setTableIndex(0); setTableHeaderMode("local"); setTableCount(0);
     toast("Reset — everything cleared.", "ok");
   }, [toast]);
@@ -416,6 +418,7 @@ export default function App() {
       strict_header: strictHeader,
       min_header: minHeader,
       variables: configVariables,
+      ref_variables: refVariables,
       table_marker: tableMarker || null,
       table_index: tableIndex,
       table_header_mode: tableHeaderMode,
@@ -425,7 +428,7 @@ export default function App() {
       filters: tableFilters,
     }).then((r) => setYaml(r.yaml)).catch((e) => toast(String((e as Error).message), "err"))
       .finally(() => setYamlGen(false));
-  }, [tab, fileType, encoding, delimiterKey, header, fields, visible, presets, sheet, tableFilters, strictHeader, minHeader, configVariables, tableMarker, tableIndex, tableHeaderMode, toast]);
+  }, [tab, fileType, encoding, delimiterKey, header, fields, visible, presets, sheet, tableFilters, strictHeader, minHeader, configVariables, refVariables, tableMarker, tableIndex, tableHeaderMode, toast]);
 
   const copyYaml = useCallback(() => {
     navigator.clipboard.writeText(yaml).then(() => toast("YAML copied.", "ok"));
@@ -570,7 +573,7 @@ export default function App() {
     setPreview(tp);
     setResult(null);
     setDeletedTotal(0);
-    toast("All manual edits discarded — file restored.", "info");
+    toast("Toutes les modifications manuelles annulées — fichier restauré.", "info");
   }, [sid, toast]);
 
   // Effective column names available inside computed expressions: renamed where
@@ -589,10 +592,10 @@ export default function App() {
     return (
       <div className="badges">
         {loadedName && <span className="badge"><b>{loadedName}</b></span>}
-        <span className="badge">Columns <b>{columns.length}</b></span>
-        <span className="badge">Rows <b>{(preview?.total_rows ?? 0).toLocaleString()}</b></span>
-        {meta && fileType === "CSV" && <span className="badge">Enc <b className="mono">{meta.encoding}</b></span>}
-        {meta && fileType === "CSV" && <span className="badge">Delim <b className="mono">{meta.delimiter}</b></span>}
+        <span className="badge">Colonnes <b>{columns.length}</b></span>
+        <span className="badge">Lignes <b>{(preview?.total_rows ?? 0).toLocaleString()}</b></span>
+        {meta && fileType === "CSV" && <span className="badge">Enc. <b className="mono">{meta.encoding}</b></span>}
+        {meta && fileType === "CSV" && <span className="badge">Délim. <b className="mono">{meta.delimiter}</b></span>}
         {tco && <span className="badge">TCO <b>{tco.labels.length}</b></span>}
       </div>
     );
@@ -613,7 +616,7 @@ export default function App() {
     <nav className="tabs">
       {gate("schema", (
         <button className={`tab ${tab === "schema" ? "active" : ""}`} onClick={() => setTab("schema")}>
-          <IconList size={15} /> Schéma & Règles <span className="count">{visible.length}</span>
+          <IconList size={15} /> Schéma & Règles {visible.length > 0 && <span className="count">{visible.length}</span>}
         </button>
       ))}
       {gate("computed", (
@@ -690,7 +693,7 @@ export default function App() {
           <span className="brand-mark"><IconGrid size={17} /></span>
           <div>
             <div className="brand-name">File Explorer</div>
-            <div className="brand-sub">schema workbench · csv / xlsx</div>
+            <div className="brand-sub">atelier de schéma · csv / xlsx</div>
           </div>
         </div>
         {badges}
@@ -707,7 +710,7 @@ export default function App() {
           </span>
         )}
         <select className="envpick" value={env} onChange={(e) => setEnv(e.target.value)}
-                title="Environment — scopes configs, mappings, flows, functions and tables">
+                title="Environnement — délimite les configs, correspondances, flux, fonctions et tables">
           {envs.map((e) => <option key={e} value={e}>{e}</option>)}
         </select>
       </header>
@@ -783,7 +786,9 @@ export default function App() {
                           setComputed={setComputed} sqlComputed={sqlComputed} setSqlComputed={setSqlComputed}
                           styleRules={styleRules} setStyleRules={setStyleRules}
                           variables={configVariables}
-                          setVariables={setConfigVariables} errors={result?.compute_errors ?? {}}
+                          setVariables={setConfigVariables}
+                          refVariables={refVariables} setRefVariables={setRefVariables}
+                          errors={result?.compute_errors ?? {}}
                           styleErrors={result?.style_errors ?? {}} />
                       )
                     : tab === "yaml" ? (
@@ -836,6 +841,7 @@ export default function App() {
                     sqlComputed={sqlComputed} setSqlComputed={setSqlComputed}
                     styleRules={styleRules} setStyleRules={setStyleRules}
                     variables={configVariables} setVariables={setConfigVariables}
+                    refVariables={refVariables} setRefVariables={setRefVariables}
                     errors={result?.compute_errors ?? {}} styleErrors={result?.style_errors ?? {}} />
                 )}
                 {tab === "data" && (

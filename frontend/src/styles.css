@@ -460,6 +460,11 @@ pre.yaml .k { color: #8db4ff; }
   border: 1px solid var(--line); border-radius: var(--r); background: var(--panel);
   overflow: auto; height: 58vh; min-height: 320px; position: relative;
 }
+.table-fullscreen {
+  position: fixed; inset: 0; z-index: 500; background: var(--bg);
+  padding: 18px 22px 22px; overflow-y: auto; display: flex; flex-direction: column;
+}
+.table-fullscreen .vtable { flex: 1 1 auto; height: auto; }
 .vthead {
   display: grid; position: sticky; top: 0; z-index: 2;
   background: var(--panel-2); border-bottom: 1px solid var(--line-strong);
@@ -1278,7 +1283,9 @@ pre.yaml .k { color: #8db4ff; }
 /* ── the door, and who is behind it (v24) ────────────────────────── */
 .gate { display: flex; align-items: center; justify-content: center; min-height: 70vh; padding: 20px; }
 .gate-card { display: flex; flex-direction: column; gap: 10px; width: 100%; max-width: 360px;
-  border: 1px solid var(--line); border-radius: var(--r); background: var(--panel); padding: 20px; }
+  border: 1px solid var(--line); border-radius: var(--r); background: var(--panel); padding: 24px;
+  box-shadow: 0 8px 28px rgba(20, 20, 40, 0.06); }
+.gate-brand { display: flex; align-items: center; gap: 11px; margin-bottom: 4px; }
 .gate-card h2 { margin: 0; font-size: 16px; }
 .gate-note { font-size: 12.5px; line-height: 1.6; color: var(--ink-soft); margin: 0; }
 .gate-card input { border: 1px solid var(--line-strong); border-radius: var(--r-sm);

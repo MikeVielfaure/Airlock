@@ -3,6 +3,7 @@
 import type {
   ArtefactInfo,
   AuthUser,
+  AvailableVariable,
   EnvProfile,
   TcoSuggestRow,
   RunRow,
@@ -47,6 +48,7 @@ export interface ExportArgsLocal {
   strict_header?: boolean;
   min_header?: boolean;
   variables?: Record<string, string>;
+  ref_variables?: string[];
   table_marker?: string | null;
   table_index?: number;
   table_header_mode?: string;
@@ -183,6 +185,7 @@ export const api = {
       sql_computed?: { name: string; expression: string }[];
       style_rules?: { column: string; expression: string }[];
       variables?: Record<string, string>;
+      ref_variables?: string[];
     },
   ) =>
     fetch(`${BASE}/files/${sid}/process`, {
@@ -209,9 +212,29 @@ export const api = {
       .then((r) => json<SourceInfo>(r));
   },
 
+  attachExternalDbSource: (sid: string, name: string, connection: string, query: string,
+                          params: Record<string, string>) =>
+    fetch(`${BASE}/files/${sid}/sources/external_db`, {
+      method: "POST", headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ name, connection, query, params }),
+    }).then((r) => json<SourceInfo>(r)),
+
+  attachApiSource: (sid: string, name: string, connection: string, path: string, method: string,
+                   responseKind: string, dataPath: string, body?: Record<string, unknown>) =>
+    fetch(`${BASE}/files/${sid}/sources/api`, {
+      method: "POST", headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ name, connection, path, method, response_kind: responseKind,
+                            data_path: dataPath, body: body ?? null }),
+    }).then((r) => json<SourceInfo>(r)),
+
   detachSource: (sid: string, name: string) =>
     fetch(`${BASE}/files/${sid}/sources/${encodeURIComponent(name)}`,
          { method: "DELETE", headers: authHeaders() }).then((r) => json<{ ok: boolean }>(r)),
+
+  /** Référentiel variables pickable outside the référentiel itself. */
+  listAvailableVariables: (kind = "") =>
+    fetch(`${BASE}/variables/available${kind ? `?kind=${encodeURIComponent(kind)}` : ""}`,
+         { headers: authHeaders() }).then((r) => json<AvailableVariable[]>(r)),
 
   getRows: (
     sid: string,

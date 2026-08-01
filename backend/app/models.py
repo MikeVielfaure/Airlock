@@ -69,6 +69,7 @@ class FileConfig(BaseModel):
     strict_header: bool = False             # require the file header to match the config exactly
     min_header: bool = False                # require at least the config's columns; extra tolerated
     variables: Dict[str, str] = Field(default_factory=dict)   # named values usable in expressions
+    ref_variables: List[str] = Field(default_factory=list)    # référentiel variable names, resolved server-side
     delete_char_delimiter: Optional[bool] = False
     header: Optional[HeaderConfig] = None
     Fields: List[FieldConfig] = Field(default_factory=list)
@@ -114,7 +115,29 @@ class ProcessRequest(BaseModel):
     sql_computed: List[ComputedColumn] = Field(default_factory=list)
     style_rules: List[StyleRule] = Field(default_factory=list)
     variables: Dict[str, str] = Field(default_factory=dict)   # config variables -> value
+    # Names picked from the référentiel — never a value the client already
+    # knows. Resolved server-side at process time, exactly like a flow
+    # resolves a connection: a variable can change after being picked, and a
+    # secret must never even transit through this request.
+    ref_variables: List[str] = Field(default_factory=list)
     preview_limit: int = 150
+
+
+class AttachExternalDbSource(BaseModel):
+    name: str
+    connection: str          # référentiel variable name, kind "external_db"
+    query: str
+    params: Dict[str, str] = Field(default_factory=dict)
+
+
+class AttachApiSource(BaseModel):
+    name: str
+    connection: str          # référentiel variable name, kind "api"
+    path: str = ""
+    method: str = "GET"
+    body: Optional[dict] = None
+    response_kind: str = "json"   # json | csv | xlsx
+    data_path: str = ""           # dot path into the JSON payload — only when response_kind == "json"
 
 
 class ExportRequest(BaseModel):
@@ -128,6 +151,7 @@ class ExportRequest(BaseModel):
     strict_header: bool = False
     min_header: bool = False
     variables: Dict[str, str] = Field(default_factory=dict)
+    ref_variables: List[str] = Field(default_factory=list)
     header: HeaderConfig = Field(default_factory=HeaderConfig)
     fields: Dict[str, FieldConfig] = Field(default_factory=dict)
     visible_cols: List[str] = Field(default_factory=list)

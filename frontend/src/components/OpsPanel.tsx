@@ -8,6 +8,7 @@ import {
 interface Props { notify: (m: string, k?: "ok" | "err" | "info") => void }
 
 const SCOPES: VariableRow["scope"][] = ["global", "environment", "flow", "brick"];
+const STATUS_LABELS: Record<string, string> = { running: "en cours", success: "réussi", error: "erreur" };
 
 /**
  * Two halves of one concern: connection points *feed* an execution, the journal
@@ -21,7 +22,7 @@ export function OpsPanel({ notify }: Props) {
     <div className="ops">
       <nav className="ops-tabs">
         <button className={`tab ${tab === "runs" ? "active" : ""}`} onClick={() => setTab("runs")}>
-          <IconLayers size={14} /> Runs
+          <IconLayers size={14} /> Exécutions
         </button>
         <button className={`tab ${tab === "vars" ? "active" : ""}`} onClick={() => setTab("vars")}>
           <IconCode size={14} /> Référentiel
@@ -53,8 +54,8 @@ function Runs({ notify }: Props) {
     try {
       const r = await api.replayRun(run.id, mode);
       notify(mode === "same_data"
-        ? `Replayed on the recorded data — ${r.run.status}.`
-        : `Re-executed with fresh data — ${r.run.status}.`,
+        ? `Rejoué sur les données enregistrées — ${STATUS_LABELS[r.run.status] ?? r.run.status}.`
+        : `Ré-exécuté avec des données fraîches — ${STATUS_LABELS[r.run.status] ?? r.run.status}.`,
         r.run.status === "success" ? "ok" : "err");
       await refresh();
     } catch (e) { notify(e instanceof Error ? e.message : String(e), "err"); }
@@ -67,19 +68,19 @@ function Runs({ notify }: Props) {
         {["", "running", "success", "error"].map((sv) => (
           <button key={sv} className={`ops-chip ${status === sv ? "on" : ""} ${sv}`}
                   onClick={() => setStatus(sv)}>
-            {sv === "" ? "all" : sv}
+            {sv === "" ? "tous" : STATUS_LABELS[sv] ?? sv}
             {sv && <span className="ops-n">{counts[sv] ?? 0}</span>}
           </button>
         ))}
-        <button className="btn sm" onClick={refresh}><IconReset size={12} /> Refresh</button>
+        <button className="btn sm" onClick={refresh}><IconReset size={12} /> Actualiser</button>
       </div>
 
-      {runs.length === 0 && <p className="ops-hint">No run yet in this environment.</p>}
+      {runs.length === 0 && <p className="ops-hint">Aucune exécution pour l'instant dans cet environnement.</p>}
 
       <table className="ops-table">
         <thead>
-          <tr><th>Flow</th><th>Status</th><th>Rows</th><th>Time</th>
-              <th>Started</th><th>Replay</th></tr>
+          <tr><th>Flux</th><th>Statut</th><th>Lignes</th><th>Durée</th>
+              <th>Démarré</th><th>Rejouer</th></tr>
         </thead>
         <tbody>
           {runs.map((r) => (
@@ -92,21 +93,21 @@ function Runs({ notify }: Props) {
                   }}>
                 <td>
                   <strong>{r.graph_name}</strong>
-                  {r.replay_of && <span className="ops-tag">replay · {r.replay_mode}</span>}
+                  {r.replay_of && <span className="ops-tag">rejeu · {r.replay_mode}</span>}
                 </td>
-                <td><span className={`ops-badge ${r.status}`}>{r.status}</span></td>
+                <td><span className={`ops-badge ${r.status}`}>{STATUS_LABELS[r.status] ?? r.status}</span></td>
                 <td>{r.rows_out}</td>
                 <td>{r.ms} ms</td>
                 <td className="ops-when">{r.started_at.replace("T", " ").slice(0, 16)}</td>
                 <td onClick={(e) => e.stopPropagation()}>
                   <button className="btn sm" disabled={busy === r.id || !r.has_snapshot}
                           title={r.has_snapshot
-                            ? "Reproduce the exact run: the API is not called again"
-                            : "No input was recorded for this run"}
-                          onClick={() => replay(r, "same_data")}>same data</button>
+                            ? "Reproduit l'exécution à l'identique : l'API n'est pas rappelée"
+                            : "Aucune entrée n'a été enregistrée pour cette exécution"}
+                          onClick={() => replay(r, "same_data")}>mêmes données</button>
                   <button className="btn sm" disabled={busy === r.id}
-                          title="Call the sources again — the API is re-queried, the trigger re-checked"
-                          onClick={() => replay(r, "refetch")}>re-fetch</button>
+                          title="Rappelle les sources — l'API est re-interrogée, le déclencheur revérifié"
+                          onClick={() => replay(r, "refetch")}>ré-interroger</button>
                 </td>
               </tr>
               {open?.id === r.id && (
@@ -127,15 +128,15 @@ function Runs({ notify }: Props) {
                       </div>
                     )}
                     <table className="ops-steps">
-                      <thead><tr><th>#</th><th>Brick</th><th>Type</th><th>Status</th>
-                                 <th>Rows</th><th>ms</th><th>Detail</th></tr></thead>
+                      <thead><tr><th>#</th><th>Brique</th><th>Type</th><th>Statut</th>
+                                 <th>Lignes</th><th>ms</th><th>Détail</th></tr></thead>
                       <tbody>
                         {(open.steps ?? []).map((st) => (
                           <tr key={st.ordinal} className={st.status}>
                             <td>{st.ordinal + 1}</td>
                             <td><strong>{st.node_id}</strong> {st.label && <em>{st.label}</em>}</td>
                             <td>{st.type}</td>
-                            <td><span className={`ops-badge ${st.status}`}>{st.status}</span></td>
+                            <td><span className={`ops-badge ${st.status}`}>{STATUS_LABELS[st.status] ?? st.status}</span></td>
                             <td>{st.rows}</td>
                             <td>{st.ms}</td>
                             <td className="ops-meta">
@@ -366,11 +367,11 @@ function Vars({ notify }: Props) {
                         await api.saveVariable({ ...draft, value: buildValue() });
                         resetDraft();
                         await refresh();
-                        notify("Connection point saved.", "ok");
+                        notify("Point de connexion enregistré.", "ok");
                       } catch (e) { notify(e instanceof Error ? e.message : String(e), "err"); }
-                    }}><IconSave size={12} /> Save</button>
+                    }}><IconSave size={12} /> Enregistrer</button>
             {draft.name && (
-              <button className="btn sm" onClick={() => resetDraft()}>Clear</button>
+              <button className="btn sm" onClick={() => resetDraft()}>Réinitialiser</button>
             )}
             {draft.id && (
               <button className="btn sm danger" onClick={async () => {
@@ -379,7 +380,7 @@ function Vars({ notify }: Props) {
                   resetDraft();
                   await refresh();
                 } catch (e) { notify(e instanceof Error ? e.message : String(e), "err"); }
-              }}>Delete</button>
+              }}>Supprimer</button>
             )}
           </div>
 
@@ -428,7 +429,7 @@ function Vars({ notify }: Props) {
                      onChange={(e) => setConn({ ...conn, user: e.target.value })} />
               <input placeholder="password" type="password" value={conn.password ?? ""}
                      onChange={(e) => setConn({ ...conn, password: e.target.value })} />
-              <input placeholder="private_key (optional, PEM text)" value={conn.private_key ?? ""}
+              <input placeholder="private_key (facultatif, texte PEM)" value={conn.private_key ?? ""}
                      onChange={(e) => setConn({ ...conn, private_key: e.target.value })} />
               <input placeholder="remote_dir" value={conn.remote_dir ?? ""}
                      onChange={(e) => setConn({ ...conn, remote_dir: e.target.value })} />
@@ -501,7 +502,7 @@ function Vars({ notify }: Props) {
 
       <h4><IconCheck size={13} /> What a brick would see here</h4>
       <div className="ops-resolved">
-        {Object.keys(resolved).length === 0 && <span className="ops-hint">Nothing defined.</span>}
+        {Object.keys(resolved).length === 0 && <span className="ops-hint">Rien de défini.</span>}
         {Object.entries(resolved).map(([k, v]) => (
           <span key={k} className="ops-kv"><code>{k}</code> {v}</span>
         ))}

@@ -28,6 +28,15 @@ export interface SourceInfo {
   row_count: number;
 }
 
+/** A référentiel variable pickable from outside the référentiel itself — a
+ * calculated column's variable list, or a source-attachment connection
+ * select. Secrets never appear here at all. */
+export interface AvailableVariable {
+  name: string;
+  kind: string;
+  value: string;
+}
+
 export interface FieldConfig {
   name?: string[] | null;
   type: FieldType;
@@ -167,6 +176,7 @@ export interface ImportResponse {
     strict_header?: boolean;
     min_header?: boolean;
     variables?: Record<string, string>;
+    ref_variables?: string[];
     header?: HeaderConfig | null;
     Fields: FieldConfig[];
     filters?: Record<string, string>;

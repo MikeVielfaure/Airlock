@@ -27,19 +27,19 @@ export function TcoFixPanel({ result, fieldTypes, tcoArtefactId, editable, notif
   const uncovered = result?.tco_uncovered ?? {};
   const count = Object.values(uncovered).reduce((n, v) => n + v.length, 0);
 
-  if (!result) return <p className="tf-hint">Run the check first.</p>;
+  if (!result) return <p className="tf-hint">Lancez d'abord le contrôle.</p>;
   if (count === 0)
     return (
-      <p className="tf-ok"><IconCheck size={14} /> Every value is covered by the
-        correspondence table.</p>
+      <p className="tf-ok"><IconCheck size={14} /> Toutes les valeurs sont couvertes
+        par la table de correspondance.</p>
     );
 
   return (
     <div className="tf">
       <p className="tf-warn">
-        <IconWarn size={14} /> {count} value(s) are not in the correspondence table.
-        These are <strong>mapping</strong> errors, not data errors: the file is
-        probably fine, the table is incomplete.
+        <IconWarn size={14} /> {count} valeur(s) absente(s) de la table de correspondance.
+        Ce sont des erreurs de <strong>correspondance</strong>, pas des erreurs de
+        données : le fichier est probablement correct, c'est la table qui est incomplète.
       </p>
 
       <button className="btn" disabled={busy} onClick={async () => {
@@ -49,13 +49,13 @@ export function TcoFixPanel({ result, fieldTypes, tcoArtefactId, editable, notif
           setRows(r.rows);
         } catch (e) { notify(e instanceof Error ? e.message : String(e), "err"); }
         finally { setBusy(false); }
-      }}><IconPlay size={14} /> Propose the missing entries</button>
+      }}><IconPlay size={14} /> Proposer les entrées manquantes</button>
 
       {rows.length > 0 && (
         <>
           <table className="tf-table">
-            <thead><tr><th>Field</th><th>Type</th><th>Value found</th>
-                       <th>Occurrences</th><th>Target label</th></tr></thead>
+            <thead><tr><th>Champ</th><th>Type</th><th>Valeur trouvée</th>
+                       <th>Occurrences</th><th>Libellé cible</th></tr></thead>
             <tbody>
               {rows.map((r, i) => (
                 <tr key={i}>
@@ -65,7 +65,7 @@ export function TcoFixPanel({ result, fieldTypes, tcoArtefactId, editable, notif
                   <td>{r.count}</td>
                   <td>
                     <input value={r.TARGET_LABEL} disabled={!editable}
-                           placeholder="what it should become"
+                           placeholder="ce que ça devrait devenir"
                            onChange={(e) => setRows((rs) => rs.map((x, j) =>
                              j === i ? { ...x, TARGET_LABEL: e.target.value } : x))} />
                   </td>
@@ -85,18 +85,18 @@ export function TcoFixPanel({ result, fieldTypes, tcoArtefactId, editable, notif
                         const res = await api.appendTco({ artefact_id: tcoArtefactId,
                                                           name: "correspondances",
                                                           rows: filled });
-                        notify(`${res.added} correspondence(s) added — version ${res.version_no}. `
-                               + `Run the check again.`, "ok");
+                        notify(`${res.added} correspondance(s) ajoutée(s) — version ${res.version_no}. `
+                               + `Relancez le contrôle.`, "ok");
                         setRows([]);
                       } catch (e) { notify(e instanceof Error ? e.message : String(e), "err"); }
                       finally { setBusy(false); }
                     }}>
-              <IconSave size={14} /> Add to the table
+              <IconSave size={14} /> Ajouter à la table
             </button>
           ) : (
             <p className="tf-hint">
-              This environment does not allow editing the correspondence table —
-              pass these values on to whoever maintains it.
+              Cet environnement ne permet pas de modifier la table de correspondance —
+              transmettez ces valeurs à la personne qui la maintient.
             </p>
           )}
         </>

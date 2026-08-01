@@ -46,16 +46,16 @@ function ModelPicker({ label, models, ctl }: {
                   if (v === "__inline") { ctl.setInline(true); return; }
                   ctl.setInline(false); ctl.setId(v);
                 }}>
-          <option value="">— pick a model —</option>
+          <option value="">— choisir un modèle —</option>
           {models.map((m) => (
             <option key={m.id} value={m.id}>{m.name} (v{m.latest_version_no})</option>
           ))}
-          <option value="__inline">✎ paste YAML inline…</option>
+          <option value="__inline">✎ coller le YAML directement…</option>
         </select>
         {!ctl.inline && ctl.id && (
-          <label className="edi-check" title="Pin the version instead of tracking the latest">
+          <label className="edi-check" title="Figer la version au lieu de suivre la dernière">
             <input type="checkbox" checked={ctl.pinned}
-                   onChange={(e) => ctl.setPinned(e.target.checked)} /> pin
+                   onChange={(e) => ctl.setPinned(e.target.checked)} /> figer
           </label>
         )}
       </div>
@@ -94,8 +94,8 @@ function MiniTable({ p, caption }: { p: TablePreview; caption: string }) {
   return (
     <div className="edi-table-wrap">
       <div className="edi-caption">
-        {caption} — {p.total_rows} row{p.total_rows === 1 ? "" : "s"}, {p.columns.length} columns
-        {p.shown_rows < p.total_rows && ` (showing ${p.shown_rows})`}
+        {caption} — {p.total_rows} ligne{p.total_rows === 1 ? "" : "s"}, {p.columns.length} colonnes
+        {p.shown_rows < p.total_rows && ` (affichage de ${p.shown_rows})`}
       </div>
       <div className="edi-scroll">
         <table className="edi-grid">
@@ -118,7 +118,7 @@ export function EdiPanel({ notify, onSession }: Props) {
 
   const refreshModels = useCallback(async () => {
     try { setModels(await api.listArtefacts("edi_model")); }
-    catch (e) { notify(e instanceof Error ? e.message : "Could not load EDI models.", "err"); }
+    catch (e) { notify(e instanceof Error ? e.message : "Impossible de charger les modèles EDI.", "err"); }
   }, [notify]);
   useEffect(() => { refreshModels(); }, [refreshModels]);
 
@@ -172,22 +172,22 @@ export function EdiPanel({ notify, onSession }: Props) {
   }, [sub, kb]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   const needModel = (r: EdiModelRef | null): r is EdiModelRef => {
-    if (!r) { notify("Pick a model first (library or inline YAML).", "err"); return false; }
+    if (!r) { notify("Choisissez d'abord un modèle (bibliothèque ou YAML inline).", "err"); return false; }
     return true;
   };
   const needFile = (f: File | null): f is File => {
-    if (!f) { notify("Pick a file first.", "err"); return false; }
+    if (!f) { notify("Choisissez d'abord un fichier.", "err"); return false; }
     return true;
   };
 
   return (
     <div className="edi">
       <nav className="edi-subtabs">
-        {([["inspect", "Inspect", <IconList size={14} />],
-           ["transform", "Transform", <IconTable size={14} />],
-           ["generate", "Generate", <IconCode size={14} />],
-           ["convert", "Convert", <IconLayers size={14} />],
-           ["models", "Models", <IconSave size={14} />],
+        {([["inspect", "Inspecter", <IconList size={14} />],
+           ["transform", "Transformer", <IconTable size={14} />],
+           ["generate", "Générer", <IconCode size={14} />],
+           ["convert", "Convertir", <IconLayers size={14} />],
+           ["models", "Modèles", <IconSave size={14} />],
            ["doc", "Doc", <IconCheck size={14} />]] as [Sub, string, JSX.Element][])
           .map(([k, label, icon]) => (
             <button key={k} className={`tab ${sub === k ? "active" : ""}`} onClick={() => setSub(k)}>
@@ -200,9 +200,9 @@ export function EdiPanel({ notify, onSession }: Props) {
       {sub === "inspect" && (
         <section className="edi-pane">
           <p className="edi-hint">
-            EDI files rarely carry an extension — the format is detected from the content
-            (UNA/UNB for EDIFACT). Envelope counters and references are checked here without
-            any model: this is the free structural check.
+            Les fichiers EDI portent rarement une extension — le format est détecté à partir du
+            contenu (UNA/UNB pour EDIFACT). Les compteurs d'enveloppe et les références sont
+            vérifiés ici sans aucun modèle : c'est le contrôle structurel gratuit.
           </p>
           <input type="file" ref={inspectRef} hidden onChange={(e) => {
             const f = e.target.files?.[0]; if (!f) return;
@@ -210,34 +210,34 @@ export function EdiPanel({ notify, onSession }: Props) {
             e.target.value = "";
           }} />
           <button className="btn" onClick={() => inspectRef.current?.click()} disabled={!!busy}>
-            <IconUpload size={15} /> {busy === "inspect" ? "Reading…" : "Open an EDI file"}
+            <IconUpload size={15} /> {busy === "inspect" ? "Lecture…" : "Ouvrir un fichier EDI"}
           </button>
 
           {inspected && (
             <>
               <div className="edi-summary">
                 <span className="pill">{inspected.format}</span>
-                <span className="pill">{inspected.had_una ? "UNA present" : "default separators"}</span>
+                <span className="pill">{inspected.had_una ? "UNA présent" : "séparateurs par défaut"}</span>
                 <span className="pill">{inspected.interchanges.length} interchange(s)</span>
                 <span className="pill">{inspected.total_segments} segments</span>
                 <span className={`pill ${inspected.syntax_errors.length ? "err" : "ok"}`}>
                   {inspected.syntax_errors.length
-                    ? `${inspected.syntax_errors.length} syntax error(s)`
-                    : "envelope consistent"}
+                    ? `${inspected.syntax_errors.length} erreur(s) de syntaxe`
+                    : "enveloppe cohérente"}
                 </span>
                 {inspected.truncated && (
-                  <span className="pill warn" title="Only the first segments are decoded — the checks above still cover the whole file">
-                    tree truncated
+                  <span className="pill warn" title="Seuls les premiers segments sont décodés — les contrôles ci-dessus portent quand même sur tout le fichier">
+                    arbre tronqué
                   </span>
                 )}
               </div>
-              <ErrorList title="Syntax" errors={inspected.syntax_errors} />
+              <ErrorList title="Syntaxe" errors={inspected.syntax_errors} />
               {inspected.interchanges.map((it, i) => (
                 <div key={i} className="edi-inter">
                   <h4>
-                    Interchange {it.ref || "(no ref)"}{" "}
+                    Interchange {it.ref || "(sans réf.)"}{" "}
                     <span className="edi-loc">{it.sender} → {it.recipient}</span>
-                    {it.implicit && <span className="pill warn">no UNB</span>}
+                    {it.implicit && <span className="pill warn">sans UNB</span>}
                   </h4>
                   {it.messages.map((m, j) => (
                     <details key={j} open={j === 0}>
@@ -284,26 +284,26 @@ export function EdiPanel({ notify, onSession }: Props) {
       {sub === "transform" && (
         <section className="edi-pane">
           <p className="edi-hint">
-            Check a file against a model, then flatten it. <strong>Flat</strong> repeats the head
-            on every item line — one table, ready for the cleaning pipeline.{" "}
-            <strong>Linked</strong> keeps two tables joined on <code>message_no</code>.
+            Contrôler un fichier contre un modèle, puis le mettre à plat. <strong>Plat</strong> répète
+            la tête sur chaque ligne de détail — une seule table, prête pour le pipeline de nettoyage.{" "}
+            <strong>Lié</strong> garde deux tables jointes sur <code>message_no</code>.
           </p>
           <div className="edi-form">
             <div className="edi-field">
-              <label>EDI file</label>
+              <label>Fichier EDI</label>
               <input type="file" ref={ediFileRef} onChange={(e) => {
                 setEdiFile(e.target.files?.[0] ?? null); setReport(null); setPivotOut(null);
               }} />
             </div>
-            <ModelPicker label="Model" models={models} ctl={tModel} />
+            <ModelPicker label="Modèle" models={models} ctl={tModel} />
             <div className="edi-field">
-              <label>Pivot mode</label>
+              <label>Mode de pivot</label>
               <div className="edi-row">
                 <label className="edi-check">
-                  <input type="radio" checked={mode === "flat"} onChange={() => setMode("flat")} /> flat
+                  <input type="radio" checked={mode === "flat"} onChange={() => setMode("flat")} /> plat
                 </label>
                 <label className="edi-check">
-                  <input type="radio" checked={mode === "linked"} onChange={() => setMode("linked")} /> linked
+                  <input type="radio" checked={mode === "linked"} onChange={() => setMode("linked")} /> lié
                 </label>
               </div>
             </div>
@@ -316,10 +316,10 @@ export function EdiPanel({ notify, onSession }: Props) {
               run("validate", async () => {
                 const r = await api.ediValidate(ediFile, m);
                 setReport(r);
-                notify(r.ok ? `Valid — ${r.stats.messages} message(s), ${r.stats.items} item(s).`
-                            : `${r.stats.errors} error(s) found.`, r.ok ? "ok" : "err");
+                notify(r.ok ? `Valide — ${r.stats.messages} message(s), ${r.stats.items} ligne(s).`
+                            : `${r.stats.errors} erreur(s) trouvée(s).`, r.ok ? "ok" : "err");
               });
-            }}><IconCheck size={15} /> Validate</button>
+            }}><IconCheck size={15} /> Contrôler</button>
 
             <button className="btn" disabled={!!busy} onClick={() => {
               const m = tModel.ref();
@@ -327,7 +327,7 @@ export function EdiPanel({ notify, onSession }: Props) {
               run("pivot", async () => {
                 setPivotOut(await api.ediPivot(ediFile, m, mode, "preview") as EdiPivotPreview);
               });
-            }}><IconPlay size={15} /> Pivot</button>
+            }}><IconPlay size={15} /> Pivoter</button>
 
             <button className="btn sm" disabled={!!busy} onClick={() => {
               const m = tModel.ref();
@@ -354,28 +354,28 @@ export function EdiPanel({ notify, onSession }: Props) {
                 run("session", async () => {
                   const r = await api.ediPivot(ediFile, m, "flat", "session") as FileResponse;
                   onSession(r);
-                  notify("Pivoted table opened in the Data view.", "ok");
+                  notify("Table pivotée ouverte dans la vue Data.", "ok");
                 });
-              }}><IconTable size={14} /> Open in Data</button>
+              }}><IconTable size={14} /> Ouvrir dans Data</button>
             )}
           </div>
 
           {report && (
             <>
               <div className="edi-summary">
-                <span className={`pill ${report.ok ? "ok" : "err"}`}>{report.ok ? "valid" : "errors"}</span>
+                <span className={`pill ${report.ok ? "ok" : "err"}`}>{report.ok ? "valide" : "erreurs"}</span>
                 <span className="pill">{report.model_name}</span>
                 <span className="pill">{report.stats.messages} message(s)</span>
-                <span className="pill">{report.stats.items} item(s)</span>
+                <span className="pill">{report.stats.items} ligne(s)</span>
               </div>
-              <ErrorList title="Syntax" errors={report.syntax_errors} />
-              <ErrorList title="Model" errors={report.model_errors} />
+              <ErrorList title="Syntaxe" errors={report.syntax_errors} />
+              <ErrorList title="Modèle" errors={report.model_errors} />
             </>
           )}
 
-          {pivotOut?.flat && <MiniTable p={pivotOut.flat} caption="Flat" />}
-          {pivotOut?.heads && <MiniTable p={pivotOut.heads} caption="Heads" />}
-          {pivotOut?.items && <MiniTable p={pivotOut.items} caption="Items" />}
+          {pivotOut?.flat && <MiniTable p={pivotOut.flat} caption="Plat" />}
+          {pivotOut?.heads && <MiniTable p={pivotOut.heads} caption="Têtes" />}
+          {pivotOut?.items && <MiniTable p={pivotOut.items} caption="Lignes" />}
         </section>
       )}
 
@@ -383,28 +383,28 @@ export function EdiPanel({ notify, onSession }: Props) {
       {sub === "generate" && (
         <section className="edi-pane">
           <p className="edi-hint">
-            The reverse trip: a flat CSV/XLSX whose headers match the model's field names becomes
-            EDIFACT. Rows are grouped into messages, UNT/UNZ counters are computed, and reserved
-            characters in the data are escaped.
+            Le trajet inverse : un CSV/XLSX plat dont les en-têtes correspondent aux noms de champs
+            du modèle devient de l'EDIFACT. Les lignes sont regroupées en messages, les compteurs
+            UNT/UNZ sont calculés, et les caractères réservés des données sont échappés.
           </p>
           <div className="edi-form">
             <div className="edi-field">
-              <label>Flat file (CSV or XLSX)</label>
+              <label>Fichier plat (CSV ou XLSX)</label>
               <input type="file" ref={tabFileRef} accept=".csv,.xlsx,.xls,.txt"
                      onChange={(e) => { setTabFile(e.target.files?.[0] ?? null); setGenerated(null); }} />
             </div>
-            <ModelPicker label="Model" models={models} ctl={gModel} />
+            <ModelPicker label="Modèle" models={models} ctl={gModel} />
             <div className="edi-field">
-              <label>Group rows into messages by</label>
+              <label>Regrouper les lignes en messages par</label>
               <input value={gGroup} onChange={(e) => setGGroup(e.target.value)}
-                     placeholder="column name — default: message_no, else one message" />
+                     placeholder="nom de colonne — par défaut : message_no, sinon un seul message" />
             </div>
             <div className="edi-field">
               <label>Interchange</label>
               <div className="edi-row">
-                <input value={gSender} onChange={(e) => setGSender(e.target.value)} placeholder="sender (GLN:14)" />
-                <input value={gRecipient} onChange={(e) => setGRecipient(e.target.value)} placeholder="recipient" />
-                <input value={gRef} onChange={(e) => setGRef(e.target.value)} placeholder="reference" />
+                <input value={gSender} onChange={(e) => setGSender(e.target.value)} placeholder="expéditeur (GLN:14)" />
+                <input value={gRecipient} onChange={(e) => setGRecipient(e.target.value)} placeholder="destinataire" />
+                <input value={gRef} onChange={(e) => setGRef(e.target.value)} placeholder="référence" />
               </div>
             </div>
           </div>
@@ -416,9 +416,9 @@ export function EdiPanel({ notify, onSession }: Props) {
                 const r = await api.ediGenerate(tabFile, m, {
                   group_by: gGroup, sender: gSender, recipient: gRecipient, interchange_ref: gRef });
                 setGenerated(r);
-                notify(`${r.messages} message(s), ${r.items} item(s) generated.`, "ok");
+                notify(`${r.messages} message(s), ${r.items} ligne(s) générée(s).`, "ok");
               });
-            }}><IconPlay size={15} /> Generate EDI</button>
+            }}><IconPlay size={15} /> Générer EDI</button>
             {generated && (
               <button className="btn sm" onClick={() => downloadBase64(generated.file)}>
                 <IconDownload size={14} /> {generated.file.filename}
@@ -433,21 +433,22 @@ export function EdiPanel({ notify, onSession }: Props) {
       {sub === "convert" && (
         <section className="edi-pane">
           <p className="edi-hint">
-            EDI → EDI always goes through the internal pivot: read with the source model, write with
-            the target one. N models cover N×N conversions instead of needing N² mappings. When the
-            two models name their fields differently, map them:{" "}
+            EDI → EDI passe toujours par le pivot interne : lecture avec le modèle source, écriture
+            avec le modèle cible. N modèles couvrent N×N conversions au lieu de nécessiter N²
+            mappings. Quand les deux modèles nomment leurs champs différemment, les faire
+            correspondre :{" "}
             <code>{"{\"target_field\": \"source_field\"}"}</code>.
           </p>
           <div className="edi-form">
             <div className="edi-field">
-              <label>EDI file</label>
+              <label>Fichier EDI</label>
               <input type="file" ref={convFileRef}
                      onChange={(e) => { setConvFile(e.target.files?.[0] ?? null); setConverted(null); }} />
             </div>
-            <ModelPicker label="Source model" models={models} ctl={srcModel} />
-            <ModelPicker label="Target model" models={models} ctl={dstModel} />
+            <ModelPicker label="Modèle source" models={models} ctl={srcModel} />
+            <ModelPicker label="Modèle cible" models={models} ctl={dstModel} />
             <div className="edi-field">
-              <label>Field mapping (JSON, optional)</label>
+              <label>Mapping des champs (JSON, optionnel)</label>
               <textarea className="mono" rows={4} value={mapping} spellCheck={false}
                         placeholder='{"ref_commande": "numero_commande"}'
                         onChange={(e) => setMapping(e.target.value)} />
@@ -460,9 +461,9 @@ export function EdiPanel({ notify, onSession }: Props) {
               run("convert", async () => {
                 const r = await api.ediConvert(convFile, s, d, mapping, "", "");
                 setConverted(r);
-                notify(`${r.messages} message(s): ${r.source} → ${r.target}.`, "ok");
+                notify(`${r.messages} message(s) : ${r.source} → ${r.target}.`, "ok");
               });
-            }}><IconPlay size={15} /> Convert</button>
+            }}><IconPlay size={15} /> Convertir</button>
             {converted && (
               <button className="btn sm" onClick={() => downloadBase64(converted.file)}>
                 <IconDownload size={14} /> {converted.file.filename}
@@ -477,9 +478,9 @@ export function EdiPanel({ notify, onSession }: Props) {
       {sub === "models" && (
         <section className="edi-pane">
           <p className="edi-hint">
-            Models are versioned artefacts, like configs: saving an existing name adds a version,
-            it never overwrites. Start from a sample file — the skeleton is inferred from what the
-            file actually contains — then refine it here.
+            Les modèles sont des artefacts versionnés, comme les configs : enregistrer sous un nom
+            existant ajoute une version, jamais un écrasement. Partir d'un fichier exemple — le
+            squelette est déduit de ce que le fichier contient réellement — puis l'affiner ici.
           </p>
 
           <div className="edi-actions">
@@ -488,13 +489,13 @@ export function EdiPanel({ notify, onSession }: Props) {
               run("infer", async () => {
                 const r = await api.ediInfer(f, editorName || f.name);
                 setEditorYaml(r.yaml); setNotes(r.notes);
-                if (!editorName) setEditorName(`${f.name} (inferred)`);
-                notify("Skeleton inferred — review it before saving.", "ok");
+                if (!editorName) setEditorName(`${f.name} (déduit)`);
+                notify("Squelette déduit — à vérifier avant l'enregistrement.", "ok");
               });
               e.target.value = "";
             }} />
             <button className="btn" disabled={!!busy} onClick={() => inferRef.current?.click()}>
-              <IconUpload size={15} /> {busy === "infer" ? "Reading…" : "Infer from a sample file"}
+              <IconUpload size={15} /> {busy === "infer" ? "Lecture…" : "Déduire depuis un fichier exemple"}
             </button>
 
             <input type="file" ref={yamlUpRef} accept=".yaml,.yml" hidden onChange={(e) => {
@@ -503,25 +504,25 @@ export function EdiPanel({ notify, onSession }: Props) {
               e.target.value = "";
             }} />
             <button className="btn sm" onClick={() => yamlUpRef.current?.click()}>
-              <IconUpload size={14} /> Load a .yaml
+              <IconUpload size={14} /> Charger un .yaml
             </button>
           </div>
 
           {notes.length > 0 && (
             <div className="edi-notes">
-              <h4>What the inference could not know</h4>
+              <h4>Ce que la déduction n'a pas pu savoir</h4>
               <ul>{notes.map((n, i) => <li key={i}>{n}</li>)}</ul>
             </div>
           )}
 
           <div className="edi-form">
             <div className="edi-field">
-              <label>Name</label>
+              <label>Nom</label>
               <input value={editorName} onChange={(e) => setEditorName(e.target.value)}
-                     placeholder="ORDERS — partner X" />
+                     placeholder="ORDERS — partenaire X" />
             </div>
             <div className="edi-field">
-              <label>Model YAML</label>
+              <label>YAML du modèle</label>
               <textarea className="mono" rows={18} value={editorYaml} spellCheck={false}
                         onChange={(e) => setEditorYaml(e.target.value)} />
             </div>
@@ -529,24 +530,24 @@ export function EdiPanel({ notify, onSession }: Props) {
 
           <div className="edi-actions">
             <button className="btn" disabled={!!busy || !editorYaml.trim()} onClick={() => {
-              if (!editorName.trim()) { notify("Name the model first.", "err"); return; }
+              if (!editorName.trim()) { notify("Nommez d'abord le modèle.", "err"); return; }
               run("save", async () => {
                 const existing = models.find((m) => m.name === editorName.trim());
                 if (existing) {
                   await api.addArtefactVersion("edi_model", existing.id, { yaml: editorYaml });
-                  notify(`New version of “${editorName}” saved.`, "ok");
+                  notify(`Nouvelle version de « ${editorName} » enregistrée.`, "ok");
                 } else {
                   await api.createArtefact("edi_model", { name: editorName.trim(), yaml: editorYaml });
-                  notify(`Model “${editorName}” saved to the library.`, "ok");
+                  notify(`Modèle « ${editorName} » enregistré dans la bibliothèque.`, "ok");
                 }
                 await refreshModels();
               });
-            }}><IconSave size={15} /> Save to library</button>
+            }}><IconSave size={15} /> Enregistrer dans la bibliothèque</button>
           </div>
 
           <div className="edi-list">
-            <h4>Library <span className="count">{models.length}</span></h4>
-            {models.length === 0 && <p className="edi-hint">No EDI model yet.</p>}
+            <h4>Bibliothèque <span className="count">{models.length}</span></h4>
+            {models.length === 0 && <p className="edi-hint">Aucun modèle EDI pour l'instant.</p>}
             {models.map((m) => (
               <div key={m.id} className="edi-list-row">
                 <strong>{m.name}</strong>
@@ -554,12 +555,12 @@ export function EdiPanel({ notify, onSession }: Props) {
                 <button className="btn sm" onClick={() => run("load", async () => {
                   const r = await api.ediModelYaml(m.id, m.latest_version_no);
                   setEditorName(m.name); setEditorYaml(r.yaml); setNotes([]);
-                })}><IconCode size={13} /> Open</button>
+                })}><IconCode size={13} /> Ouvrir</button>
                 <button className="btn sm" onClick={() => run("archive", async () => {
                   await api.archiveArtefact("edi_model", m.id);
                   await refreshModels();
-                  notify(`“${m.name}” archived.`, "ok");
-                })}>Archive</button>
+                  notify(`« ${m.name} » archivé.`, "ok");
+                })}>Archiver</button>
               </div>
             ))}
           </div>
@@ -569,43 +570,46 @@ export function EdiPanel({ notify, onSession }: Props) {
       {/* ═══ DOC ═══ */}
       {sub === "doc" && (
         <section className="edi-pane">
-          <h3>How EDIFACT is put together</h3>
+          <h3>Comment EDIFACT est structuré</h3>
           <p className="edi-doc-p">
-            An <strong>interchange</strong> is the envelope: it opens with <code>UNB</code> (sender,
-            recipient, date, reference) and closes with <code>UNZ</code>, which states how many
-            messages it contained. Inside, each <strong>message</strong> runs from <code>UNH</code>{" "}
-            to <code>UNT</code>; <code>UNH</code> announces its type and directory version
-            (<code>ORDERS:D:96A:UN</code>), <code>UNT</code> states its segment count. Those two
-            counters are free integrity checks — a wrong count means a truncated or tampered file,
-            and the Inspect tab flags it before any model is involved.
+            Un <strong>interchange</strong> est l'enveloppe : il s'ouvre avec <code>UNB</code>{" "}
+            (expéditeur, destinataire, date, référence) et se ferme avec <code>UNZ</code>, qui
+            indique combien de messages il contenait. À l'intérieur, chaque <strong>message</strong>{" "}
+            va de <code>UNH</code> à <code>UNT</code> ; <code>UNH</code> annonce son type et sa
+            version d'annuaire (<code>ORDERS:D:96A:UN</code>), <code>UNT</code> indique son nombre
+            de segments. Ces deux compteurs sont des contrôles d'intégrité gratuits — un mauvais
+            compte signale un fichier tronqué ou altéré, et l'onglet Inspecter le signale avant
+            même qu'un modèle intervienne.
           </p>
           <p className="edi-doc-p">
-            A message reads in three zones: the <strong>head</strong> (document number, dates,
-            trading parties), a <strong>detail loop</strong> repeated per article — this is where
-            several items hang under one head — and a <strong>summary</strong> with control totals.
-            One file may carry several messages, so several heads: that is why the flat pivot repeats
-            head values on every item line and keys everything on <code>message_no</code>.
+            Un message se lit en trois zones : la <strong>tête</strong> (numéro de document, dates,
+            partenaires commerciaux), une <strong>boucle de détail</strong> répétée par article —
+            c'est là que plusieurs lignes se rattachent à une même tête — et un{" "}
+            <strong>résumé</strong> avec les totaux de contrôle. Un fichier peut porter plusieurs
+            messages, donc plusieurs têtes : c'est pourquoi le pivot à plat répète les valeurs de
+            tête sur chaque ligne de détail et indexe tout sur <code>message_no</code>.
           </p>
           <p className="edi-doc-p">
-            A <strong>segment</strong> starts with a three-letter tag, then data elements, each
-            possibly split into components. In <code>NAD+BY+5412345000013::9</code>, the tag is{" "}
-            <code>NAD</code>, <code>BY</code> is the qualifier that gives the segment its meaning
-            (buyer), and the third element holds a GLN plus the code list it belongs to. The same
-            tag says different things depending on its qualifier — which is why models declare one
-            variant per qualifier value.
+            Un <strong>segment</strong> commence par un tag de trois lettres, puis des éléments de
+            données, chacun pouvant être découpé en composants. Dans{" "}
+            <code>NAD+BY+5412345000013::9</code>, le tag est <code>NAD</code>, <code>BY</code> est
+            le qualifiant qui donne son sens au segment (acheteur), et le troisième élément porte un
+            GLN ainsi que la liste de codes à laquelle il appartient. Un même tag dit des choses
+            différentes selon son qualifiant — c'est pourquoi les modèles déclarent une variante par
+            valeur de qualifiant.
           </p>
 
-          {!kb && <p className="edi-hint">Loading the reference…</p>}
+          {!kb && <p className="edi-hint">Chargement de la référence…</p>}
           {kb && (
             <>
-              <h4>Separators</h4>
+              <h4>Séparateurs</h4>
               <p className="edi-doc-p">
-                Set by the <code>UNA</code> service string when it is present, and taken as the
-                defaults below when it is not. Never assume them: a partner may ship a comma as the
-                decimal mark.
+                Définis par la chaîne de service <code>UNA</code> quand elle est présente, et pris
+                comme valeurs par défaut ci-dessous quand elle ne l'est pas. Ne jamais les supposer :
+                un partenaire peut envoyer une virgule comme marque décimale.
               </p>
               <table className="edi-doc-table">
-                <thead><tr><th>Role</th><th>Default</th><th>What it does</th></tr></thead>
+                <thead><tr><th>Rôle</th><th>Défaut</th><th>Effet</th></tr></thead>
                 <tbody>
                   {kb.separators.map((s) => (
                     <tr key={s.role}>
@@ -617,9 +621,9 @@ export function EdiPanel({ notify, onSession }: Props) {
                 </tbody>
               </table>
 
-              <h4>Common segments</h4>
+              <h4>Segments courants</h4>
               <table className="edi-doc-table">
-                <thead><tr><th>Tag</th><th>Name</th><th>Role</th><th>Main elements</th></tr></thead>
+                <thead><tr><th>Tag</th><th>Nom</th><th>Rôle</th><th>Éléments principaux</th></tr></thead>
                 <tbody>
                   {kb.segments.map((s) => (
                     <tr key={s.tag}>
@@ -636,13 +640,13 @@ export function EdiPanel({ notify, onSession }: Props) {
                 </tbody>
               </table>
 
-              <h4>Qualifiers</h4>
+              <h4>Qualifiants</h4>
               <p className="edi-doc-p">
-                The code that gives a repeated segment its meaning — the value a model keys its{" "}
-                <code>when:</code> variants on.
+                Le code qui donne son sens à un segment répété — la valeur sur laquelle un modèle
+                indexe ses variantes <code>when:</code>.
               </p>
               <table className="edi-doc-table">
-                <thead><tr><th>Segment</th><th>Code</th><th>Meaning</th></tr></thead>
+                <thead><tr><th>Segment</th><th>Code</th><th>Signification</th></tr></thead>
                 <tbody>
                   {kb.qualifiers.map((q) => (
                     <tr key={`${q.tag}-${q.code}`}>
@@ -652,9 +656,9 @@ export function EdiPanel({ notify, onSession }: Props) {
                 </tbody>
               </table>
 
-              <h4>Date formats (element 2379)</h4>
+              <h4>Formats de date (élément 2379)</h4>
               <table className="edi-doc-table">
-                <thead><tr><th>Code</th><th>Layout</th></tr></thead>
+                <thead><tr><th>Code</th><th>Format</th></tr></thead>
                 <tbody>
                   {kb.date_formats.map((d) => (
                     <tr key={d.code}><td><code>{d.code}</code></td><td>{d.label}</td></tr>

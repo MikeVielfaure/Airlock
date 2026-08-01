@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import type { CellStatus, FieldType, ProcessResponse, RowsMutationResponse, TablePreview } from "../lib/types";
 import { api } from "../lib/api";
-import { IconPlay, IconReset, IconSave } from "../lib/icons";
+import { IconMaximize, IconMinimize, IconPlay, IconReset, IconSave } from "../lib/icons";
 
 interface Props {
   preview: TablePreview | null;
@@ -135,6 +135,17 @@ export function DataTable(props: Props) {
   const [viewH, setViewH] = useState(440);
   const scrollRef = useRef<HTMLDivElement>(null);
 
+  // ── fullscreen mode ────────────────────────────────────────
+  // An overlay, not the browser Fullscreen API: keeps the toolbar, filters
+  // and edit mode all working exactly as-is, just given the whole viewport.
+  const [fullscreen, setFullscreen] = useState(false);
+  useEffect(() => {
+    if (!fullscreen) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setFullscreen(false); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [fullscreen]);
+
   // export form
   const validEnc = ENCODINGS.includes(originEncoding) ? originEncoding : "utf-8";
   const validDelim = originDelimiter in DELIMS ? originDelimiter : ";";
@@ -174,13 +185,13 @@ export function DataTable(props: Props) {
       }
     } catch (e) {
       setPending((m) => { const n = { ...m }; if (prev === undefined) delete n[key]; else n[key] = prev; return n; });
-      notify(e instanceof Error ? e.message : "Edit failed", "err");
+      notify(e instanceof Error ? e.message : "Échec de la modification", "err");
     }
   };
 
   const discardEdits = async () => {
     try { await onResetEdits(); setPending({}); setEditing(null); }
-    catch (e) { notify(e instanceof Error ? e.message : "Reset failed", "err"); }
+    catch (e) { notify(e instanceof Error ? e.message : "Échec de la réinitialisation", "err"); }
   };
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(100);
@@ -311,7 +322,7 @@ export function DataTable(props: Props) {
     try {
       await api.reorderRow(sid, from, target);
       await onRowsChanged();
-    } catch (e) { notify(e instanceof Error ? e.message : "Reorder failed", "err"); }
+    } catch (e) { notify(e instanceof Error ? e.message : "Échec du réordonnancement", "err"); }
   };
 
   const duplicateRow = async (idx: number) => {
@@ -348,7 +359,7 @@ export function DataTable(props: Props) {
       if (edits.length) await api.editCells(sid, edits);
       await onRowsChanged(added);
       notify(`${grid.length} ligne(s) collée(s).`, "ok");
-    } catch (e) { notify(e instanceof Error ? e.message : "Paste failed", "err"); }
+    } catch (e) { notify(e instanceof Error ? e.message : "Échec du collage", "err"); }
     return true;
   };
 
@@ -365,49 +376,55 @@ export function DataTable(props: Props) {
   };
 
   return (
-    <div>
+    <div className={fullscreen ? "table-fullscreen" : undefined}>
       <div className="sec-h">
-        <h3>Preview</h3>
+        <h3>Aperçu</h3>
         <span className="sub">
-          {result ? "Validated — colored cells flag issues, cleanups and computed values." : "Raw values. Run validation to apply your rules."}
+          {result ? "Validé — les cellules colorées signalent les erreurs, nettoyages et valeurs calculées." : "Valeurs brutes. Lancez la validation pour appliquer vos règles."}
         </span>
-        <button className="btn primary" style={{ marginLeft: "auto" }} onClick={onRun} disabled={!canRun || running}>
-          <IconPlay size={15} /> {running ? "Running…" : "Run validation"}
-        </button>
+        <span style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+          <button className="btn sm" title={fullscreen ? "Quitter le plein écran (Échap)" : "Afficher le tableau en grand"}
+            onClick={() => setFullscreen((v) => !v)}>
+            {fullscreen ? <IconMinimize size={14} /> : <IconMaximize size={14} />}
+          </button>
+          <button className="btn primary" onClick={onRun} disabled={!canRun || running}>
+            <IconPlay size={15} /> {running ? "En cours…" : "Lancer la validation"}
+          </button>
+        </span>
       </div>
 
       {stats && (
         <div className="statbar">
-          <div className="stat"><div className="num">{stats.total_rows.toLocaleString()}</div><div className="lbl">Rows</div></div>
-          <div className="stat err"><div className="num">{stats.rows_err.toLocaleString()}</div><div className="lbl">Rows with errors</div></div>
-          <div className="stat clean"><div className="num">{stats.rows_clean.toLocaleString()}</div><div className="lbl">Rows cleaned</div></div>
-          <div className="stat"><div className="num">{columns.length}</div><div className="lbl">Columns shown</div></div>
+          <div className="stat"><div className="num">{stats.total_rows.toLocaleString()}</div><div className="lbl">Lignes</div></div>
+          <div className="stat err"><div className="num">{stats.rows_err.toLocaleString()}</div><div className="lbl">Lignes en erreur</div></div>
+          <div className="stat clean"><div className="num">{stats.rows_clean.toLocaleString()}</div><div className="lbl">Lignes nettoyées</div></div>
+          <div className="stat"><div className="num">{columns.length}</div><div className="lbl">Colonnes affichées</div></div>
         </div>
       )}
 
       <div className="tabletools">
-        {sortedCol && <button className="btn sm" onClick={() => (serverMode ? setSrvSort(null) : setSort(null))}><IconReset size={13} /> Clear sort</button>}
-        {anyFilter && <button className="btn sm" onClick={() => setFilters({})}><IconReset size={13} /> Clear filters ({activeFilters.length})</button>}
-        <button className="btn sm" onClick={() => setShowOps((v) => !v)} title="Show the filter operators">
-          {showOps ? "Hide operators" : "Filter operators"}
+        {sortedCol && <button className="btn sm" onClick={() => (serverMode ? setSrvSort(null) : setSort(null))}><IconReset size={13} /> Réinitialiser le tri</button>}
+        {anyFilter && <button className="btn sm" onClick={() => setFilters({})}><IconReset size={13} /> Réinitialiser les filtres ({activeFilters.length})</button>}
+        <button className="btn sm" onClick={() => setShowOps((v) => !v)} title="Afficher les opérateurs de filtre">
+          {showOps ? "Masquer les opérateurs" : "Opérateurs de filtre"}
         </button>
-        <button className={`btn sm ${editMode ? "active" : ""}`} title="Click any cell to correct its value, then re-validate"
+        <button className={`btn sm ${editMode ? "active" : ""}`} title="Cliquez sur une cellule pour corriger sa valeur, puis relancez la validation"
           onClick={() => { setEditMode((v) => !v); setEditing(null); }}>
-          ✎ {editMode ? "Editing on" : "Edit cells"}
+          ✎ {editMode ? "Édition activée" : "Modifier les cellules"}
         </button>
         <button className="btn sm" disabled={!sid || !result}
-          title="Turn what you just did into a repeatable flow"
+          title="Transformer ce que vous venez de faire en flux reproductible"
           onClick={async () => {
             if (!sid) return;
-            const name = window.prompt("Name for the flow?", "flux-manuel");
+            const name = window.prompt("Nom du flux ?", "flux-manuel");
             if (!name) return;
             try {
               const r = await api.sessionToFlow(sid, { name, save: true });
               notify(r.skipped.length
-                ? `Flow saved (${r.steps} step(s)). Not carried over: ${r.skipped.join(" ; ")}`
-                : `Flow “${name}” saved — ${r.steps} step(s).`, "ok");
+                ? `Flux enregistré (${r.steps} étape(s)). Non repris : ${r.skipped.join(" ; ")}`
+                : `Flux « ${name} » enregistré — ${r.steps} étape(s).`, "ok");
             } catch (e) { notify(e instanceof Error ? e.message : String(e), "err"); }
-          }}>Save as flow</button>
+          }}>Enregistrer comme flux</button>
         <button className="btn sm" disabled={!sid} title="Ajouter une ligne vide en fin de table"
           onClick={async () => {
             if (!sid) return;
@@ -441,20 +458,20 @@ export function DataTable(props: Props) {
         )}
         <span className="toolnote">
           {anyFilter
-            ? `${filteredCount.toLocaleString()} of ${totalAll.toLocaleString()} rows match${serverMode ? " (whole file)" : " (sample)"} · `
+            ? `${filteredCount.toLocaleString()} ligne(s) sur ${totalAll.toLocaleString()} correspondent${serverMode ? " (fichier entier)" : " (échantillon)"} · `
             : ""}
-          {srvLoading ? "loading… · " : ""}drag headers to reorder · click name to sort · type below a column to filter
+          {srvLoading ? "chargement… · " : ""}glissez les en-têtes pour réordonner · cliquez un nom pour trier · saisissez sous une colonne pour filtrer
         </span>
       </div>
       {(anyFilter || showOps) && (
         <div className="filterlegend">
           <div>
-            <strong>Operators:</strong> <code>text</code> contains · <code>=x</code> equals · <code>!x</code> not contains ·
-            <code>!=x</code> not equal · <code>in:a,b</code> · <code>!in:a,b</code> · <code>&gt;n</code> <code>&lt;n</code> <code>&gt;=n</code> <code>&lt;=n</code> · <code>null</code> / <code>notnull</code>
+            <strong>Opérateurs :</strong> <code>texte</code> contient · <code>=x</code> égal à · <code>!x</code> ne contient pas ·
+            <code>!=x</code> différent de · <code>in:a,b</code> · <code>!in:a,b</code> · <code>&gt;n</code> <code>&lt;n</code> <code>&gt;=n</code> <code>&lt;=n</code> · <code>null</code> / <code>notnull</code>
           </div>
           <div>
-            <strong>Combine:</strong> different columns are <em>AND</em> by default. Prefix with <code>:1</code> (any id) to put
-            columns in the same <em>OR</em> group — e.g. <code>:1!empty</code> on two columns matches rows where <em>either</em> is non-empty.
+            <strong>Combiner :</strong> les colonnes différentes sont en <em>ET</em> par défaut. Préfixez avec <code>:1</code> (n'importe quel identifiant) pour mettre
+            des colonnes dans le même groupe <em>OU</em> — ex. <code>:1!empty</code> sur deux colonnes correspond aux lignes où <em>l'une ou l'autre</em> est non vide.
           </div>
         </div>
       )}
@@ -462,14 +479,14 @@ export function DataTable(props: Props) {
       {(pendingCount > 0 || editMode) && (
         <div className="editbar">
           {pendingCount > 0 ? (
-            <span><strong>{pendingCount}</strong> cell{pendingCount > 1 ? "s" : ""} edited — the colors below are stale until you re-validate.</span>
+            <span><strong>{pendingCount}</strong> cellule{pendingCount > 1 ? "s" : ""} modifiée{pendingCount > 1 ? "s" : ""} — les couleurs ci-dessous sont périmées tant que vous ne relancez pas la validation.</span>
           ) : (
-            <span>Edit mode: click a cell, type the correction, <kbd>Enter</kbd> to save · <kbd>Esc</kbd> to cancel. Computed columns are read-only.</span>
+            <span>Mode édition : cliquez une cellule, saisissez la correction, <kbd>Entrée</kbd> pour enregistrer · <kbd>Échap</kbd> pour annuler. Les colonnes calculées sont en lecture seule.</span>
           )}
           {pendingCount > 0 && (
             <span className="editbar-actions">
-              <button className="btn sm primary" onClick={onRun} disabled={running}>Re-validate</button>
-              <button className="btn sm" onClick={discardEdits} title="Restore the file as loaded (all manual edits, including previous ones)">Discard all edits</button>
+              <button className="btn sm primary" onClick={onRun} disabled={running}>Relancer la validation</button>
+              <button className="btn sm" onClick={discardEdits} title="Restaure le fichier tel que chargé (toutes les modifications manuelles, y compris les précédentes)">Annuler toutes les modifications</button>
             </span>
           )}
         </div>
@@ -477,22 +494,22 @@ export function DataTable(props: Props) {
 
       {result && (
         <div className="legend">
-          <span><i className="swatch err" /> Error</span>
-          <span><i className="swatch clean" /> Cleaned / mapped</span>
-          <span><i className="swatch warn" /> No TCO</span>
-          <span><i className="swatch comp" /> Computed</span>
-          {(editMode || pendingCount > 0) && <span><i className="swatch edited" /> Edited (re-validate)</span>}
-          <span style={{ color: "var(--ink-faint)" }}><code style={{ fontFamily: "var(--mono)" }}>null</code> = empty</span>
+          <span><i className="swatch err" /> Erreur</span>
+          <span><i className="swatch clean" /> Nettoyée / mappée</span>
+          <span><i className="swatch warn" /> Sans TCO</span>
+          <span><i className="swatch comp" /> Calculée</span>
+          {(editMode || pendingCount > 0) && <span><i className="swatch edited" /> Modifiée (à revalider)</span>}
+          <span style={{ color: "var(--ink-faint)" }}><code style={{ fontFamily: "var(--mono)" }}>null</code> = vide</span>
         </div>
       )}
 
       {columns.length === 0 ? (
-        <div className="banner"><span>No columns to show. Activate columns in the Schema tab.</span></div>
+        <div className="banner"><span>Aucune colonne à afficher. Activez des colonnes dans l'onglet Schéma.</span></div>
       ) : (
         <div className="vtable" ref={scrollRef} onScroll={(e) => setScrollTop((e.target as HTMLDivElement).scrollTop)}>
           <div className="vthead" style={{ gridTemplateColumns: gridCols }}>
             <div className="vth rownum">
-              {anyFilter && <button className="hclear" title="Clear filters" onClick={() => setFilters({})}>×</button>}
+              {anyFilter && <button className="hclear" title="Réinitialiser les filtres" onClick={() => setFilters({})}>×</button>}
             </div>
             {colIdx.map((ci) => (
               <div key={ci} className={`vth ${computed.has(columns[ci]) ? "comp" : ""} ${drag === ci ? "dragging" : ""}`}>
@@ -564,7 +581,7 @@ export function DataTable(props: Props) {
                   );
                 }
                 return (
-                  <div key={ci} className={`vtd ${st ? `cell-${st}` : ""} ${canEdit ? "editable" : ""}`} title={canEdit ? `${cell || "(empty)"} — click to edit` : cell}
+                  <div key={ci} className={`vtd ${st ? `cell-${st}` : ""} ${canEdit ? "editable" : ""}`} title={canEdit ? `${cell || "(vide)"} — cliquer pour modifier` : cell}
                     style={parseStyleToken(sty)}
                     onClick={canEdit ? () => setEditing({ idx: row.idx, ci, val: cell }) : undefined}>
                     {cell === "" ? <span className="nullv">null</span> : cell}
@@ -580,27 +597,27 @@ export function DataTable(props: Props) {
       {serverMode ? (
         <div className="pager">
           <span className="toolnote">
-            {filteredCount === 0 ? "No rows" :
-              `Rows ${(page * pageSize + 1).toLocaleString()}–${(page * pageSize + rows.length).toLocaleString()} of ${filteredCount.toLocaleString()}`}
-            {anyFilter ? ` (filtered from ${totalAll.toLocaleString()})` : ""}
+            {filteredCount === 0 ? "Aucune ligne" :
+              `Lignes ${(page * pageSize + 1).toLocaleString()}–${(page * pageSize + rows.length).toLocaleString()} sur ${filteredCount.toLocaleString()}`}
+            {anyFilter ? ` (filtré depuis ${totalAll.toLocaleString()})` : ""}
           </span>
           <span className="pager-ctrls">
-            <label className="csub">Rows per page
+            <label className="csub">Lignes par page
               <select className="mono-input" style={{ marginLeft: 6 }} value={pageSize}
                 onChange={(e) => setPageSize(parseInt(e.target.value))}>
                 {[50, 100, 200, 500, 1000].map((n) => <option key={n} value={n}>{n}</option>)}
               </select>
             </label>
-            <button className="btn sm" disabled={page <= 0} onClick={() => setPage(0)}>« First</button>
-            <button className="btn sm" disabled={page <= 0} onClick={() => setPage((p) => Math.max(0, p - 1))}>‹ Prev</button>
+            <button className="btn sm" disabled={page <= 0} onClick={() => setPage(0)}>« Début</button>
+            <button className="btn sm" disabled={page <= 0} onClick={() => setPage((p) => Math.max(0, p - 1))}>‹ Préc.</button>
             <span className="csub">Page {page + 1} / {pageCount}</span>
-            <button className="btn sm" disabled={page + 1 >= pageCount} onClick={() => setPage((p) => p + 1)}>Next ›</button>
-            <button className="btn sm" disabled={page + 1 >= pageCount} onClick={() => setPage(pageCount - 1)}>Last »</button>
+            <button className="btn sm" disabled={page + 1 >= pageCount} onClick={() => setPage((p) => p + 1)}>Suiv. ›</button>
+            <button className="btn sm" disabled={page + 1 >= pageCount} onClick={() => setPage(pageCount - 1)}>Fin »</button>
           </span>
         </div>
       ) : data.length > 0 ? (
         <div className="toolnote" style={{ marginTop: 8 }}>
-          Showing a sample of {data.length.toLocaleString()} rows. Run validation to browse and filter the whole file.
+          Échantillon de {data.length.toLocaleString()} ligne(s). Lancez la validation pour parcourir et filtrer le fichier entier.
         </div>
       ) : null}
 
@@ -608,11 +625,11 @@ export function DataTable(props: Props) {
       {columns.length > 0 && (
         <div className="export">
           <div className="sec-h" style={{ marginBottom: 12 }}>
-            <h3>Export table</h3>
-            <span className="sub">{result ? "Exports the last validated result (cleaned + computed)." : "Run validation first to export cleaned values — otherwise exports the working table."}</span>
+            <h3>Exporter la table</h3>
+            <span className="sub">{result ? "Exporte le dernier résultat validé (nettoyé + calculé)." : "Lancez la validation d'abord pour exporter les valeurs nettoyées — sinon la table de travail est exportée telle quelle."}</span>
           </div>
           <div className="export-form">
-            <div className="frow"><label>File name</label>
+            <div className="frow"><label>Nom du fichier</label>
               <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="export" /></div>
             <div className="frow"><label>Format</label>
               <select value={fmt} onChange={(e) => setFmt(e.target.value as "csv" | "xlsx" | "pivot")}>
@@ -620,25 +637,25 @@ export function DataTable(props: Props) {
                 <option value="xlsx">Excel (.xlsx)</option>
                 <option value="pivot">Pivot (.json)</option>
               </select></div>
-            <div className="frow"><label>Encoding</label>
+            <div className="frow"><label>Encodage</label>
               <select value={enc} onChange={(e) => setEnc(e.target.value)} disabled={fmt !== "csv"}>
                 {ENCODINGS.map((x) => <option key={x} value={x}>{x}</option>)}
               </select></div>
-            <div className="frow"><label>Delimiter</label>
+            <div className="frow"><label>Délimiteur</label>
               <select value={delim} onChange={(e) => setDelim(e.target.value)} disabled={fmt !== "csv"}>
                 {Object.entries(DELIMS).map(([v, lbl]) => <option key={v} value={v}>{lbl}</option>)}
               </select></div>
             <label className="check" style={{ alignSelf: "end", opacity: anyFilter ? 1 : 0.5 }}>
               <input type="checkbox" checked={onlyFiltered} disabled={!anyFilter}
                 onChange={(e) => setOnlyFiltered(e.target.checked)} />
-              <span className="ctxt">Only filtered rows
+              <span className="ctxt">Uniquement les lignes filtrées
                 <div className="csub">{anyFilter
-                  ? "Applies your column filters across the whole file, not just the sample."
-                  : "Set a column filter above to enable."}</div>
+                  ? "Applique vos filtres de colonne à tout le fichier, pas seulement à l'échantillon."
+                  : "Définissez un filtre de colonne ci-dessus pour activer cette option."}</div>
               </span>
             </label>
             <button className="btn primary" onClick={doExport} disabled={!sid}>
-              <IconSave size={15} /> Export .{fmt}
+              <IconSave size={15} /> Exporter .{fmt}
             </button>
           </div>
         </div>

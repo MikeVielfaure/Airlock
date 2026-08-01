@@ -91,6 +91,26 @@ def resolved_variable_kinds(env: str = "", graph_id: str = "", node_id: str = ""
                                                  node_id=node_id)}
 
 
+@router.get("/variables/available")
+def list_available_variables(kind: str = "", env: str = "",
+                             _cap=Depends(require_capability("variables.read")),
+                             s: Session = Depends(get_session)):
+    """Names (and, for the non-secret ones, values) a picker outside the
+    référentiel itself may offer — a calculated column's variable list, or a
+    source-attachment connection select. Uses the resolved cascade, never the
+    raw administration listing: a shadowed global must not appear pickable
+    when an environment override exists. A secret is excluded outright, not
+    masked — it exists to connect, never to be read back into a value that
+    could end up in a computed column or an export."""
+    scope = env or repo.DEFAULT_ENV
+    values = repo.resolve_variables(s, environment=scope)
+    kinds = repo.resolve_variable_kinds(s, environment=scope)
+    secrets = repo.secret_names(s)
+    out = [{"name": n, "kind": k, "value": values.get(n, "")}
+           for n, k in kinds.items() if n not in secrets and (not kind or k == kind)]
+    return sorted(out, key=lambda v: v["name"])
+
+
 def _require_variable_write(s: Session, user: User, scope: str, environment: str) -> None:
     """Sharing is not creating: a global variable needs genuine cross-
     environment authority (superadmin), not just being admin of whichever

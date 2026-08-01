@@ -106,12 +106,12 @@ export function MappingPanel({ notify, onSession, sessionColumns = [], sessionId
     <div className="map">
       {/* ── source ─────────────────────────────────────────────── */}
       <section className="map-block">
-        <h3><IconTable size={15} /> The source to bridge</h3>
+        <h3><IconTable size={15} /> La source à relier</h3>
         <p className="map-hint">
-          A mapping states, explicitly and in both directions, what a source field
-          corresponds to. It replaces the old bridge-by-coincidence-of-names, and
-          because every link is reversible the same artefact drives source→pivot
-          and pivot→source.
+          Un mapping déclare, explicitement et dans les deux sens, à quoi correspond
+          un champ source. Il remplace l'ancienne mise en correspondance par
+          coïncidence de noms — chaque lien étant réversible, le même artefact
+          pilote source→pivot et pivot→source.
         </p>
         <div className="map-row">
           {(["flat", "edi"] as const).map((k) => (
@@ -133,7 +133,7 @@ export function MappingPanel({ notify, onSession, sessionColumns = [], sessionId
                  onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
           {doc.source_kind === "flat" && (
             <button className="btn sm" onClick={() => fileRef.current?.click()}>
-              <IconUpload size={13} /> {file ? file.name : "Sample file"}
+              <IconUpload size={13} /> {file ? file.name : "Fichier d'exemple"}
             </button>
           )}
           <button className="btn sm" disabled={!!busy} onClick={() => run("suggest", async () => {
@@ -145,9 +145,9 @@ export function MappingPanel({ notify, onSession, sessionColumns = [], sessionId
             });
             setDoc({ ...s.mapping, name: doc.name || s.mapping.name });
             setSourceFields(s.mapping.links.map((l) => l.source ?? "").filter(Boolean));
-            notify("Starting mapping proposed — every field linked to itself. Edit from here.", "ok");
+            notify("Mapping de départ proposé — chaque champ relié à lui-même. Modifiez-le ici.", "ok");
           })}>
-            <IconPlay size={13} /> Suggest a starting point
+            <IconPlay size={13} /> Suggérer un point de départ
           </button>
         </div>
       </section>
@@ -156,19 +156,19 @@ export function MappingPanel({ notify, onSession, sessionColumns = [], sessionId
       <section className="map-block">
         <div className="map-modes">
           <button className={`map-tab ${mode === "list" ? "on" : ""}`} onClick={() => setMode("list")}>
-            <IconList size={14} /> List
+            <IconList size={14} /> Liste
           </button>
           <button className={`map-tab ${mode === "connect" ? "on" : ""}`} onClick={() => setMode("connect")}>
-            <IconEdit size={14} /> Connect by hand
+            <IconEdit size={14} /> Relier à la main
           </button>
-          <span className="map-count">{doc.links.length} link(s)</span>
+          <span className="map-count">{doc.links.length} lien(s)</span>
         </div>
 
         {mode === "connect" ? (
           <div className="map-connect">
             <div className="map-col">
-              <h4>Source fields</h4>
-              {sourceFields.length === 0 && <p className="map-hint">Load a source above.</p>}
+              <h4>Champs source</h4>
+              {sourceFields.length === 0 && <p className="map-hint">Chargez une source ci-dessus.</p>}
               {sourceFields.map((f) => (
                 <button key={f}
                         className={`map-node ${pending === f ? "pending" : ""} ${linked.has(f) ? "done" : ""}`}
@@ -177,27 +177,27 @@ export function MappingPanel({ notify, onSession, sessionColumns = [], sessionId
                 </button>
               ))}
               {unlinked.length > 0 && (
-                <p className="map-hint">{unlinked.length} field(s) not linked yet.</p>
+                <p className="map-hint">{unlinked.length} champ(s) pas encore relié(s).</p>
               )}
             </div>
 
             <div className="map-middle">
               {pending
-                ? <><span className="map-arrow">→</span><p className="map-hint">Now click a pivot field, or create one.</p></>
-                : <p className="map-hint">Click a source field to start a link.</p>}
+                ? <><span className="map-arrow">→</span><p className="map-hint">Cliquez maintenant un champ pivot, ou créez-en un.</p></>
+                : <p className="map-hint">Cliquez un champ source pour démarrer un lien.</p>}
               {pending && (
                 <button className="btn sm" onClick={() => { pairWith(pending); }}>
-                  Create pivot field “{pending}”
+                  Créer le champ pivot « {pending} »
                 </button>
               )}
             </div>
 
             <div className="map-col">
-              <h4>Pivot fields</h4>
+              <h4>Champs pivot</h4>
               {doc.links.map((l, i) => (
                 <button key={i} className={`map-node ${pending ? "target" : ""}`}
                         onClick={() => pending && pairWith(l.pivot)}>
-                  {l.pivot || <em>(unnamed)</em>}
+                  {l.pivot || <em>(sans nom)</em>}
                   <span className="map-src">
                     {originOf(l) === "expr" ? "ƒ(x)" : l.source}
                   </span>
@@ -208,12 +208,12 @@ export function MappingPanel({ notify, onSession, sessionColumns = [], sessionId
         ) : (
           <div className="map-list">
             {doc.links.length === 0 && (
-              <p className="map-hint">No link yet — suggest a starting point above, or add one.</p>
+              <p className="map-hint">Aucun lien pour l'instant — suggérez un point de départ ci-dessus, ou ajoutez-en un.</p>
             )}
             {doc.links.map((l, i) => (
               <div key={i} className={`map-link ${openLink === i ? "open" : ""}`}>
                 <div className="map-link-row">
-                  <input className="map-pivot" value={l.pivot} placeholder="pivot field"
+                  <input className="map-pivot" value={l.pivot} placeholder="champ pivot"
                          onChange={(e) => setLink(i, { pivot: e.target.value })} />
                   <span className="map-eq">=</span>
 
@@ -225,7 +225,7 @@ export function MappingPanel({ notify, onSession, sessionColumns = [], sessionId
                         {sourceFields.map((f) => <option key={f} value={f}>{f}</option>)}
                       </select>
                     ) : (
-                      <input value={l.source ?? ""} placeholder="source field"
+                      <input value={l.source ?? ""} placeholder="champ source"
                              onChange={(e) => setLink(i, { source: e.target.value, expr: null })} />
                     )
                   ) : (
@@ -234,7 +234,7 @@ export function MappingPanel({ notify, onSession, sessionColumns = [], sessionId
                            onChange={(e) => setLink(i, { expr: e.target.value, source: "" })} />
                   )}
 
-                  <button className="map-flip" title="Read a field, or compute the value"
+                  <button className="map-flip" title="Lire un champ, ou calculer la valeur"
                           onClick={() => setLink(i, originOf(l) === "source"
                             ? { expr: "", source: "" } : { expr: null, source: "" })}>
                     {originOf(l) === "source" ? <IconCode size={13} /> : <IconTable size={13} />}
@@ -245,7 +245,7 @@ export function MappingPanel({ notify, onSession, sessionColumns = [], sessionId
                     <option value="item">item</option>
                   </select>
 
-                  <button className="map-flip" title="Constraints"
+                  <button className="map-flip" title="Contraintes"
                           onClick={() => setOpenLink(openLink === i ? -1 : i)}>
                     <IconCheck size={13} />
                   </button>
@@ -255,32 +255,32 @@ export function MappingPanel({ notify, onSession, sessionColumns = [], sessionId
                 {openLink === i && (
                   <div className="map-rules">
                     <p className="map-hint">
-                      The same constraints a cleaning config declares, checked by the
-                      same engine — a regex means the same thing here as there.
+                      Les mêmes contraintes qu'une config de nettoyage déclare, vérifiées
+                      par le même moteur — une regex veut dire la même chose ici que là-bas.
                     </p>
                     <div className="map-row">
                       <select value={(l.rules?.type as string) ?? ""}
                               onChange={(e) => setLink(i, { rules: { ...(l.rules ?? {}), type: e.target.value || undefined } })}>
-                        <option value="">type: any</option>
+                        <option value="">type : any</option>
                         {["string", "integer", "float", "date", "boolean"].map((t) =>
-                          <option key={t} value={t}>type: {t}</option>)}
+                          <option key={t} value={t}>type : {t}</option>)}
                       </select>
-                      <input className="mono" placeholder="regex, e.g. ^\\d{13}$"
+                      <input className="mono" placeholder="regex, ex. ^\\d{13}$"
                              value={(l.rules?.regex as string) ?? ""}
                              onChange={(e) => setLink(i, { rules: { ...(l.rules ?? {}), regex: e.target.value || undefined } })} />
                       <label className="map-check">
                         <input type="checkbox" checked={l.rules?.nullable === false}
                                onChange={(e) => setLink(i, { rules: { ...(l.rules ?? {}), nullable: e.target.checked ? false : undefined } })} />
-                        required
+                        obligatoire
                       </label>
-                      <input placeholder="default if empty" value={l.default ?? ""}
+                      <input placeholder="valeur par défaut si vide" value={l.default ?? ""}
                              onChange={(e) => setLink(i, { default: e.target.value || null })} />
                     </div>
                   </div>
                 )}
               </div>
             ))}
-            <button className="btn sm" onClick={() => addLink()}>+ link</button>
+            <button className="btn sm" onClick={() => addLink()}>+ lien</button>
           </div>
         )}
       </section>
@@ -288,7 +288,7 @@ export function MappingPanel({ notify, onSession, sessionColumns = [], sessionId
       {/* ── test & save ────────────────────────────────────────── */}
       <section className="map-block">
         <div className="map-row">
-          <input value={doc.name} placeholder="mapping name"
+          <input value={doc.name} placeholder="nom du mapping"
                  onChange={(e) => setDoc({ ...doc, name: e.target.value })} />
           <button className="btn" disabled={!!busy || !doc.links.length}
                   onClick={() => run("test", async () => {
@@ -304,11 +304,11 @@ export function MappingPanel({ notify, onSession, sessionColumns = [], sessionId
                     const r = await api.toPivotObject(doc.source_kind, payload);
                     setResult(r);
                     notify(r.checks.ok
-                      ? `${r.documents} document(s) — all constraints satisfied.`
-                      : `${r.checks.problems.length} constraint problem(s).`,
+                      ? `${r.documents} document(s) — toutes les contraintes sont respectées.`
+                      : `${r.checks.problems.length} problème(s) de contrainte.`,
                       r.checks.ok ? "ok" : "err");
                   })}>
-            <IconPlay size={15} /> Test on the source
+            <IconPlay size={15} /> Tester sur la source
           </button>
           <button className="btn" disabled={!!busy || !doc.name.trim() || !doc.links.length}
                   onClick={() => run("save", async () => {
@@ -316,13 +316,13 @@ export function MappingPanel({ notify, onSession, sessionColumns = [], sessionId
                     if (existing) await api.addArtefactVersion("mapping", existing.id, { yaml: yamlOf(doc) });
                     else await api.createArtefact("mapping", { name: doc.name.trim(), yaml: yamlOf(doc) });
                     await refresh();
-                    notify(`Mapping “${doc.name}” saved.`, "ok");
+                    notify(`Mapping « ${doc.name} » enregistré.`, "ok");
                   })}>
-            <IconSave size={15} /> Save to library
+            <IconSave size={15} /> Enregistrer dans la bibliothèque
           </button>
           {result?.session_id && onSession && (
             <button className="btn sm" onClick={() => onSession(result.session_id!)}>
-              Open in Data
+              Ouvrir dans Données
             </button>
           )}
         </div>
@@ -331,7 +331,7 @@ export function MappingPanel({ notify, onSession, sessionColumns = [], sessionId
         {result && (
           <div className="map-grid-wrap">
             <div className="map-caption">
-              {result.documents} document(s) · {result.preview.total_rows} row(s)
+              {result.documents} document(s) · {result.preview.total_rows} ligne(s)
             </div>
             <div className="map-scroll">
               <table className="map-grid">
@@ -349,8 +349,8 @@ export function MappingPanel({ notify, onSession, sessionColumns = [], sessionId
 
       {/* ── library ────────────────────────────────────────────── */}
       <section className="map-block">
-        <h4><IconSave size={14} /> Saved mappings <span className="map-count">{saved.length}</span></h4>
-        {saved.length === 0 && <p className="map-hint">None yet.</p>}
+        <h4><IconSave size={14} /> Mappings enregistrés <span className="map-count">{saved.length}</span></h4>
+        {saved.length === 0 && <p className="map-hint">Aucun pour l'instant.</p>}
         {saved.map((m) => (
           <div key={m.id} className="map-saved">
             <strong>{m.name}</strong>
@@ -364,16 +364,16 @@ export function MappingPanel({ notify, onSession, sessionColumns = [], sessionId
 
 function ChecksView({ checks }: { checks: PivotChecks }) {
   if (checks.checked === 0)
-    return <p className="map-hint">No constraint declared — nothing to check.</p>;
+    return <p className="map-hint">Aucune contrainte déclarée — rien à vérifier.</p>;
   if (checks.ok)
     return (
       <div className="map-ok">
-        <IconCheck size={14} /> {checks.checked} field(s) constrained, all satisfied.
+        <IconCheck size={14} /> {checks.checked} champ(s) contraint(s), tous respectés.
       </div>
     );
   return (
     <div className="map-ko">
-      <h4><IconWarn size={14} /> {checks.problems.length} problem(s)</h4>
+      <h4><IconWarn size={14} /> {checks.problems.length} problème(s)</h4>
       <ul>
         {checks.problems.slice(0, 40).map((p, i) => (
           <li key={i}><code>{p.field}</code> {p.message}</li>

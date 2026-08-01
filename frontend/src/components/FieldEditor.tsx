@@ -10,7 +10,7 @@ interface Props {
 }
 
 const CASE_LABELS: Record<string, string> = {
-  upper: "UPPER", lower: "lower", title: "Title", "": "As-is",
+  upper: "MAJUSCULES", lower: "minuscules", title: "Titre", "": "Tel quel",
 };
 
 // Insertable helpers for the dynamic "Match column by" field.
@@ -56,7 +56,7 @@ export function FieldEditor({ col, field, presets, tcoLabels, configFields, onCh
       <div className="editor-body">
         <div className="editor-grid">
           {/* IDENTITY */}
-          <div className="editor-section-h">Identity</div>
+          <div className="editor-section-h">Identité</div>
 
           <div className="frow">
             <label>Type</label>
@@ -69,7 +69,7 @@ export function FieldEditor({ col, field, presets, tcoLabels, configFields, onCh
           </div>
 
           <div className="frow full">
-            <label>Rename to / match a config field <span style={{ color: "var(--ink-faint)" }}>(optional)</span></label>
+            <label>Renommer / associer à un champ de config <span style={{ color: "var(--ink-faint)" }}>(optionnel)</span></label>
             <input
               type="text" className="mono-input" placeholder={col}
               list={configNames.length ? "cfg-fields" : undefined}
@@ -84,10 +84,10 @@ export function FieldEditor({ col, field, presets, tcoLabels, configFields, onCh
             {cfMatch && (
               <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6 }}>
                 <button type="button" className="preset" onClick={inherit}>
-                  ↧ Inherit rules from config field “{field.mapping}”
+                  ↧ Hériter des règles du champ de config « {field.mapping} »
                 </button>
                 <span style={{ color: "var(--ink-faint)", fontSize: 11 }}>type {cfMatch.type}
-                  {cfMatch.regex ? " · regex" : ""}{cfMatch.length != null ? ` · len ${cfMatch.length}` : ""}
+                  {cfMatch.regex ? " · regex" : ""}{cfMatch.length != null ? ` · long. ${cfMatch.length}` : ""}
                   {cfMatch.tco_mapping ? " · TCO" : ""}</span>
               </div>
             )}
@@ -95,15 +95,15 @@ export function FieldEditor({ col, field, presets, tcoLabels, configFields, onCh
               <label className="check" style={{ marginTop: 6 }}>
                 <input type="checkbox" checked={field.rename_output}
                   onChange={(e) => onChange({ rename_output: e.target.checked })} />
-                <span className="ctxt">Show this name in the table & export
-                  <div className="csub">Off: rules apply but the column keeps its original name “{col}”.</div>
+                <span className="ctxt">Afficher ce nom dans le tableau et l'export
+                  <div className="csub">Désactivé : les règles s'appliquent mais la colonne garde son nom d'origine « {col} ».</div>
                 </span>
               </label>
             )}
           </div>
 
           <div className="frow full">
-            <label>Match column by <span style={{ color: "var(--ink-faint)" }}>(advanced — name can vary)</span></label>
+            <label>Faire correspondre la colonne par <span style={{ color: "var(--ink-faint)" }}>(avancé — le nom peut varier)</span></label>
             <input
               type="text" className="mono-input"
               value={(field.name ?? []).join(", ")}
@@ -112,22 +112,22 @@ export function FieldEditor({ col, field, presets, tcoLabels, configFields, onCh
             />
             <div className="namehelp">
               <div className="namehelp-row">
-                <span className="chiplabel">tags:</span>
+                <span className="chiplabel">balises :</span>
                 {NAME_TOKENS.map((t) => (
                   <button key={t} type="button" className="microchip"
                     onClick={() => appendName(`[${t}]`)}>[{t}]</button>
                 ))}
               </div>
               <div className="namehelp-row">
-                <span className="chiplabel">functions:</span>
+                <span className="chiplabel">fonctions :</span>
                 {NAME_FUNCS.map((f) => (
                   <button key={f} type="button" className="microchip"
-                    onClick={() => appendName((field.name?.length ? "" : "=") + f)} title="prefix the whole name with = to use functions">{f}</button>
+                    onClick={() => appendName((field.name?.length ? "" : "=") + f)} title="préfixer le nom entier par = pour utiliser des fonctions">{f}</button>
                 ))}
               </div>
               <div className="csub">
-                Binds this field to a file column. Use a tag for a name that changes (e.g. <code>[MOIS_COURT]</code>),
-                or start with <code>=</code> for a computed name (e.g. <code>=LEFT([MOIS_NOM], 4)</code>).
+                Relie ce champ à une colonne du fichier. Utilise une balise pour un nom qui varie (ex. <code>[MOIS_COURT]</code>),
+                ou commence par <code>=</code> pour un nom calculé (ex. <code>=LEFT([MOIS_NOM], 4)</code>).
               </div>
             </div>
           </div>
@@ -137,21 +137,21 @@ export function FieldEditor({ col, field, presets, tcoLabels, configFields, onCh
               type="checkbox" checked={field.identifiant}
               onChange={(e) => onChange({ identifiant: e.target.checked })}
             />
-            <span className="ctxt">Use as row identifier
-              <div className="csub">This column labels rows in the report instead of the row number.</div>
+            <span className="ctxt">Utiliser comme identifiant de ligne
+              <div className="csub">Cette colonne identifie les lignes dans le rapport, à la place du numéro de ligne.</div>
             </span>
           </label>
 
           {/* CLEANING */}
-          <div className="editor-section-h">Cleaning</div>
+          <div className="editor-section-h">Nettoyage</div>
 
           <label className="check">
             <input type="checkbox" checked={field.trim} onChange={(e) => onChange({ trim: e.target.checked })} />
-            <span className="ctxt">Trim whitespace</span>
+            <span className="ctxt">Supprimer les espaces superflus</span>
           </label>
 
           <div className="frow">
-            <label>Normalize case</label>
+            <label>Normaliser la casse</label>
             <select
               value={field.normalize_case ?? ""}
               onChange={(e) => onChange({ normalize_case: (e.target.value || null) as any })}
@@ -163,7 +163,7 @@ export function FieldEditor({ col, field, presets, tcoLabels, configFields, onCh
           </div>
 
           <div className="frow">
-            <label>Strip character <span style={{ color: "var(--ink-faint)" }}>(e.g. €, spaces)</span></label>
+            <label>Retirer un caractère <span style={{ color: "var(--ink-faint)" }}>(ex. €, espaces)</span></label>
             <input
               type="text" className="mono-input" maxLength={3}
               value={field.delimiteur ?? ""}
@@ -173,17 +173,17 @@ export function FieldEditor({ col, field, presets, tcoLabels, configFields, onCh
 
           {isNum && (
             <div className="frow">
-              <label>Number formatting</label>
+              <label>Format des nombres</label>
               <div style={{ display: "flex", gap: 14, paddingTop: 4 }}>
                 <label className="check" style={{ padding: 0 }}>
                   <input type="checkbox" checked={field.separator_mile}
                     onChange={(e) => onChange({ separator_mile: e.target.checked })} />
-                  <span className="ctxt">Strip thousands</span>
+                  <span className="ctxt">Retirer les séparateurs de milliers</span>
                 </label>
                 <label className="check" style={{ padding: 0 }}>
                   <input type="checkbox" checked={field.separator_decimal}
                     onChange={(e) => onChange({ separator_decimal: e.target.checked })} />
-                  <span className="ctxt">Decimal → "."</span>
+                  <span className="ctxt">Décimale → "."</span>
                 </label>
               </div>
             </div>
@@ -194,13 +194,13 @@ export function FieldEditor({ col, field, presets, tcoLabels, configFields, onCh
               <label className="check full">
                 <input type="checkbox" checked={field.auto_date_format}
                   onChange={(e) => onChange({ auto_date_format: e.target.checked })} />
-                <span className="ctxt">Detect source format automatically
-                  <div className="csub">Uses a day/month heuristic when the order is ambiguous.</div>
+                <span className="ctxt">Détecter automatiquement le format source
+                  <div className="csub">Utilise une heuristique jour/mois quand l'ordre est ambigu.</div>
                 </span>
               </label>
               {!field.auto_date_format && (
                 <div className="frow">
-                  <label>Source format</label>
+                  <label>Format source</label>
                   <select value={field.format ?? ""} onChange={(e) => onChange({ format: e.target.value || null })}>
                     <option value="">—</option>
                     {presets.date_formats.map((f) => <option key={f} value={f}>{f}</option>)}
@@ -208,7 +208,7 @@ export function FieldEditor({ col, field, presets, tcoLabels, configFields, onCh
                 </div>
               )}
               <div className="frow">
-                <label>Target format</label>
+                <label>Format cible</label>
                 <select value={field.format_clean ?? ""} onChange={(e) => onChange({ format_clean: e.target.value || null })}>
                   <option value="">—</option>
                   {presets.date_formats.map((f) => <option key={f} value={f}>{f}</option>)}
@@ -223,24 +223,24 @@ export function FieldEditor({ col, field, presets, tcoLabels, configFields, onCh
           <label className="check">
             <input type="checkbox" checked={!field.nullable}
               onChange={(e) => onChange({ nullable: !e.target.checked })} />
-            <span className="ctxt">Required (no empty values)</span>
+            <span className="ctxt">Obligatoire (aucune valeur vide)</span>
           </label>
 
           <label className="check">
             <input type="checkbox" checked={field.check_type}
               onChange={(e) => onChange({ check_type: e.target.checked })} />
-            <span className="ctxt">Enforce type ({field.type})</span>
+            <span className="ctxt">Vérifier le type ({field.type})</span>
           </label>
 
           <div className="frow">
-            <label>Max length</label>
+            <label>Longueur maximale</label>
             <input type="number" min={0} placeholder="—"
               value={field.length ?? ""}
               onChange={(e) => onChange({ length: e.target.value ? Number(e.target.value) : null })} />
           </div>
 
           <div className="frow">
-            <label>Allowed values <span style={{ color: "var(--ink-faint)" }}>(comma-separated)</span></label>
+            <label>Valeurs autorisées <span style={{ color: "var(--ink-faint)" }}>(séparées par des virgules)</span></label>
             <input type="text" className="mono-input" placeholder="M, F, X"
               value={(field.on_list ?? []).join(", ")}
               onChange={(e) => {
@@ -250,7 +250,7 @@ export function FieldEditor({ col, field, presets, tcoLabels, configFields, onCh
           </div>
 
           <div className="frow full">
-            <label>Regex pattern</label>
+            <label>Motif regex</label>
             <input type="text" className="mono-input" placeholder="^[0-9]{14}$"
               value={field.regex ?? ""}
               onChange={(e) => onChange({ regex: e.target.value || null })} />
@@ -263,7 +263,7 @@ export function FieldEditor({ col, field, presets, tcoLabels, configFields, onCh
           </div>
 
           {/* MAPPING */}
-          <div className="editor-section-h">TCO mapping</div>
+          <div className="editor-section-h">Correspondance TCO</div>
           <div className="frow full">
             <label>Mode</label>
             <select
@@ -274,30 +274,30 @@ export function FieldEditor({ col, field, presets, tcoLabels, configFields, onCh
                 else if (m === "replace") onChange({ tco_replace: true, tco_mapping: null });
                 else onChange({ tco_replace: false });   // validate
               }}>
-              <option value="off">Off</option>
-              <option value="validate">Validate — each value must match a label</option>
-              <option value="replace">Replace — swap each value for its label</option>
+              <option value="off">Désactivé</option>
+              <option value="validate">Valider — chaque valeur doit correspondre à une étiquette</option>
+              <option value="replace">Remplacer — échanger chaque valeur contre son étiquette</option>
             </select>
           </div>
 
           {field.tco_replace ? (
             <div className="csub" style={{ marginTop: 2 }}>
-              Each value is looked up in the reference table and replaced by its <code>TARGET_LABEL</code>
-              (e.g. <code>M → MASCULIN</code>). Unknown values are kept as-is and flagged — they show up in
-              the report’s TCO coverage so you can complete the table.
+              Chaque valeur est recherchée dans la table de référence et remplacée par son <code>TARGET_LABEL</code>
+              (ex. <code>M → MASCULIN</code>). Les valeurs inconnues sont conservées telles quelles et signalées —
+              elles apparaissent dans la couverture TCO du rapport pour compléter la table.
             </div>
           ) : (
             <div className="frow full">
-              <label>Expected label
-                <span style={{ color: "var(--ink-faint)" }}> — checks each value against the reference table</span>
+              <label>Étiquette attendue
+                <span style={{ color: "var(--ink-faint)" }}> — vérifie chaque valeur par rapport à la table de référence</span>
               </label>
               {tcoLabels.length > 0 ? (
                 <select value={field.tco_mapping ?? ""} onChange={(e) => onChange({ tco_mapping: e.target.value || null })}>
-                  <option value="">No mapping</option>
+                  <option value="">Aucune correspondance</option>
                   {tcoLabels.map((l) => <option key={l} value={l}>{l}</option>)}
                 </select>
               ) : (
-                <input type="text" className="mono-input" placeholder="Load a TCO file first, or type a label"
+                <input type="text" className="mono-input" placeholder="Charge d'abord un fichier TCO, ou saisis une étiquette"
                   value={field.tco_mapping ?? ""}
                   onChange={(e) => onChange({ tco_mapping: e.target.value || null })} />
               )}
@@ -306,7 +306,7 @@ export function FieldEditor({ col, field, presets, tcoLabels, configFields, onCh
         </div>
 
         <div style={{ marginTop: 16, paddingTop: 14, borderTop: "1px solid var(--line)", fontSize: 12, color: "var(--ink-faint)" }}>
-          Validates as <span className="tchip string" style={{ fontSize: 10 }}>{finalName}</span>
+          Validé comme <span className="tchip string" style={{ fontSize: 10 }}>{finalName}</span>
         </div>
       </div>
     </div>

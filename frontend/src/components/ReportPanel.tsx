@@ -85,7 +85,7 @@ export function ReportPanel({ result, sid, notify, onLoadReport }: Props) {
   if (!result) {
     return (
       <div>
-        <div className="banner"><span>Run validation first — the report lists every cell and what happened to it.</span></div>
+        <div className="banner"><span>Lancez d'abord une validation — le rapport liste chaque cellule et ce qui lui est arrivé.</span></div>
         <div style={{ marginTop: 10 }}>{importButton}</div>
       </div>
     );
@@ -127,23 +127,23 @@ export function ReportPanel({ result, sid, notify, onLoadReport }: Props) {
   return (
     <div>
       <div className="sec-h">
-        <h3>Report</h3>
-        <span className="sub">One line per checked cell.</span>
+        <h3>Rapport</h3>
+        <span className="sub">Une ligne par cellule vérifiée.</span>
         <span style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-          <label className="csub">Shape
+          <label className="csub">Forme
             <select className="mono-input" style={{ marginLeft: 4 }} value={shape} onChange={(e) => setShape(e.target.value as Shape)}>
-              <option value="long">flat (one row per cell)</option>
-              <option value="by_id">grouped by id</option>
-              <option value="pivot">pivot (id × column)</option>
+              <option value="long">plat (une ligne par cellule)</option>
+              <option value="by_id">groupé par id</option>
+              <option value="pivot">pivot (id × colonne)</option>
             </select>
           </label>
           {shape === "pivot" && (
-            <label className="csub">Cell
+            <label className="csub">Cellule
               <select className="mono-input" style={{ marginLeft: 4 }} value={pivotValue}
                       onChange={(e) => setPivotValue(e.target.value as PivotValue)}>
-                <option value="status">status</option>
+                <option value="status">statut</option>
                 <option value="message">message</option>
-                <option value="final">final value</option>
+                <option value="final">valeur finale</option>
               </select>
             </label>
           )}
@@ -151,7 +151,7 @@ export function ReportPanel({ result, sid, notify, onLoadReport }: Props) {
             <option value="csv">CSV</option>
             <option value="xlsx">Excel</option>
           </select>
-          <button className="btn sm" onClick={download}><IconDownload size={14} /> Download</button>
+          <button className="btn sm" onClick={download}><IconDownload size={14} /> Télécharger</button>
           <button className="btn sm" onClick={exportJson}><IconDownload size={14} /> Exporter (JSON)</button>
           {importButton}
         </span>
@@ -159,17 +159,17 @@ export function ReportPanel({ result, sid, notify, onLoadReport }: Props) {
 
       {uncoveredCols.length > 0 && (
         <div className="tco-coverage">
-          <div className="tco-coverage-h">TCO — values not covered (add these to your correspondence table)</div>
+          <div className="tco-coverage-h">TCO — valeurs non couvertes (ajoutez-les à votre table de correspondance)</div>
           {uncoveredCols.map((col) => (
             <div key={col} className="tco-col">
               <span className="tco-colname">{col}</span>
               <div className="tco-vals">
                 {uncovered[col].slice(0, 40).map((v) => (
-                  <span key={v.value} className="tco-val" title={`${v.count} row(s)`}>
+                  <span key={v.value} className="tco-val" title={`${v.count} ligne(s)`}>
                     {v.value || "∅"} <span className="tco-count">{v.count}</span>
                   </span>
                 ))}
-                {uncovered[col].length > 40 && <span className="csub">+{uncovered[col].length - 40} more</span>}
+                {uncovered[col].length > 40 && <span className="csub">+{uncovered[col].length - 40} de plus</span>}
               </div>
             </div>
           ))}
@@ -178,10 +178,10 @@ export function ReportPanel({ result, sid, notify, onLoadReport }: Props) {
 
       <div className="filterbar">
         <button className={`statpill ${filter === "ISSUES" ? "on" : ""}`} onClick={() => setFilter("ISSUES")}>
-          Issues <span className="n">{(counts.ERROR ?? 0) + (counts.MAPPING_KO ?? 0) + (counts.NO_TCO ?? 0)}</span>
+          Problèmes <span className="n">{(counts.ERROR ?? 0) + (counts.MAPPING_KO ?? 0) + (counts.NO_TCO ?? 0)}</span>
         </button>
         <button className={`statpill ${filter === "ALL" ? "on" : ""}`} onClick={() => setFilter("ALL")}>
-          All <span className="n">{result.report.length}</span>
+          Tous <span className="n">{result.report.length}</span>
         </button>
         {STATUSES.filter((s) => counts[s]).map((s) => (
           <button key={s} className={`statpill ${filter === s ? "on" : ""}`} onClick={() => setFilter(s)}>
@@ -203,7 +203,7 @@ export function ReportPanel({ result, sid, notify, onLoadReport }: Props) {
               <tbody>
                 {pivot.idOrder.length === 0 ? (
                   <tr><td colSpan={pivot.cols.length + 1} style={{ textAlign: "center", color: "var(--ink-faint)", padding: 24 }}>
-                    Nothing here — no rows match this filter.
+                    Rien ici — aucune ligne ne correspond à ce filtre.
                   </td></tr>
                 ) : pivot.idOrder.slice(0, 2000).map((id, i) => {
                   const cell = pivot.byId.get(String(id)) ?? {};
@@ -230,7 +230,7 @@ export function ReportPanel({ result, sid, notify, onLoadReport }: Props) {
           </div>
           {pivot.idOrder.length > 2000 && (
             <div style={{ marginTop: 8, fontSize: 12, color: "var(--ink-faint)" }}>
-              Showing first 2,000 of {pivot.idOrder.length.toLocaleString()} matching ids — download for the full set.
+              Affichage des 2 000 premiers id sur {pivot.idOrder.length.toLocaleString()} correspondants — téléchargez pour l'ensemble complet.
             </div>
           )}
         </>
@@ -240,16 +240,16 @@ export function ReportPanel({ result, sid, notify, onLoadReport }: Props) {
             <table className="grid">
               <thead>
                 <tr>
-                  <th>id</th><th>column</th>
-                  {hasOriginal && <th>original</th>}
-                  <th>{hasOriginal ? "final" : "value"}</th>
-                  <th>result</th><th>status</th>
+                  <th>id</th><th>colonne</th>
+                  {hasOriginal && <th>origine</th>}
+                  <th>{hasOriginal ? "finale" : "valeur"}</th>
+                  <th>résultat</th><th>statut</th>
                 </tr>
               </thead>
               <tbody>
                 {rows.length === 0 ? (
                   <tr><td colSpan={hasOriginal ? 6 : 5} style={{ textAlign: "center", color: "var(--ink-faint)", padding: 24 }}>
-                    Nothing here — no rows match this filter.
+                    Rien ici — aucune ligne ne correspond à ce filtre.
                   </td></tr>
                 ) : rows.slice(0, 2000).map((r, i) => (
                   <tr key={i}>
@@ -268,13 +268,13 @@ export function ReportPanel({ result, sid, notify, onLoadReport }: Props) {
           </div>
           {rows.length > 2000 && (
             <div style={{ marginTop: 8, fontSize: 12, color: "var(--ink-faint)" }}>
-              Showing first 2,000 of {rows.length.toLocaleString()} matching rows — download for the full set.
+              Affichage des 2 000 premières lignes sur {rows.length.toLocaleString()} correspondantes — téléchargez pour l'ensemble complet.
             </div>
           )}
         </>
       )}
       <div className="csub" style={{ marginTop: 8 }}>
-        The preview above shows the active filter. <strong>Download</strong> applies the same status filter and your chosen shape over the whole report.
+        L'aperçu ci-dessus affiche le filtre actif. <strong>Télécharger</strong> applique le même filtre de statut et la forme choisie à l'ensemble du rapport.
       </div>
     </div>
   );

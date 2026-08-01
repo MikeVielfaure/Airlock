@@ -28,6 +28,7 @@ from app.models import (
     FieldConfig, FileResponse, HeaderRequest, ImportRequest, ImportResponse,
     MatchInfo, Presets, ProcessRequest, ProcessResponse, ProcessStats, RowsResponse, TablePreview, TcoResponse,
     PipelineResponse, SourceInfo, AttachDatasetSource, ReorderRowRequest,
+    AttachExternalDbSource, AttachApiSource,
 )
 from app.services.config_service import ConfigService
 from app.services.file_service import FileService
@@ -420,6 +421,123 @@ async def attach_upload_source(sid: str, name: str = Form(...), file: UploadFile
             df, _enc, _delim = _files.load_csv_raw(raw, _AUTO, None)
     except Exception as e:  # noqa: BLE001 — surface load errors to the client
         raise HTTPException(422, f"Impossible de lire le fichier : {e}")
+
+    sess.attached[name] = df
+    return SourceInfo(name=name, columns=list(df.columns), row_count=int(len(df)))
+
+
+@app.post("/api/files/{sid}/sources/external_db", response_model=SourceInfo)
+def attach_external_db_source(sid: str, req: AttachExternalDbSource, env: str = "",
+        _cap=Depends(require_capability("variables.read")),
+        s: DbSession = Depends(get_session)):
+    """
+    A read-only, parameter-bound query against a saved BDD externe
+    connection, attached the same way a table or an uploaded file already
+    is — a session source, nothing persisted. Never a second SQL engine:
+    `external_db.run_query` is exactly what the `external_db` flow brick
+    calls too.
+    """
+    from app.services import connections, external_db
+
+    sess = _session(sid)
+    name = req.name.strip()
+    if not name:
+        raise HTTPException(422, "La source a besoin d'un nom.")
+    query = req.query.strip()
+    if not query:
+        raise HTTPException(422, "La requête ne peut pas être vide.")
+
+    scope = env or repo.DEFAULT_ENV
+    values = repo.resolve_variables(s, environment=scope)
+    kinds = repo.resolve_variable_kinds(s, environment=scope)
+    try:
+        conn = connections.parse_connection(
+            req.connection, values.get(req.connection), kinds.get(req.connection), "external_db")
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+    url = conn.get("url")
+    if not url:
+        raise HTTPException(422, f"La connexion « {req.connection} » n'a pas d'URL.")
+
+    try:
+        df = external_db.run_query(url, query, req.params, MAX_SOURCE_ROWS)
+    except external_db.QueryTooLarge as e:
+        raise HTTPException(413, str(e))
+    except Exception as e:  # noqa: BLE001 — surface the query failure to the client
+        raise HTTPException(422, f"Échec de la requête : {e}")
+
+    sess.attached[name] = df
+    return SourceInfo(name=name, columns=list(df.columns), row_count=int(len(df)))
+
+
+@app.post("/api/files/{sid}/sources/api", response_model=SourceInfo)
+def attach_api_source(sid: str, req: AttachApiSource, env: str = "",
+        _cap=Depends(require_capability("variables.read")),
+        s: DbSession = Depends(get_session)):
+    """
+    Attach the answer of a saved API connection as a session source — either
+    data (JSON, walked to `data_path` the same way the `api` flow brick
+    does) or a file (CSV/XLSX), chosen explicitly by `response_kind`: an API
+    connection point does not itself know which one it answers with, so
+    nothing here guesses.
+    """
+    from app.services import api_source, connections
+
+    sess = _session(sid)
+    name = req.name.strip()
+    if not name:
+        raise HTTPException(422, "La source a besoin d'un nom.")
+
+    scope = env or repo.DEFAULT_ENV
+    values = repo.resolve_variables(s, environment=scope)
+    kinds = repo.resolve_variable_kinds(s, environment=scope)
+    try:
+        conn = connections.parse_connection(
+            req.connection, values.get(req.connection), kinds.get(req.connection), "api")
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+
+    base = (conn.get("base_url") or "").rstrip("/")
+    rel = req.path.lstrip("/")
+    url = f"{base}/{rel}" if rel else base
+    if not url:
+        raise HTTPException(422, f"La connexion « {req.connection} » n'a pas de base_url.")
+    headers = {}
+    if conn.get("token"):
+        headers[conn.get("auth_header") or "Authorization"] = conn["token"]
+
+    try:
+        raw, _status = api_source.call(url, req.method.upper(), headers, req.body, 20.0)
+    except api_source.ApiCallError as e:
+        raise HTTPException(422, str(e))
+
+    try:
+        if req.response_kind == "xlsx":
+            df = _files.load_xlsx_raw(raw, sheet=0)
+        elif req.response_kind == "csv":
+            df, _enc, _delim = _files.load_csv_raw(raw, _AUTO, None)
+        else:
+            payload = json.loads(raw)
+            payload = api_source.walk_json_path(payload, req.data_path)
+            if payload is None:
+                payload = []
+            if isinstance(payload, dict):
+                payload = [payload]
+            if not isinstance(payload, list):
+                raise HTTPException(422, "La réponse JSON n'est ni une liste ni un objet.")
+            rows = [r for r in payload if isinstance(r, dict)]
+            df = pd.DataFrame(rows).astype("string").fillna("") if rows else pd.DataFrame()
+    except api_source.ApiCallError as e:
+        raise HTTPException(422, str(e))
+    except ValueError:
+        raise HTTPException(422, f"{url} n'a pas renvoyé de JSON.")
+    except HTTPException:
+        raise
+    except Exception as e:  # noqa: BLE001 — surface a bad file/response to the client
+        raise HTTPException(422, f"Impossible de lire la réponse : {e}")
+
+    if len(df) > MAX_SOURCE_ROWS:
+        raise HTTPException(413, f"La réponse contient plus de {MAX_SOURCE_ROWS} lignes.")
 
     sess.attached[name] = df
     return SourceInfo(name=name, columns=list(df.columns), row_count=int(len(df)))
@@ -832,8 +950,9 @@ async def upload_tco(
 
 
 @app.post("/api/files/{sid}/process", response_model=ProcessResponse)
-def process(sid: str, req: ProcessRequest,
-        _cap=Depends(require_capability("file.process"))):
+def process(sid: str, req: ProcessRequest, env: str = "",
+        _cap=Depends(require_capability("file.process")),
+        s: DbSession = Depends(get_session)):
     sess = _session(sid)
     fields: dict[str, FieldConfig] = req.fields
     # One or more identifier fields (every field marked as identifier).
@@ -842,6 +961,18 @@ def process(sid: str, req: ProcessRequest,
     # Known *before* the SQL step runs: a cross-source query must never see a
     # declared-confidential column's real value, only its mask.
     declared_sensitive = frozenset(c for c, f in fields.items() if getattr(f, "sensitive", None))
+
+    # A référentiel variable is referenced by name, resolved fresh here — never
+    # trusted from the client, and never a secret even if the requested name
+    # is one (the picker already excludes secrets; this is the "fail closed"
+    # backstop for a request built by hand).
+    ref_values: dict[str, str] = {}
+    if req.ref_variables:
+        resolved = repo.resolve_variables(s, environment=env or repo.DEFAULT_ENV)
+        secrets = repo.secret_names(s)
+        ref_values = {n: resolved[n] for n in req.ref_variables
+                     if n in resolved and n not in secrets}
+    effective_variables = {**ref_values, **req.variables}   # a hand-typed variable wins on collision
 
     try:
         result = _process.run_pipeline(
@@ -856,7 +987,7 @@ def process(sid: str, req: ProcessRequest,
             attached=sess.attached,
             sensitive_cols=declared_sensitive,
             report_flagged_only=True,
-            variables=req.variables,
+            variables=effective_variables,
         )
 
         df_post    = result["df"]
@@ -1303,6 +1434,7 @@ def export_yaml(req: ExportRequest):
             strict_header=req.strict_header,
             min_header=req.min_header,
             variables=req.variables,
+            ref_variables=req.ref_variables,
             table_marker=req.table_marker,
             table_index=req.table_index,
             table_header_mode=req.table_header_mode,

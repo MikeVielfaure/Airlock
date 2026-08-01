@@ -224,7 +224,7 @@ export function FlowCanvas({ notify, onOpenSession }: Props) {
     try {
       const r = await api.runGraph({ yaml: toYaml() });
       setTrace(r.trace);
-      notify(`Flow ran — output “${r.output}”, ${r.preview.total_rows} row(s).`, "ok");
+      notify(`Flux exécuté — sortie « ${r.output} », ${r.preview.total_rows} ligne(s).`, "ok");
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       // The runner names the failing node; highlight it on the canvas.
@@ -253,8 +253,8 @@ export function FlowCanvas({ notify, onOpenSession }: Props) {
     try {
       const r = await api.validateFlow({ yaml: toYaml() });
       notify(r.ok
-        ? `Valid — order: ${r.order.join(" → ")}, output “${r.output}”.`
-        : `Unknown brick type(s): ${r.unknown_types.join(", ")}`, r.ok ? "ok" : "err");
+        ? `Valide — ordre : ${r.order.join(" → ")}, sortie « ${r.output} ».`
+        : `Type(s) de brique inconnu(s) : ${r.unknown_types.join(", ")}`, r.ok ? "ok" : "err");
     } catch (e) { notify(e instanceof Error ? e.message : String(e), "err"); }
     finally { setBusy(""); }
   };
@@ -266,7 +266,7 @@ export function FlowCanvas({ notify, onOpenSession }: Props) {
     <div className="fc">
       {/* palette */}
       <aside className="fc-palette">
-        <h4>Bricks</h4>
+        <h4>Briques</h4>
         {(["source", "transform", "sink"] as const).map((role) => (
           <div key={role} className="fc-group">
             <span className="fc-role">{role}</span>
@@ -280,12 +280,12 @@ export function FlowCanvas({ notify, onOpenSession }: Props) {
 
       <div className="fc-main">
         <div className="fc-bar">
-          <input value={name} placeholder="flow name" onChange={(e) => setName(e.target.value)} />
+          <input value={name} placeholder="nom du flux" onChange={(e) => setName(e.target.value)} />
           <button className="btn sm" disabled={!!busy} onClick={check}>
-            <IconCheck size={13} /> Check
+            <IconCheck size={13} /> Vérifier
           </button>
           <button className="btn" disabled={!!busy || !nodes.length} onClick={run}>
-            <IconPlay size={14} /> {busy === "run" ? "Running…" : "Run"}
+            <IconPlay size={14} /> {busy === "run" ? "En cours…" : "Lancer"}
           </button>
           {onOpenSession && (
             <button className="btn sm" disabled={!!busy || !nodes.length} onClick={adopt}
@@ -300,24 +300,24 @@ export function FlowCanvas({ notify, onOpenSession }: Props) {
                       if (ex) await api.addArtefactVersion("graph", ex.id, { yaml: toYaml() });
                       else await api.createArtefact("graph", { name: name.trim(), yaml: toYaml() });
                       setSaved(await api.listArtefacts("graph"));
-                      notify(`Flow “${name}” saved.`, "ok");
+                      notify(`Flux « ${name} » enregistré.`, "ok");
                     } catch (e) { notify(e instanceof Error ? e.message : String(e), "err"); }
                   }}>
-            <IconSave size={13} /> Save
+            <IconSave size={13} /> Enregistrer
           </button>
           <select value="" onChange={async (e) => {
             if (!e.target.value) return;
             try {
               const g = await api.loadGraph(e.target.value);
               loadGraph(g as never);
-              notify("Flow loaded.", "ok");
+              notify("Flux chargé.", "ok");
             } catch (err) { notify(err instanceof Error ? err.message : String(err), "err"); }
           }}>
-            <option value="">— open a flow —</option>
+            <option value="">— ouvrir un flux —</option>
             {saved.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
           </select>
           <button className="btn sm" onClick={() => setShowYaml(!showYaml)}>
-            <IconCode size={13} /> {showYaml ? "Canvas" : "YAML"}
+            <IconCode size={13} /> {showYaml ? "Canevas" : "YAML"}
           </button>
         </div>
 
@@ -365,9 +365,9 @@ export function FlowCanvas({ notify, onOpenSession }: Props) {
                     <span className="fc-type">{n.type}</span>
                   </div>
                   {step && (
-                    <div className="fc-metrics">{step.rows} rows · {step.ms}ms</div>
+                    <div className="fc-metrics">{step.rows} lignes · {step.ms}ms</div>
                   )}
-                  <button className="fc-port" title="Connect to another brick"
+                  <button className="fc-port" title="Relier à une autre brique"
                           onClick={(e) => { e.stopPropagation(); setLinking(n.id); }}>›</button>
                   <button className="fc-kill" onClick={(e) => { e.stopPropagation(); removeNode(n.id); }}>×</button>
                 </div>
@@ -375,21 +375,21 @@ export function FlowCanvas({ notify, onOpenSession }: Props) {
             })}
 
             {nodes.length === 0 && (
-              <p className="fc-empty">Pick a brick on the left to start a flow.</p>
+              <p className="fc-empty">Choisissez une brique à gauche pour démarrer un flux.</p>
             )}
             {linking && (
-              <div className="fc-linking">Click a brick to connect <strong>{linking}</strong> to it.</div>
+              <div className="fc-linking">Cliquez une brique pour y relier <strong>{linking}</strong>.</div>
             )}
           </div>
         )}
 
         {trace.length > 0 && (
           <div className="fc-trace">
-            <h4><IconLayers size={13} /> Run</h4>
+            <h4><IconLayers size={13} /> Exécution</h4>
             <div className="fc-steps">
               {trace.map((t, i) => (
                 <span key={i} className="fc-step">
-                  <strong>{t.node}</strong> {t.rows} rows · {t.ms}ms
+                  <strong>{t.node}</strong> {t.rows} lignes · {t.ms}ms
                   {t.meta ? <em>{Object.entries(t.meta)
                     .filter(([k]) => !["content_base64"].includes(k))
                     .slice(0, 2)
@@ -406,8 +406,8 @@ export function FlowCanvas({ notify, onOpenSession }: Props) {
         {sel ? (
           <>
             <h4>{sel.id} <span className="fc-type">{sel.type}</span></h4>
-            <label>Label</label>
-            <input value={sel.label ?? ""} placeholder="what this brick does"
+            <label>Libellé</label>
+            <input value={sel.label ?? ""} placeholder="ce que fait cette brique"
                    onChange={(e) => setNodes((ns) =>
                      ns.map((n) => (n.id === sel.id ? { ...n, label: e.target.value } : n)))} />
 
@@ -427,8 +427,8 @@ export function FlowCanvas({ notify, onOpenSession }: Props) {
                           key={sel.id}
                           onChange={(e) => patchConfig(sel.id, e.target.value)} />
                 <p className="fc-hint">
-                  Edited live. An invalid JSON draft is ignored until it parses again,
-                  so typing never destroys the config.
+                  Modifié en direct. Un brouillon JSON invalide est ignoré jusqu'à ce
+                  qu'il redevienne valide — la saisie ne détruit donc jamais la config.
                 </p>
               </>
             )}
@@ -439,22 +439,22 @@ export function FlowCanvas({ notify, onOpenSession }: Props) {
               </button>
             )}
             {failed === sel.id && (
-              <p className="fc-fail"><IconWarn size={12} /> This brick failed on the last run.</p>
+              <p className="fc-fail"><IconWarn size={12} /> Cette brique a échoué lors de la dernière exécution.</p>
             )}
           </>
         ) : (
           <>
-            <h4>Parameters</h4>
+            <h4>Paramètres</h4>
             <p className="fc-hint">
-              Named inputs make the flow reusable — and they are the request body
-              when it is called as an API.
+              Des entrées nommées rendent le flux réutilisable — elles forment aussi
+              le corps de la requête quand il est appelé comme API.
             </p>
             {params.map((p, i) => (
               <div key={i} className="fc-param">
-                <input value={p.name} placeholder="name"
+                <input value={p.name} placeholder="nom"
                        onChange={(e) => setParams((ps) =>
                          ps.map((q, j) => (j === i ? { ...q, name: e.target.value } : q)))} />
-                <input value={p.default} placeholder="default"
+                <input value={p.default} placeholder="défaut"
                        onChange={(e) => setParams((ps) =>
                          ps.map((q, j) => (j === i ? { ...q, default: e.target.value } : q)))} />
                 <button className="fc-kill" onClick={() =>
@@ -462,10 +462,10 @@ export function FlowCanvas({ notify, onOpenSession }: Props) {
               </div>
             ))}
             <button className="btn sm" onClick={() => setParams((ps) => [...ps, { name: "", default: "" }])}>
-              + parameter
+              + paramètre
             </button>
             <button className="btn sm" onClick={() => { setNodes([]); setEdges([]); setTrace([]); }}>
-              <IconReset size={13} /> Clear canvas
+              <IconReset size={13} /> Vider le canevas
             </button>
           </>
         )}

@@ -29,11 +29,11 @@ interface Props {
 }
 
 const HEADER_OPTS: { key: keyof HeaderConfig; label: string; sub: string }[] = [
-  { key: "auto_header", label: "Promote first data row to header", sub: "When the header line is empty and the real names sit below." },
-  { key: "delete_empty_line_before_header", label: "Drop empty lines before header", sub: "" },
-  { key: "delete_empty_line_after_header", label: "Drop trailing empty lines", sub: "" },
-  { key: "delete_all_empty_line", label: "Drop all empty lines", sub: "Anywhere in the file." },
-  { key: "delete_unamed_column", label: "Drop unnamed columns", sub: "Columns with no header name (kept only if every column is unnamed)." },
+  { key: "auto_header", label: "Promouvoir la première ligne de données en en-tête", sub: "Quand la ligne d'en-tête est vide et que les vrais noms se trouvent en dessous." },
+  { key: "delete_empty_line_before_header", label: "Supprimer les lignes vides avant l'en-tête", sub: "" },
+  { key: "delete_empty_line_after_header", label: "Supprimer les lignes vides finales", sub: "" },
+  { key: "delete_all_empty_line", label: "Supprimer toutes les lignes vides", sub: "N'importe où dans le fichier." },
+  { key: "delete_unamed_column", label: "Supprimer les colonnes sans nom", sub: "Colonnes sans nom d'en-tête (conservées seulement si toutes les colonnes sont sans nom)." },
 ];
 
 function hasRules(f: FieldConfig): boolean {
@@ -83,8 +83,8 @@ export function SchemaPanel(p: Props) {
       <div className="sec">
         <div className="sec-h">
           <h3>Structure</h3>
-          <span className="sub">Clean the file shape before applying field rules.</span>
-          <button className="btn sm" style={{ marginLeft: "auto" }} onClick={p.applyHeader}>Apply structure</button>
+          <span className="sub">Nettoyez la structure du fichier avant d'appliquer les règles de champs.</span>
+          <button className="btn sm" style={{ marginLeft: "auto" }} onClick={p.applyHeader}>Appliquer la structure</button>
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 24px", marginTop: 8 }}>
           {HEADER_OPTS.map((o) => (
@@ -97,24 +97,24 @@ export function SchemaPanel(p: Props) {
         </div>
         <label className="check" style={{ marginTop: 8 }}>
           <input type="checkbox" checked={p.strictHeader} onChange={(e) => p.setStrictHeader(e.target.checked)} />
-          <span className="ctxt">Strict header
-            <div className="csub">The file's columns must match the config exactly — flagged below if they don't.</div>
+          <span className="ctxt">En-tête strict
+            <div className="csub">Les colonnes du fichier doivent correspondre exactement à la config — sinon signalées ci-dessous.</div>
           </span>
         </label>
         <label className="check" style={{ marginTop: 4 }}>
           <input type="checkbox" checked={p.minHeader} onChange={(e) => p.setMinHeader(e.target.checked)} />
-          <span className="ctxt">Minimum header
-            <div className="csub">The file must contain at least the config's columns — extra columns are tolerated and ignored.</div>
+          <span className="ctxt">En-tête minimum
+            <div className="csub">Le fichier doit contenir au moins les colonnes de la config — les colonnes en plus sont tolérées et ignorées.</div>
           </span>
         </label>
         {((p.strictHeader && (p.unmatchedConfig.length > 0 || p.unmapped.length > 0)) ||
           (p.minHeader && p.unmatchedConfig.length > 0)) && (
           <div className="banner err" style={{ marginTop: 8 }}>
             <span>
-              <strong>{p.strictHeader ? "Strict header mismatch." : "Minimum header mismatch."}</strong>{" "}
-              {p.unmatchedConfig.length > 0 && `${p.unmatchedConfig.length} config field(s) missing from the file. `}
-              {p.strictHeader && p.unmapped.length > 0 && `${p.unmapped.length} file column(s) not in the config. `}
-              Resolve below{p.strictHeader ? ", or uncheck strict header." : ", or uncheck minimum header."}
+              <strong>{p.strictHeader ? "En-tête strict non respecté." : "En-tête minimum non respecté."}</strong>{" "}
+              {p.unmatchedConfig.length > 0 && `${p.unmatchedConfig.length} champ(s) de config manquant(s) dans le fichier. `}
+              {p.strictHeader && p.unmapped.length > 0 && `${p.unmapped.length} colonne(s) du fichier absente(s) de la config. `}
+              Résolvez ci-dessous{p.strictHeader ? ", ou décochez en-tête strict." : ", ou décochez en-tête minimum."}
             </span>
           </div>
         )}
@@ -123,34 +123,34 @@ export function SchemaPanel(p: Props) {
       {/* fields */}
       <div className="sec">
         <div className="sec-h">
-          <h3>Fields</h3>
+          <h3>Champs</h3>
           <span className="sub">
-            {p.visible.length}/{allColumns.length} active · click to toggle, pencil to configure
+            {p.visible.length}/{allColumns.length} actif(s) · cliquer pour activer/désactiver, crayon pour configurer
           </span>
           <span style={{ marginLeft: "auto", display: "flex", gap: 6, alignItems: "center" }}>
             <label className="check" style={{ padding: 0, marginRight: 4 }}>
               <input type="checkbox" checked={hideInactive} onChange={(e) => setHideInactive(e.target.checked)} />
-              <span className="ctxt" style={{ fontSize: 12 }}>Hide inactive</span>
+              <span className="ctxt" style={{ fontSize: 12 }}>Masquer les inactifs</span>
             </label>
-            <button className="btn sm" onClick={() => p.setVisible([...allColumns])}>Activate all</button>
-            <button className="btn sm" onClick={() => p.setVisible([])}>Deactivate all</button>
-            <button className="btn sm" onClick={p.resetFields}>Reset rules</button>
+            <button className="btn sm" onClick={() => p.setVisible([...allColumns])}>Tout activer</button>
+            <button className="btn sm" onClick={() => p.setVisible([])}>Tout désactiver</button>
+            <button className="btn sm" onClick={p.resetFields}>Réinitialiser les règles</button>
           </span>
         </div>
 
         <div className="addcol">
-          <input type="text" className="mono-input" placeholder="declare a column (e.g. a month name)…"
+          <input type="text" className="mono-input" placeholder="déclarer une colonne (ex. un nom de mois)…"
             value={newCol} onChange={(e) => setNewCol(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter") addColumn(); }} />
-          <button className="btn sm" onClick={addColumn} disabled={!newCol.trim()}>+ Add column</button>
-          <span className="csub">Declared columns are saved in the config; they apply to any future file that has them.</span>
+          <button className="btn sm" onClick={addColumn} disabled={!newCol.trim()}>+ Ajouter une colonne</button>
+          <span className="csub">Les colonnes déclarées sont enregistrées dans la config ; elles s'appliquent à tout futur fichier qui les contient.</span>
         </div>
 
         {p.unmapped.length > 0 && (
           <div className="banner" style={{ marginTop: 4 }}>
             <span>
-              Config imported. <strong>{p.visible.length}</strong> column{p.visible.length > 1 ? "s" : ""} matched and
-              activated; <strong>{p.unmapped.length}</strong> left inactive (greyed). Click any to include it.
+              Config importée. <strong>{p.visible.length}</strong> colonne{p.visible.length > 1 ? "s" : ""} trouvée(s)
+              et activée(s) ; <strong>{p.unmapped.length}</strong> laissée(s) inactive(s) (grisée(s)). Cliquez sur l'une d'elles pour l'inclure.
             </span>
           </div>
         )}
@@ -158,7 +158,7 @@ export function SchemaPanel(p: Props) {
         {p.unmatchedConfig.length > 0 && (
           <div className="orphans">
             <div className="orphans-h">
-              {p.unmatchedConfig.length} config field{p.unmatchedConfig.length > 1 ? "s" : ""} matched no column — link to a file column
+              {p.unmatchedConfig.length} champ{p.unmatchedConfig.length > 1 ? "s" : ""} de config sans colonne correspondante — associer à une colonne du fichier
             </div>
             {p.unmatchedConfig.map((f, i) => {
               const label = f.mapping || (f.name && f.name[0]) || `field_${i}`;
@@ -168,7 +168,7 @@ export function SchemaPanel(p: Props) {
                   <span className="orphan-name">{label}</span>
                   <span className="orphan-arrow">←</span>
                   <select defaultValue="" onChange={(e) => { if (e.target.value) p.assignConfigField(e.target.value, f); }}>
-                    <option value="">choose a column…</option>
+                    <option value="">choisir une colonne…</option>
                     {p.unmapped.map((c) => <option key={c} value={c}>{c}</option>)}
                   </select>
                 </div>
@@ -178,7 +178,7 @@ export function SchemaPanel(p: Props) {
         )}
 
         {many && (
-          <input type="text" placeholder={`Filter ${p.columns.length} fields…`}
+          <input type="text" placeholder={`Filtrer ${p.columns.length} champs…`}
             value={query} onChange={(e) => setQuery(e.target.value)}
             style={{ maxWidth: 280, marginTop: 6, marginBottom: 4 }} />
         )}
@@ -193,25 +193,25 @@ export function SchemaPanel(p: Props) {
               <div key={c}
                 className={`fieldchip ${on ? "on" : "off"} ${editing === c ? "editing" : ""} ${isDeclared ? "declared" : ""}`}
                 onClick={() => toggle(c)}
-                title={isDeclared ? "Declared column (not in the loaded file)" : (on ? "Click to deactivate" : "Click to activate")}>
+                title={isDeclared ? "Colonne déclarée (absente du fichier chargé)" : (on ? "Cliquer pour désactiver" : "Cliquer pour activer")}>
                 <span className={`tchip ${f?.type ?? "string"}`}>{(f?.type ?? "string").slice(0, 3)}</span>
                 <span className="fname">{c}</span>
-                {isDeclared && <span className="declared-badge" title="Not in the loaded file">declared</span>}
-                {cstat?.errors ? <span className="dot err" title={`${cstat.errors} errors`} /> : null}
-                {cstat?.cleans ? <span className="dot clean" title={`${cstat.cleans} cleaned`} /> : null}
-                {!cstat && f && hasRules(f) ? <span className="dot rule" title="has rules" /> : null}
-                <button className="chip-edit" title="Configure field"
+                {isDeclared && <span className="declared-badge" title="Absente du fichier chargé">déclarée</span>}
+                {cstat?.errors ? <span className="dot err" title={`${cstat.errors} erreur(s)`} /> : null}
+                {cstat?.cleans ? <span className="dot clean" title={`${cstat.cleans} nettoyée(s)`} /> : null}
+                {!cstat && f && hasRules(f) ? <span className="dot rule" title="a des règles" /> : null}
+                <button className="chip-edit" title="Configurer le champ"
                   onClick={(e) => { e.stopPropagation(); setEdit(editing === c ? null : c); }}>
                   <IconEdit size={13} />
                 </button>
                 {isDeclared && (
-                  <button className="chip-edit" title="Remove declared column"
+                  <button className="chip-edit" title="Retirer la colonne déclarée"
                     onClick={(e) => { e.stopPropagation(); if (editing === c) setEdit(null); p.removeColumn(c); }}>×</button>
                 )}
               </div>
             );
           })}
-          {shown.length === 0 && <span style={{ color: "var(--ink-faint)", fontSize: 12 }}>No field matches “{query}”.</span>}
+          {shown.length === 0 && <span style={{ color: "var(--ink-faint)", fontSize: 12 }}>Aucun champ ne correspond à « {query} ».</span>}
         </div>
 
         {editing && p.fields[editing] && (

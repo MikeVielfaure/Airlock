@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { ComputedColumn, DatasetInfo, SourceInfo, StyleRule } from "../lib/types";
+import type { AvailableVariable, ComputedColumn, DatasetInfo, SourceInfo, StyleRule } from "../lib/types";
 import { api } from "../lib/api";
 import type { ArtefactInfo } from "../lib/types";
 import { IconCode, IconReset, IconUpload, IconDownload } from "../lib/icons";
@@ -15,31 +15,33 @@ interface Props {
   setStyleRules: (r: StyleRule[]) => void;
   variables: Record<string, string>;
   setVariables: (v: Record<string, string>) => void;
+  refVariables: string[];
+  setRefVariables: (v: string[]) => void;
   errors: Record<string, string>;   // server-side errors from the last run
   styleErrors?: Record<string, string>;
   notify: (msg: string, kind?: "ok" | "err" | "info") => void;
 }
 
 const TEMPLATES: { label: string; expr: (cols: string[]) => string }[] = [
-  { label: "Concatenate", expr: (c) => `CONCAT([${c[0] ?? "col1"}], " ", [${c[1] ?? "col2"}])` },
+  { label: "Concaténer", expr: (c) => `CONCAT([${c[0] ?? "col1"}], " ", [${c[1] ?? "col2"}])` },
   { label: "Condition", expr: (c) => `IF([${c[0] ?? "col1"}] == "value", "yes", "no")` },
-  { label: "Uppercase", expr: (c) => `UPPER([${c[0] ?? "col1"}])` },
-  { label: "Fallback", expr: (c) => `DEFAULT([${c[0] ?? "col1"}], "N/A")` },
+  { label: "Majuscules", expr: (c) => `UPPER([${c[0] ?? "col1"}])` },
+  { label: "Valeur par défaut", expr: (c) => `DEFAULT([${c[0] ?? "col1"}], "N/A")` },
 ];
 
 const FUNCS = [
-  ["IF(cond, a, b)", "returns a when cond is true, else b"],
-  ["ISNULL(x) / NOTNULL(x)", "test for empty / null — e.g. IF(ISNULL([x]), \"N/A\", [x])"],
-  ["COALESCE(…) / DEFAULT(x, fb)", "first non-empty value / fallback when x is empty"],
-  ["CONCAT(…)", "joins values and text"],
-  ["UPPER / LOWER / TITLE / TRIM(x)", "text transforms"],
-  ["LEFT(x, n) / RIGHT(x, n)", "first / last n characters"],
-  ["LTRIM(x, \"0\") / RTRIM(x, \"0\")", "strip leading / trailing chars — e.g. 0012 → 12"],
-  ["REGEX_EXTRACT(x, pat, n)", "capture group n of a regex — e.g. \"0*([0-9]+)\" → 12"],
-  ["REPLACE(x, a, b)", "replace a with b"],
-  ["NUM(x) / STR(x) / LEN(x)", "cast / length"],
-  ["EXISTS(\"col\") / COL(\"col\", def)", "does a column exist / its value by name"],
-  ["STYLE(color, bold, italic)", "for mise en forme conditionnelle — e.g. STYLE(\"orange\", \"1\")"],
+  ["IF(cond, a, b)", "renvoie a si cond est vrai, sinon b"],
+  ["ISNULL(x) / NOTNULL(x)", "teste si vide / null — ex. IF(ISNULL([x]), \"N/A\", [x])"],
+  ["COALESCE(…) / DEFAULT(x, fb)", "première valeur non vide / valeur par défaut si x est vide"],
+  ["CONCAT(…)", "assemble des valeurs et du texte"],
+  ["UPPER / LOWER / TITLE / TRIM(x)", "transformations de texte"],
+  ["LEFT(x, n) / RIGHT(x, n)", "n premiers / derniers caractères"],
+  ["LTRIM(x, \"0\") / RTRIM(x, \"0\")", "retire les caractères en tête / en fin — ex. 0012 → 12"],
+  ["REGEX_EXTRACT(x, pat, n)", "groupe n capturé par une regex — ex. \"0*([0-9]+)\" → 12"],
+  ["REPLACE(x, a, b)", "remplace a par b"],
+  ["NUM(x) / STR(x) / LEN(x)", "conversion / longueur"],
+  ["EXISTS(\"col\") / COL(\"col\", def)", "la colonne existe-t-elle / sa valeur par son nom"],
+  ["STYLE(color, bold, italic)", "pour la mise en forme conditionnelle — ex. STYLE(\"orange\", \"1\")"],
 ];
 
 function Row({ col, columns, onChange, onRemove, serverError }: {
@@ -60,7 +62,7 @@ function Row({ col, columns, onChange, onRemove, serverError }: {
       try {
         const r = await api.checkExpression(col.expression);
         setErr(r.ok ? null : r.error); setOk(r.ok);
-      } catch { setErr("Could not validate."); setOk(false); }
+      } catch { setErr("Validation impossible."); setOk(false); }
     }, 350);
     return () => window.clearTimeout(timer.current);
   }, [col.expression]);
@@ -70,25 +72,25 @@ function Row({ col, columns, onChange, onRemove, serverError }: {
   return (
     <div className="computed-row">
       <div className="computed-head">
-        <input className="mono-input" placeholder="new_column_name" value={col.name}
+        <input className="mono-input" placeholder="nom_colonne" value={col.name}
           onChange={(e) => onChange({ ...col, name: e.target.value.replace(/\s+/g, "_") })}
           style={{ maxWidth: 220 }} />
         <span style={{ marginLeft: "auto" }}>
           {col.expression.trim() && (ok
-            ? <span className="valid ok">valid</span>
-            : err ? <span className="valid err">{err}</span> : <span className="valid">checking…</span>)}
+            ? <span className="valid ok">valide</span>
+            : err ? <span className="valid err">{err}</span> : <span className="valid">vérification…</span>)}
         </span>
-        <button className="btn sm" onClick={onRemove} title="Remove">✕</button>
+        <button className="btn sm" onClick={onRemove} title="Retirer">✕</button>
       </div>
       <textarea className="mono-input" rows={2} placeholder='IF([civilite] == "M", "Monsieur", "Madame")'
         value={col.expression} onChange={(e) => onChange({ ...col, expression: e.target.value })} />
-      {serverError && <div className="valid err" style={{ marginTop: 4 }}>Last run: {serverError}</div>}
+      {serverError && <div className="valid err" style={{ marginTop: 4 }}>Dernière exécution : {serverError}</div>}
       <div className="chipbar">
-        <span className="chiplabel">insert column:</span>
+        <span className="chiplabel">insérer une colonne :</span>
         {columns.slice(0, 40).map((c) => (
           <button key={c} className="microchip" onClick={() => insert(`[${c}]`)}>{c}</button>
         ))}
-        {columns.length > 40 && <span className="chiplabel">+{columns.length - 40} more…</span>}
+        {columns.length > 40 && <span className="chiplabel">+{columns.length - 40} de plus…</span>}
       </div>
     </div>
   );
@@ -138,7 +140,7 @@ function SqlBlock({ col, columns, sources, serverError, onChange, onRemove }: {
         <button className="btn sm" onClick={() => setShowAssistant((v) => !v)}>
           {showAssistant ? "Masquer l'assistant" : "Assistant"}
         </button>
-        <button className="btn sm" style={{ marginLeft: "auto" }} onClick={onRemove} title="Remove">✕</button>
+        <button className="btn sm" style={{ marginLeft: "auto" }} onClick={onRemove} title="Retirer">✕</button>
       </div>
 
       {showAssistant && (
@@ -210,7 +212,7 @@ function SqlBlock({ col, columns, sources, serverError, onChange, onRemove }: {
         placeholder="SELECT self._row_id, ext.libelle FROM self LEFT JOIN referentiel_clients ext ON self.code = ext.code"
         value={col.expression}
         onChange={(e) => onChange({ ...col, expression: e.target.value })} />
-      {serverError && <div className="valid err" style={{ marginTop: 4 }}>Last run: {serverError}</div>}
+      {serverError && <div className="valid err" style={{ marginTop: 4 }}>Dernière exécution : {serverError}</div>}
     </div>
   );
 }
@@ -233,13 +235,13 @@ function StyleRuleRow({ rule, columns, serverError, onChange, onRemove }: {
           <option value="">— colonne —</option>
           {columns.map((c) => <option key={c} value={c}>{c}</option>)}
         </select>
-        <button className="btn sm" style={{ marginLeft: "auto" }} onClick={onRemove} title="Remove">✕</button>
+        <button className="btn sm" style={{ marginLeft: "auto" }} onClick={onRemove} title="Retirer">✕</button>
       </div>
       <textarea className="mono-input" rows={2}
         placeholder={'IF([age] < "18", STYLE("orange", "1"), STYLE())'}
         value={rule.expression}
         onChange={(e) => onChange({ ...rule, expression: e.target.value })} />
-      {serverError && <div className="valid err" style={{ marginTop: 4 }}>Last run: {serverError}</div>}
+      {serverError && <div className="valid err" style={{ marginTop: 4 }}>Dernière exécution : {serverError}</div>}
     </div>
   );
 }
@@ -247,7 +249,8 @@ function StyleRuleRow({ rule, columns, serverError, onChange, onRemove }: {
 type SubTab = "columns" | "sql" | "sources" | "style" | "library";
 
 export function ComputedPanel({ sid, columns, computed, setComputed, sqlComputed, setSqlComputed,
-                               styleRules, setStyleRules, variables, setVariables, errors,
+                               styleRules, setStyleRules, variables, setVariables,
+                               refVariables, setRefVariables, errors,
                                styleErrors, notify }: Props) {
   const [tab, setTab] = useState<SubTab>("columns");
   const [lib, setLib] = useState<ArtefactInfo[]>([]);
@@ -255,6 +258,20 @@ export function ComputedPanel({ sid, columns, computed, setComputed, sqlComputed
   const [saveTarget, setSaveTarget] = useState("");
   const refreshLib = useCallback(() => { api.listArtefacts("computed").then(setLib).catch(() => {}); }, []);
   useEffect(() => { refreshLib(); }, [refreshLib]);
+
+  // ── référentiel variables — usable in an expression as [nom] or,
+  // when the value is a JSON object (a connection point), [nom.champ] ──
+  const [available, setAvailable] = useState<AvailableVariable[]>([]);
+  useEffect(() => { api.listAvailableVariables().then(setAvailable).catch(() => {}); }, []);
+  const [pickVar, setPickVar] = useState("");
+  const pickableVars = available.filter((v) => !refVariables.includes(v.name));
+  const addRefVariable = () => {
+    if (!pickVar) return;
+    setRefVariables([...refVariables, pickVar]);
+    setPickVar("");
+  };
+  const removeRefVariable = (name: string) =>
+    setRefVariables(refVariables.filter((n) => n !== name));
 
   // ── attached sources (for cross-source SQL) ──────────────────────
   const [sources, setSources] = useState<SourceInfo[]>([]);
@@ -267,6 +284,50 @@ export function ComputedPanel({ sid, columns, computed, setComputed, sqlComputed
   }, [sid]);
   useEffect(() => { refreshSources(); }, [refreshSources]);
   useEffect(() => { api.listDatasets().then(setDatasets).catch(() => {}); }, []);
+
+  // ── attach a BDD externe source ───────────────────────────────
+  const [dbConn, setDbConn] = useState("");
+  const [dbName, setDbName] = useState("");
+  const [dbQuery, setDbQuery] = useState("");
+  const [dbParams, setDbParams] = useState<{ key: string; value: string }[]>([]);
+  const dbConnections = available.filter((v) => v.kind === "external_db");
+
+  const attachExternalDb = async () => {
+    if (!sid || !dbName.trim() || !dbConn || !dbQuery.trim()) return;
+    const params = Object.fromEntries(dbParams.filter((p) => p.key.trim()).map((p) => [p.key.trim(), p.value]));
+    try {
+      await api.attachExternalDbSource(sid, dbName.trim(), dbConn, dbQuery.trim(), params);
+      setDbName(""); setDbQuery(""); setDbParams([]);
+      refreshSources();
+      notify(`Source « ${dbName.trim()} » attachée.`, "ok");
+    } catch (e) { notify(e instanceof Error ? e.message : "Échec de l'attachement.", "err"); }
+  };
+
+  // ── attach an API source ───────────────────────────────────────
+  const [apiConn, setApiConn] = useState("");
+  const [apiName, setApiName] = useState("");
+  const [apiPath, setApiPath] = useState("");
+  const [apiMethod, setApiMethod] = useState("GET");
+  const [apiResponseKind, setApiResponseKind] = useState<"json" | "csv" | "xlsx">("json");
+  const [apiDataPath, setApiDataPath] = useState("");
+  const [apiBody, setApiBody] = useState("");
+  const apiConnections = available.filter((v) => v.kind === "api");
+
+  const attachApi = async () => {
+    if (!sid || !apiName.trim() || !apiConn) return;
+    let body: Record<string, unknown> | undefined;
+    if (apiMethod !== "GET" && apiBody.trim()) {
+      try { body = JSON.parse(apiBody); }
+      catch { notify("Le corps doit être du JSON valide.", "err"); return; }
+    }
+    try {
+      await api.attachApiSource(sid, apiName.trim(), apiConn, apiPath, apiMethod,
+        apiResponseKind, apiDataPath, body);
+      setApiName(""); setApiPath(""); setApiDataPath(""); setApiBody("");
+      refreshSources();
+      notify(`Source « ${apiName.trim()} » attachée.`, "ok");
+    } catch (e) { notify(e instanceof Error ? e.message : "Échec de l'attachement.", "err"); }
+  };
 
   const attachDataset = async () => {
     if (!sid || !attachName.trim() || !attachDatasetId) return;
@@ -300,7 +361,7 @@ export function ComputedPanel({ sid, columns, computed, setComputed, sqlComputed
   const validStyle = styleRules.filter((r) => r.column.trim() && r.expression.trim());
   const saveToLibrary = async () => {
     if (!valid.length && !validSql.length && !validStyle.length) {
-      notify("No computed column to save.", "err"); return;
+      notify("Aucune colonne calculée à enregistrer.", "err"); return;
     }
     const body = { computed: valid, ...(validSql.length ? { sql_computed: validSql } : {}),
                   ...(validStyle.length ? { style_rules: validStyle } : {}) };
@@ -309,13 +370,13 @@ export function ComputedPanel({ sid, columns, computed, setComputed, sqlComputed
         const a = await api.addArtefactVersion("computed", saveTarget, body);
         notify(`Saved as version ${a.latest_version_no} of « ${a.name} ».`, "ok");
       } else {
-        if (!saveName.trim()) { notify("Give the set a name.", "err"); return; }
+        if (!saveName.trim()) { notify("Donnez un nom à cet ensemble.", "err"); return; }
         await api.createArtefact("computed", { name: saveName.trim(), ...body });
         notify(`Computed set « ${saveName.trim()} » saved.`, "ok");
         setSaveName("");
       }
       refreshLib();
-    } catch (e) { notify(e instanceof Error ? e.message : "Save failed.", "err"); }
+    } catch (e) { notify(e instanceof Error ? e.message : "Échec de l'enregistrement.", "err"); }
   };
 
   const loadFromLibrary = async (a: ArtefactInfo) => {
@@ -332,7 +393,7 @@ export function ComputedPanel({ sid, columns, computed, setComputed, sqlComputed
       notify(`Computed set « ${a.name} » (v${a.latest_version_no}) loaded — ${items.length} column(s)`
             + (sqlItems.length ? `, ${sqlItems.length} bloc(s) SQL` : "")
             + (styleItems.length ? `, ${styleItems.length} règle(s) de style.` : "."), "ok");
-    } catch (e) { notify(e instanceof Error ? e.message : "Load failed.", "err"); }
+    } catch (e) { notify(e instanceof Error ? e.message : "Échec du chargement.", "err"); }
   };
   const importRef = useRef<HTMLInputElement>(null);
 
@@ -397,7 +458,7 @@ export function ComputedPanel({ sid, columns, computed, setComputed, sqlComputed
         setStyleRules([...styleRules, ...cleanStyle]);
       }
     } catch {
-      alert("Could not read this functions file (expected JSON with a 'computed' array).");
+      alert("Impossible de lire ce fichier de fonctions (un JSON avec un tableau 'computed' est attendu).");
     }
   };
 
@@ -431,17 +492,17 @@ export function ComputedPanel({ sid, columns, computed, setComputed, sqlComputed
 
         {tab === "columns" && (
           <div className="tab-panel">
-            <p className="hint">Derive new columns from existing ones. Applied on cleaned values when you run validation.</p>
+            <p className="hint">Dérivez de nouvelles colonnes à partir des colonnes existantes. Appliqué sur les valeurs nettoyées lors d'une validation.</p>
             <div className="filterbar">
-              <button className="btn primary sm" onClick={() => add()}><IconCode size={14} /> Add column</button>
+              <button className="btn primary sm" onClick={() => add()}><IconCode size={14} /> Ajouter une colonne</button>
               {TEMPLATES.map((t) => (
                 <button key={t.label} className="btn sm" onClick={() => add(t.expr(columns))}>{t.label}</button>
               ))}
               <span style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
-                <button className="btn sm" onClick={() => importRef.current?.click()}><IconUpload size={13} /> Import</button>
-                <button className="btn sm" onClick={exportFns} disabled={computed.length === 0}><IconDownload size={13} /> Export</button>
+                <button className="btn sm" onClick={() => importRef.current?.click()}><IconUpload size={13} /> Importer</button>
+                <button className="btn sm" onClick={exportFns} disabled={computed.length === 0}><IconDownload size={13} /> Exporter</button>
                 {computed.length > 0 && (
-                  <button className="btn sm" onClick={() => setComputed([])}><IconReset size={13} /> Clear</button>
+                  <button className="btn sm" onClick={() => setComputed([])}><IconReset size={13} /> Réinitialiser</button>
                 )}
               </span>
               <input ref={importRef} type="file" accept=".json" hidden
@@ -450,27 +511,58 @@ export function ComputedPanel({ sid, columns, computed, setComputed, sqlComputed
 
             <div className="vars">
               <div className="vars-h">
-                <span>Variables <span style={{ color: "var(--ink-faint)", fontWeight: 400 }}>— named values usable in expressions as <code>[name]</code></span></span>
-                <button className="btn sm" onClick={addVar}>+ Add variable</button>
+                <span>Variables <span style={{ color: "var(--ink-faint)", fontWeight: 400 }}>— valeurs nommées, utilisables dans les expressions comme <code>[nom]</code></span></span>
+                <button className="btn sm" onClick={addVar}>+ Ajouter une variable</button>
               </div>
               {varEntries.length === 0 ? (
-                <p className="hint" style={{ margin: "4px 0 0" }}>e.g. <code>societe = italie</code>, then use <code>[societe]</code> in any expression.</p>
+                <p className="hint" style={{ margin: "4px 0 0" }}>ex. <code>societe = italie</code>, puis utilisez <code>[societe]</code> dans n'importe quelle expression.</p>
               ) : (
                 varEntries.map(([k, v], i) => (
                   <div className="var-row" key={i}>
-                    <input className="mono-input" value={k} placeholder="name"
+                    <input className="mono-input" value={k} placeholder="nom"
                       onChange={(e) => setVar(k, e.target.value.replace(/[^\w]/g, "_"), v)} />
                     <span className="var-eq">=</span>
-                    <input className="mono-input" value={v} placeholder="value"
+                    <input className="mono-input" value={v} placeholder="valeur"
                       onChange={(e) => setVar(k, k, e.target.value)} />
-                    <button className="hclear" title="Remove" onClick={() => removeVar(k)}>×</button>
+                    <button className="hclear" title="Retirer" onClick={() => removeVar(k)}>×</button>
                   </div>
                 ))
               )}
             </div>
 
+            <div className="vars">
+              <div className="vars-h">
+                <span>Variables du référentiel <span style={{ color: "var(--ink-faint)", fontWeight: 400 }}>
+                  — sélectionnées ici, résolues à chaque calcul ; un champ d'un objet JSON s'utilise avec un point,
+                  ex. <code>[connexion.champ]</code></span></span>
+              </div>
+              <div className="flowform" style={{ marginTop: 6 }}>
+                <select value={pickVar} onChange={(e) => setPickVar(e.target.value)}>
+                  <option value="">— choisir une variable —</option>
+                  {pickableVars.map((v) => <option key={v.name} value={v.name}>{v.name} ({v.kind})</option>)}
+                </select>
+                <button className="btn sm" disabled={!pickVar} onClick={addRefVariable}>+ Ajouter</button>
+              </div>
+              {refVariables.length === 0 ? (
+                <p className="hint" style={{ margin: "6px 0 0" }}>Aucune variable du référentiel sélectionnée.</p>
+              ) : (
+                refVariables.map((name) => {
+                  const v = available.find((x) => x.name === name);
+                  return (
+                    <div className="var-row" key={name}>
+                      <code className="mono-input" style={{ flex: 1 }}>{name}</code>
+                      <span className="csub" style={{ maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {v ? `${v.kind} · ${v.value}` : "introuvable dans cet environnement"}
+                      </span>
+                      <button className="hclear" title="Retirer" onClick={() => removeRefVariable(name)}>×</button>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
             {computed.length === 0 ? (
-              <div className="banner"><span>No computed columns yet. Add one, or start from a template above.</span></div>
+              <div className="banner"><span>Aucune colonne calculée pour l'instant. Ajoutez-en une, ou partez d'un modèle ci-dessus.</span></div>
             ) : (
               computed.map((c, i) => (
                 <Row key={i} col={c} columns={columns} serverError={errors[c.name]}
@@ -491,7 +583,7 @@ export function ComputedPanel({ sid, columns, computed, setComputed, sqlComputed
             <div className="filterbar">
               <button className="btn primary sm" onClick={addSql}><IconCode size={14} /> Ajouter un bloc SQL</button>
               {sqlComputed.length > 0 && (
-                <button className="btn sm" onClick={() => setSqlComputed([])}><IconReset size={13} /> Clear</button>
+                <button className="btn sm" onClick={() => setSqlComputed([])}><IconReset size={13} /> Réinitialiser</button>
               )}
             </div>
             {sqlComputed.length === 0 ? (
@@ -517,7 +609,7 @@ export function ComputedPanel({ sid, columns, computed, setComputed, sqlComputed
             <div className="filterbar">
               <button className="btn primary sm" onClick={addStyleRule}><IconCode size={14} /> Ajouter une règle</button>
               {styleRules.length > 0 && (
-                <button className="btn sm" onClick={() => setStyleRules([])}><IconReset size={13} /> Clear</button>
+                <button className="btn sm" onClick={() => setStyleRules([])}><IconReset size={13} /> Réinitialiser</button>
               )}
             </div>
             {styleRules.length === 0 ? (
@@ -570,6 +662,83 @@ export function ComputedPanel({ sid, columns, computed, setComputed, sqlComputed
                     ))}
                   </div>
                 )}
+
+                <div className="sec-h" style={{ marginTop: 18 }}>
+                  <h3 style={{ fontSize: 14 }}>Source BDD externe</h3>
+                  <span className="sub">Requête en lecture seule sur un point de connexion enregistré — paramètres liés, jamais de substitution textuelle.</span>
+                </div>
+                <div className="flowform">
+                  <div className="frow"><label>Connexion</label>
+                    <select value={dbConn} onChange={(e) => setDbConn(e.target.value)}>
+                      <option value="">— choisir —</option>
+                      {dbConnections.map((v) => <option key={v.name} value={v.name}>{v.name}</option>)}
+                    </select></div>
+                  <div className="frow"><label>Nom de la source</label>
+                    <input className="mono-input" value={dbName} placeholder="ex. clients_externe"
+                      onChange={(e) => setDbName(e.target.value.replace(/\s+/g, "_"))} /></div>
+                </div>
+                <textarea className="mono-input" rows={3} style={{ width: "100%", marginTop: 6 }}
+                  placeholder="SELECT * FROM clients WHERE pays = :pays"
+                  value={dbQuery} onChange={(e) => setDbQuery(e.target.value)} />
+                <span className="csub">Paramètres liés (jamais insérés comme texte)</span>
+                {dbParams.map((p, i) => (
+                  <div className="sql-pair" key={i}>
+                    <input placeholder="nom du paramètre" value={p.key}
+                      onChange={(e) => setDbParams(dbParams.map((x, j) => (j === i ? { ...x, key: e.target.value } : x)))} />
+                    <span>=</span>
+                    <input placeholder="valeur" value={p.value}
+                      onChange={(e) => setDbParams(dbParams.map((x, j) => (j === i ? { ...x, value: e.target.value } : x)))} />
+                    <button className="hclear" onClick={() => setDbParams(dbParams.filter((_, j) => j !== i))}>×</button>
+                  </div>
+                ))}
+                <div className="filterbar" style={{ marginTop: 6 }}>
+                  <button className="btn sm" onClick={() => setDbParams([...dbParams, { key: "", value: "" }])}>+ paramètre</button>
+                  <button className="btn primary sm" disabled={!dbConn || !dbName.trim() || !dbQuery.trim()}
+                    onClick={attachExternalDb}>Attacher la source</button>
+                </div>
+
+                <div className="sec-h" style={{ marginTop: 18 }}>
+                  <h3 style={{ fontSize: 14 }}>Source API</h3>
+                  <span className="sub">La réponse peut être des données JSON ou un fichier (CSV/Excel) — à choisir explicitement, jamais deviné.</span>
+                </div>
+                <div className="flowform">
+                  <div className="frow"><label>Connexion</label>
+                    <select value={apiConn} onChange={(e) => setApiConn(e.target.value)}>
+                      <option value="">— choisir —</option>
+                      {apiConnections.map((v) => <option key={v.name} value={v.name}>{v.name}</option>)}
+                    </select></div>
+                  <div className="frow"><label>Nom de la source</label>
+                    <input className="mono-input" value={apiName} placeholder="ex. commandes_api"
+                      onChange={(e) => setApiName(e.target.value.replace(/\s+/g, "_"))} /></div>
+                  <div className="frow"><label>Chemin</label>
+                    <input value={apiPath} placeholder="orders" onChange={(e) => setApiPath(e.target.value)} /></div>
+                  <div className="frow"><label>Méthode</label>
+                    <select value={apiMethod} onChange={(e) => setApiMethod(e.target.value)}>
+                      {["GET", "POST", "PUT", "DELETE"].map((m) => <option key={m} value={m}>{m}</option>)}
+                    </select></div>
+                  <div className="frow"><label>Réponse</label>
+                    <select value={apiResponseKind}
+                      onChange={(e) => setApiResponseKind(e.target.value as "json" | "csv" | "xlsx")}>
+                      <option value="json">Données JSON</option>
+                      <option value="csv">Fichier CSV</option>
+                      <option value="xlsx">Fichier Excel</option>
+                    </select></div>
+                </div>
+                {apiResponseKind === "json" && (
+                  <div className="frow"><label>Chemin dans la réponse (optionnel)</label>
+                    <input value={apiDataPath} placeholder="data.orders"
+                      onChange={(e) => setApiDataPath(e.target.value)} /></div>
+                )}
+                {apiMethod !== "GET" && (
+                  <textarea className="mono-input" rows={2} style={{ width: "100%", marginTop: 6 }}
+                    placeholder='Corps JSON optionnel, ex. {"depuis": "2026-01-01"}'
+                    value={apiBody} onChange={(e) => setApiBody(e.target.value)} />
+                )}
+                <div className="filterbar" style={{ marginTop: 6 }}>
+                  <button className="btn primary sm" disabled={!apiConn || !apiName.trim()} onClick={attachApi}>
+                    Attacher la source
+                  </button>
+                </div>
               </>
             )}
           </div>
@@ -577,18 +746,18 @@ export function ComputedPanel({ sid, columns, computed, setComputed, sqlComputed
 
         {tab === "library" && (
           <div className="tab-panel">
-            <p className="hint">Store this computed set server-side, versioned — reusable in flows.</p>
+            <p className="hint">Enregistre cet ensemble côté serveur, versionné — réutilisable dans un flux.</p>
             <div className="flowform">
-              <div className="frow"><label>Save as</label>
+              <div className="frow"><label>Enregistrer sous</label>
                 <select value={saveTarget} onChange={(e) => setSaveTarget(e.target.value)}>
-                  <option value="">new set…</option>
+                  <option value="">nouvel ensemble…</option>
                   {lib.map((a) => <option key={a.id} value={a.id}>new version of « {a.name} » (v{a.latest_version_no})</option>)}
                 </select></div>
               {saveTarget === "" && (
-                <div className="frow"><label>Name</label>
-                  <input value={saveName} onChange={(e) => setSaveName(e.target.value)} placeholder="e.g. colonnes-clients" /></div>
+                <div className="frow"><label>Nom</label>
+                  <input value={saveName} onChange={(e) => setSaveName(e.target.value)} placeholder="ex. colonnes-clients" /></div>
               )}
-              <button className="btn primary" onClick={saveToLibrary}>Save to library</button>
+              <button className="btn primary" onClick={saveToLibrary}>Enregistrer dans la bibliothèque</button>
             </div>
             {lib.length === 0 ? (
               <div className="banner"><span>Rien dans la bibliothèque pour l'instant.</span></div>
@@ -597,7 +766,7 @@ export function ComputedPanel({ sid, columns, computed, setComputed, sqlComputed
                 {lib.map((a) => (
                   <div key={a.id} className="libitem">
                     <span>{a.name} <span className="csub">v{a.latest_version_no}</span></span>
-                    <button className="btn sm" onClick={() => loadFromLibrary(a)}>Load</button>
+                    <button className="btn sm" onClick={() => loadFromLibrary(a)}>Charger</button>
                   </div>
                 ))}
               </div>
@@ -620,20 +789,21 @@ export function ComputedPanel({ sid, columns, computed, setComputed, sqlComputed
           </>
         ) : (
           <>
-            <div className="ref-h">Syntax</div>
-            <p className="hint">Reference a column with <code>[name]</code>. Wrap text in <code>"quotes"</code>. Renamed columns use their new name.</p>
+            <div className="ref-h">Syntaxe</div>
+            <p className="hint">Référencez une colonne avec <code>[nom]</code>. Le texte s'écrit entre <code>"guillemets"</code>. Une colonne renommée s'utilise sous son nouveau nom.</p>
+            <p className="hint">Une variable du référentiel dont la valeur est un objet JSON (un point de connexion, par exemple) s'utilise avec un point : <code>[connexion.champ]</code>.</p>
             <div className="ref-list">
               {FUNCS.map(([sig, desc]) => (
                 <div key={sig} className="ref-item"><code>{sig}</code><span>{desc}</span></div>
               ))}
             </div>
-            <div className="ref-h" style={{ marginTop: 16 }}>Dynamic tokens</div>
-            <p className="hint">Use like a column: <code>[DATENOW]</code>, <code>[MOIS]</code>, <code>[MOIS_NOM]</code>, <code>[MOIS_COURT]</code>, <code>[JOUR]</code>, <code>[ANNEE]</code>, <code>[JOUR_NOM]</code>.</p>
-            <div className="ref-h" style={{ marginTop: 16 }}>Examples</div>
+            <div className="ref-h" style={{ marginTop: 16 }}>Jetons dynamiques</div>
+            <p className="hint">S'utilisent comme une colonne : <code>[DATENOW]</code>, <code>[MOIS]</code>, <code>[MOIS_NOM]</code>, <code>[MOIS_COURT]</code>, <code>[JOUR]</code>, <code>[ANNEE]</code>, <code>[JOUR_NOM]</code>.</p>
+            <div className="ref-h" style={{ marginTop: 16 }}>Exemples</div>
             <div className="ref-list">
-              <div className="ref-item"><code>CONCAT([nom], " ", [prenom])</code><span>full name</span></div>
-              <div className="ref-item"><code>IF([age] &gt; "18", "adult", "minor")</code><span>conditional label</span></div>
-              <div className="ref-item"><code>UPPER(TRIM([code]))</code><span>clean code</span></div>
+              <div className="ref-item"><code>CONCAT([nom], " ", [prenom])</code><span>nom complet</span></div>
+              <div className="ref-item"><code>IF([age] &gt; "18", "adult", "minor")</code><span>libellé conditionnel</span></div>
+              <div className="ref-item"><code>UPPER(TRIM([code]))</code><span>code nettoyé</span></div>
             </div>
           </>
         )}

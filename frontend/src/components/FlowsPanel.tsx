@@ -67,7 +67,7 @@ export function FlowsPanel({ notify, onOpenReport }: Props) {
       ]);
       setConfigs(c); setComputeds(p); setTcos(t); setFlows(f); setRuns(r);
     } catch (e) {
-      notify(e instanceof Error ? e.message : "Could not load the library.", "err");
+      notify(e instanceof Error ? e.message : "Impossible de charger la bibliothèque.", "err");
     } finally {
       setLoading(false);
     }
@@ -76,10 +76,10 @@ export function FlowsPanel({ notify, onOpenReport }: Props) {
   useEffect(() => { refresh(); }, [refresh]);
 
   const nameOf = (list: ArtefactInfo[], id: string | null) =>
-    list.find((a) => a.id === id)?.name ?? (id ? "(archived)" : "—");
+    list.find((a) => a.id === id)?.name ?? (id ? "(archivé)" : "—");
 
   const createFlow = async () => {
-    if (!fName.trim() || !fConfig) { notify("A flow needs a name and a config.", "err"); return; }
+    if (!fName.trim() || !fConfig) { notify("Un flux nécessite un nom et une config.", "err"); return; }
     try {
       await api.createFlow({
         name: fName.trim(), config_artefact_id: fConfig,
@@ -88,21 +88,21 @@ export function FlowsPanel({ notify, onOpenReport }: Props) {
         default_export_filename: fExport.trim() || "export",
       });
       setFName(""); setFConfig(""); setFTco(""); setFComp(""); setFPinned(false);
-      notify("Flow created.", "ok");
+      notify("Flux créé.", "ok");
       refresh();
-    } catch (e) { notify(e instanceof Error ? e.message : "Flow creation failed.", "err"); }
+    } catch (e) { notify(e instanceof Error ? e.message : "Échec de la création du flux.", "err"); }
   };
 
   const saveTco = async () => {
     const file = tcoFileRef.current?.files?.[0];
-    if (!tcoName.trim() || !file) { notify("Pick a name and a TCO CSV file.", "err"); return; }
+    if (!tcoName.trim() || !file) { notify("Choisissez un nom et un fichier CSV de TCO.", "err"); return; }
     try {
       const csv = await file.text();
       await api.createArtefact("tco", { name: tcoName.trim(), csv });
       setTcoName(""); if (tcoFileRef.current) tcoFileRef.current.value = "";
-      notify("TCO saved to the library.", "ok");
+      notify("TCO enregistré dans la bibliothèque.", "ok");
       refresh();
-    } catch (e) { notify(e instanceof Error ? e.message : "TCO save failed.", "err"); }
+    } catch (e) { notify(e instanceof Error ? e.message : "Échec de l'enregistrement du TCO.", "err"); }
   };
 
   const askRun = (flow: FlowInfo) => { runTarget.current = flow; runFileRef.current?.click(); };
@@ -114,12 +114,12 @@ export function FlowsPanel({ notify, onOpenReport }: Props) {
     try {
       const res = await api.runFlow(flow.id, file);
       if (res.ok) {
-        notify(`Flow « ${flow.name} » : OK — ${res.stats?.total_rows ?? 0} rows, export ready.`, "ok");
+        notify(`Flux « ${flow.name} » : OK — ${res.stats?.total_rows ?? 0} ligne(s), export prêt.`, "ok");
       } else {
-        notify(`Flow « ${flow.name} » : blocked at ${res.stage}${res.stats ? ` — ${res.stats.rows_err} row(s) in error` : ""}.`, "err");
+        notify(`Flux « ${flow.name} » : bloqué à ${res.stage}${res.stats ? ` — ${res.stats.rows_err} ligne(s) en erreur` : ""}.`, "err");
       }
       refresh();
-    } catch (e) { notify(e instanceof Error ? e.message : "Run failed.", "err"); }
+    } catch (e) { notify(e instanceof Error ? e.message : "Échec de l'exécution.", "err"); }
     finally {
       setRunningFlow(null);
       if (runFileRef.current) runFileRef.current.value = "";
@@ -131,7 +131,7 @@ export function FlowsPanel({ notify, onOpenReport }: Props) {
       if (kind === "flow") await api.archiveFlow(id);
       else await api.archiveArtefact(kind, id);
       refresh();
-    } catch (e) { notify(e instanceof Error ? e.message : "Archive failed.", "err"); }
+    } catch (e) { notify(e instanceof Error ? e.message : "Échec de l'archivage.", "err"); }
   };
 
   const fmtDate = (iso: string) => new Date(iso).toLocaleString();
@@ -153,46 +153,46 @@ export function FlowsPanel({ notify, onOpenReport }: Props) {
         onChange={(e) => doRun(e.target.files?.[0])} />
 
       <div className="sec-h">
-        <h3>Flows</h3>
-        <span className="sub">A flow = a stored config + optional TCO + optional computed set, under one id. Run it on any file — the run is persisted with the exact versions it used.</span>
+        <h3>Flux</h3>
+        <span className="sub">Un flux = une config enregistrée + un TCO optionnel + un ensemble calculé optionnel, sous un même id. Lancez-le sur n'importe quel fichier — l'exécution est conservée avec les versions exactes utilisées.</span>
       </div>
 
-      {loading ? <div className="banner"><span>Loading the library…</span></div> : (
+      {loading ? <div className="banner"><span>Chargement de la bibliothèque…</span></div> : (
         <>
           {/* ── composer ── */}
           <div className="flowform">
-            <div className="frow"><label>Name</label>
-              <input value={fName} onChange={(e) => setFName(e.target.value)} placeholder="e.g. clients-mensuel" /></div>
+            <div className="frow"><label>Nom</label>
+              <input value={fName} onChange={(e) => setFName(e.target.value)} placeholder="ex. clients-mensuel" /></div>
             <div className="frow"><label>Config</label>
               <select value={fConfig} onChange={(e) => setFConfig(e.target.value)}>
-                <option value="">— choose —</option>
+                <option value="">— choisir —</option>
                 {configs.map((c) => <option key={c.id} value={c.id}>{c.name} (v{c.latest_version_no})</option>)}
               </select></div>
             <div className="frow"><label>TCO</label>
               <select value={fTco} onChange={(e) => setFTco(e.target.value)}>
-                <option value="">none</option>
+                <option value="">aucun</option>
                 {tcos.map((t) => <option key={t.id} value={t.id}>{t.name} (v{t.latest_version_no})</option>)}
               </select></div>
             <div className="frow"><label>Computed</label>
               <select value={fComp} onChange={(e) => setFComp(e.target.value)}>
-                <option value="">none</option>
+                <option value="">aucun</option>
                 {computeds.map((p) => <option key={p.id} value={p.id}>{p.name} (v{p.latest_version_no})</option>)}
               </select></div>
-            <div className="frow"><label>Export name</label>
+            <div className="frow"><label>Nom d'export</label>
               <input value={fExport} onChange={(e) => setFExport(e.target.value)} /></div>
             <label className="csub" style={{ display: "flex", alignItems: "center", gap: 6 }}>
               <input type="checkbox" checked={fPinned} onChange={(e) => setFPinned(e.target.checked)} />
-              Pin current versions (unchecked = always use the latest version of each artefact)
+              Épingler les versions actuelles (décoché = toujours utiliser la dernière version de chaque artefact)
             </label>
-            <button className="btn primary" onClick={createFlow}>Create flow</button>
+            <button className="btn primary" onClick={createFlow}>Créer le flux</button>
           </div>
 
           {/* ── flows list ── */}
           {flows.length === 0 ? (
-            <div className="banner"><span>No flow yet. Save a config in the Yaml tab, then compose one above.</span></div>
+            <div className="banner"><span>Aucun flux pour l'instant. Enregistrez une config dans l'onglet Yaml, puis composez-en un ci-dessus.</span></div>
           ) : (
             <table className="libtable">
-              <thead><tr><th>Flow</th><th>Config</th><th>TCO</th><th>Computed</th><th>Versions</th><th></th></tr></thead>
+              <thead><tr><th>Flux</th><th>Config</th><th>TCO</th><th>Computed</th><th>Versions</th><th></th></tr></thead>
               <tbody>
                 {flows.map((f) => (
                   <tr key={f.id}>
@@ -200,12 +200,12 @@ export function FlowsPanel({ notify, onOpenReport }: Props) {
                     <td>{nameOf(configs, f.config_artefact_id)}</td>
                     <td>{nameOf(tcos, f.tco_artefact_id)}</td>
                     <td>{nameOf(computeds, f.computed_artefact_id)}</td>
-                    <td>{f.config_version_no === null ? "latest" : `pinned v${f.config_version_no}`}</td>
+                    <td>{f.config_version_no === null ? "dernière" : `épinglée v${f.config_version_no}`}</td>
                     <td className="libactions">
                       <button className="btn sm primary" disabled={runningFlow === f.id} onClick={() => askRun(f)}>
-                        <IconPlay size={13} /> {runningFlow === f.id ? "Running…" : "Run on a file"}
+                        <IconPlay size={13} /> {runningFlow === f.id ? "En cours…" : "Lancer sur un fichier"}
                       </button>
-                      <button className="btn sm" title="Archive" onClick={() => del("flow", f.id)}><IconReset size={13} /></button>
+                      <button className="btn sm" title="Archiver" onClick={() => del("flow", f.id)}><IconReset size={13} /></button>
                     </td>
                   </tr>
                 ))}
@@ -215,14 +215,14 @@ export function FlowsPanel({ notify, onOpenReport }: Props) {
 
           {/* ── runs ── */}
           <div className="sec-h" style={{ marginTop: 26 }}>
-            <h3>Stored runs</h3>
-            <span className="sub">Every flow run is persisted with the frozen artefact versions it used.</span>
+            <h3>Exécutions enregistrées</h3>
+            <span className="sub">Chaque exécution de flux est conservée avec les versions figées des artefacts utilisés.</span>
           </div>
           {runs.length === 0 ? (
-            <div className="banner"><span>No run yet.</span></div>
+            <div className="banner"><span>Aucune exécution pour l'instant.</span></div>
           ) : (
             <table className="libtable">
-              <thead><tr><th>When</th><th>Flow</th><th>File</th><th>Result</th><th>Rows</th><th></th></tr></thead>
+              <thead><tr><th>Date</th><th>Flux</th><th>Fichier</th><th>Résultat</th><th>Lignes</th><th></th></tr></thead>
               <tbody>
                 {runs.map((r) => (
                   <Fragment key={r.id}>
@@ -238,8 +238,8 @@ export function FlowsPanel({ notify, onOpenReport }: Props) {
                         <button className="btn sm" disabled={openBusy} onClick={() => toggleRun(r.id)}>
                           {openRun === r.id ? "Fermer" : "Voir"}
                         </button>
-                        {r.ok && <a className="btn sm" href={`/api/runs/${r.id}/export`}>Export</a>}
-                        <a className="btn sm" href={`/api/runs/${r.id}`} target="_blank" rel="noreferrer">Report (json)</a>
+                        {r.ok && <a className="btn sm" href={`/api/runs/${r.id}/export`}>Exporter</a>}
+                        <a className="btn sm" href={`/api/runs/${r.id}`} target="_blank" rel="noreferrer">Rapport (json)</a>
                       </td>
                     </tr>
                     {openRun === r.id && (
@@ -259,7 +259,7 @@ export function FlowsPanel({ notify, onOpenReport }: Props) {
                               <div className="tablewrap">
                                 <table className="grid">
                                   <thead>
-                                    <tr><th>id</th><th>column</th><th>value</th><th>result</th><th>status</th></tr>
+                                    <tr><th>id</th><th>colonne</th><th>valeur</th><th>résultat</th><th>statut</th></tr>
                                   </thead>
                                   <tbody>
                                     {openReport.slice(0, 500).map((row, i) => (
@@ -276,7 +276,7 @@ export function FlowsPanel({ notify, onOpenReport }: Props) {
                               </div>
                               {openReport.length > 500 && (
                                 <div className="csub" style={{ marginTop: 6 }}>
-                                  Showing first 500 of {openReport.length.toLocaleString()} — open in Report or export for the rest.
+                                  Affichage des 500 premières sur {openReport.length.toLocaleString()} — ouvrez dans Rapport ou exportez pour le reste.
                                 </div>
                               )}
                             </>
@@ -292,8 +292,8 @@ export function FlowsPanel({ notify, onOpenReport }: Props) {
 
           {/* ── library inventory + tco upload ── */}
           <div className="sec-h" style={{ marginTop: 26 }}>
-            <h3>Library</h3>
-            <span className="sub">Configs are saved from the Yaml tab, computed sets from the Computed tab. TCOs are added here.</span>
+            <h3>Bibliothèque</h3>
+            <span className="sub">Les configs sont enregistrées depuis l'onglet Yaml, les ensembles calculés depuis l'onglet Computed. Les TCO sont ajoutés ici.</span>
           </div>
           <div className="libgrid">
             {(["config", "computed", "tco"] as const).map((kind) => {
@@ -301,11 +301,11 @@ export function FlowsPanel({ notify, onOpenReport }: Props) {
               return (
                 <div key={kind} className="libcol">
                   <div className="libcol-h">{kind} <span className="csub">({list.length})</span></div>
-                  {list.length === 0 && <div className="csub">empty</div>}
+                  {list.length === 0 && <div className="csub">vide</div>}
                   {list.map((a) => (
                     <div key={a.id} className="libitem">
                       <span>{a.name} <span className="csub">v{a.latest_version_no}</span></span>
-                      <button className="btn sm" title="Archive" onClick={() => del(kind, a.id)}>×</button>
+                      <button className="btn sm" title="Archiver" onClick={() => del(kind, a.id)}>×</button>
                     </div>
                   ))}
                 </div>
@@ -313,11 +313,11 @@ export function FlowsPanel({ notify, onOpenReport }: Props) {
             })}
           </div>
           <div className="flowform" style={{ marginTop: 12 }}>
-            <div className="frow"><label>New TCO name</label>
-              <input value={tcoName} onChange={(e) => setTcoName(e.target.value)} placeholder="e.g. civilites" /></div>
-            <div className="frow"><label>CSV file</label>
+            <div className="frow"><label>Nom du nouveau TCO</label>
+              <input value={tcoName} onChange={(e) => setTcoName(e.target.value)} placeholder="ex. civilites" /></div>
+            <div className="frow"><label>Fichier CSV</label>
               <input type="file" ref={tcoFileRef} accept=".csv,.txt" /></div>
-            <button className="btn" onClick={saveTco}>Save TCO to library</button>
+            <button className="btn" onClick={saveTco}>Enregistrer le TCO dans la bibliothèque</button>
           </div>
         </>
       )}

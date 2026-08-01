@@ -28,15 +28,15 @@ export function FunctionsPanel({ notify }: Props) {
   return (
     <div className="fn">
       <p className="fn-hint">
-        A function is an expression with named parameters. Inside the body,
-        <code>[montant]</code> is the <em>argument</em> — never a column of the
-        table it is called on, so it behaves the same everywhere.
+        Une fonction est une expression à paramètres nommés. Dans le corps,
+        <code>[montant]</code> est l'<em>argument</em> — jamais une colonne de la
+        table sur laquelle elle est appelée, elle se comporte donc pareil partout.
       </p>
 
       <div className="fn-form">
-        <label>Name</label>
+        <label>Nom</label>
         <input value={name} onChange={(e) => setName(e.target.value)} placeholder="prix_ttc" />
-        <label>Parameters</label>
+        <label>Paramètres</label>
         <input value={params} onChange={(e) => setParams(e.target.value)}
                placeholder="montant, taux" />
         <label>Expression</label>
@@ -44,7 +44,7 @@ export function FunctionsPanel({ notify }: Props) {
                   onChange={(e) => setExpr(e.target.value)} />
         {name && paramList.length > 0 && (
           <p className="fn-call">
-            Call it as <code>{name.toUpperCase()}({paramList.map((p) => `[${p}]`).join(", ")})</code>
+            S'appelle avec <code>{name.toUpperCase()}({paramList.map((p) => `[${p}]`).join(", ")})</code>
           </p>
         )}
         <div className="fn-actions">
@@ -57,17 +57,17 @@ export function FunctionsPanel({ notify }: Props) {
                       if (ex) await api.addArtefactVersion("function", ex.id, { body });
                       else await api.createArtefact("function", { name: name.trim(), body });
                       await refresh();
-                      notify(`Function “${name}” saved.`, "ok");
+                      notify(`Fonction « ${name} » enregistrée.`, "ok");
                     } catch (e) { notify(e instanceof Error ? e.message : String(e), "err"); }
                     finally { setBusy(false); }
                   }}>
-            <IconSave size={14} /> Save
+            <IconSave size={14} /> Enregistrer
           </button>
         </div>
       </div>
 
-      <h4><IconCode size={13} /> Functions in this environment <span className="count">{saved.length}</span></h4>
-      {saved.length === 0 && <p className="fn-hint">None yet.</p>}
+      <h4><IconCode size={13} /> Fonctions de cet environnement <span className="count">{saved.length}</span></h4>
+      {saved.length === 0 && <p className="fn-hint">Aucune pour l'instant.</p>}
       {saved.map((f) => (
         <div key={f.id} className="fn-row">
           <strong>{f.name.toUpperCase()}</strong>
@@ -78,7 +78,7 @@ export function FunctionsPanel({ notify }: Props) {
               const b = (d as { body: { name: string; params: string[]; expr: string } }).body;
               setName(b.name); setParams((b.params || []).join(", ")); setExpr(b.expr);
             } catch (e) { notify(e instanceof Error ? e.message : String(e), "err"); }
-          }}><IconPlay size={12} /> Open</button>
+          }}><IconPlay size={12} /> Ouvrir</button>
         </div>
       ))}
     </div>

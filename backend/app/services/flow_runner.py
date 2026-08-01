@@ -150,23 +150,20 @@ def _brick_inline(node: FlowNode, inputs: List[dict], ctx: RunContext) -> NodeRe
 def _connection(node: FlowNode, ctx: RunContext, cfg: dict, expected_kind: str) -> dict:
     """Resolve `cfg["connection"]` to its parsed JSON body, checking it exists
     and is the kind this brick expects — a hotfolder brick fed an smtp
-    connection (or vice-versa) must fail loudly, not misread the wrong keys."""
-    import json
+    connection (or vice-versa) must fail loudly, not misread the wrong keys.
+    The actual check is shared with session source-attachment
+    (`connections.parse_connection`) — only how the failure is reported
+    (a `FlowError`, here) differs by caller."""
+    from app.services import connections
 
     name = (cfg.get("connection") or "").strip()
     if not name:
         raise FlowError(node.id, "needs a `connection`")
-    if name not in ctx.variables:
-        raise FlowError(node.id, f"no connection point named '{name}'")
-    if ctx.variable_kinds.get(name) != expected_kind:
-        raise FlowError(node.id, f"'{name}' is not a {expected_kind} connection")
     try:
-        data = json.loads(ctx.variables[name])
-    except ValueError:
-        raise FlowError(node.id, f"connection '{name}' is not valid JSON")
-    if not isinstance(data, dict):
-        raise FlowError(node.id, f"connection '{name}' is not a JSON object")
-    return {**data, "_name": name}
+        return connections.parse_connection(
+            name, ctx.variables.get(name), ctx.variable_kinds.get(name), expected_kind)
+    except ValueError as e:
+        raise FlowError(node.id, str(e))
 
 
 def _brick_hotfolder(node: FlowNode, inputs: List[dict], ctx: RunContext) -> NodeResult:
@@ -235,11 +232,14 @@ def _brick_api(node: FlowNode, inputs: List[dict], ctx: RunContext) -> NodeResul
     `path` walks into the payload (`data.orders`) because an API almost never
     returns a bare list at the top level. The call is deliberately plain: no
     retries, no pagination yet — a brick that silently retried would make a flow
-    non-deterministic, and pagination needs a contract of its own.
+    non-deterministic, and pagination needs a contract of its own. This brick
+    only ever reads JSON — a session source-attachment may also ask an `api`
+    connection for a CSV/XLSX file, but that's a different caller's choice
+    (`api_source.call` is shared; the JSON-only assumption is not).
     """
     import json
-    import urllib.error
-    import urllib.request
+
+    from app.services import api_source
 
     cfg = _resolve(node.config, _subs(ctx))
     headers = dict(cfg.get("headers") or {})
@@ -261,34 +261,20 @@ def _brick_api(node: FlowNode, inputs: List[dict], ctx: RunContext) -> NodeResul
     body = cfg.get("body")
     timeout = float(cfg.get("timeout") or 20)
 
-    data = None
-    if body is not None:
-        data = (body if isinstance(body, str) else json.dumps(body)).encode()
-        headers.setdefault("Content-Type", "application/json")
-
-    req = urllib.request.Request(url, data=data, method=method,
-                                 headers={str(k): str(v) for k, v in headers.items()})
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            raw = resp.read().decode("utf-8", errors="replace")
-            status = resp.status
-    except urllib.error.HTTPError as e:
-        raise FlowError(node.id, f"HTTP {e.code} calling {url}")
-    except Exception as e:  # noqa: BLE001 — network failures must name the node
-        raise FlowError(node.id, f"{type(e).__name__} calling {url}: {e}")
+        raw, status = api_source.call(url, method, headers, body, timeout)
+    except api_source.ApiCallError as e:
+        raise FlowError(node.id, str(e))
 
     try:
-        payload = json.loads(raw)
+        payload = json.loads(raw.decode("utf-8", errors="replace"))
     except ValueError:
         raise FlowError(node.id, f"{url} did not return JSON")
 
-    for step in (cfg.get("path") or "").split("."):
-        if not step:
-            continue
-        if isinstance(payload, dict):
-            payload = payload.get(step)
-        else:
-            raise FlowError(node.id, f"path '{cfg.get('path')}' does not fit the payload")
+    try:
+        payload = api_source.walk_json_path(payload, cfg.get("path") or "")
+    except api_source.ApiCallError as e:
+        raise FlowError(node.id, str(e))
     if payload is None:
         payload = []
     if isinstance(payload, dict):
@@ -956,9 +942,10 @@ def _brick_external_db(node: FlowNode, inputs: List[dict], ctx: RunContext) -> N
     config. Parameters are always bound through SQLAlchemy, never spliced
     into the SQL text — the same "no textual substitution" rule already
     decided for a SQL source, so a value coming from anywhere upstream can
-    never turn into an injection.
+    never turn into an injection. The query itself runs through
+    `external_db.run_query`, shared with session source-attachment.
     """
-    import sqlalchemy
+    from app.services import external_db
 
     cfg = _resolve(node.config, _subs(ctx))
     conn = _connection(node, ctx, cfg, "external_db")
@@ -970,28 +957,19 @@ def _brick_external_db(node: FlowNode, inputs: List[dict], ctx: RunContext) -> N
         raise FlowError(node.id, "an external_db node needs a `query`")
     params = {str(k): v for k, v in (cfg.get("params") or {}).items()}
 
-    engine = sqlalchemy.create_engine(url)
     try:
-        with engine.connect() as c:
-            result = c.execute(sqlalchemy.text(query), params)
-            cols = list(result.keys())
-            rows = [dict(zip(cols, r)) for r in result.fetchmany(MAX_ROWS + 1)]
-    except FlowError:
-        raise
+        df = external_db.run_query(url, query, params, MAX_ROWS)
+    except external_db.QueryTooLarge as e:
+        raise FlowError(node.id, str(e))
     except Exception as e:  # noqa: BLE001 — a bad DSN/query must name the node
         raise FlowError(node.id, f"{type(e).__name__} querying '{conn['_name']}': {e}")
-    finally:
-        engine.dispose()
 
-    if len(rows) > MAX_ROWS:
-        raise FlowError(node.id, f"the query returned more than {MAX_ROWS} rows — "
-                                 f"add a LIMIT or narrow the `params`")
-    if not rows:
+    if df.empty:
         # A genuinely empty list of records, not one record with empty items:
         # `records_to_frame` treats the latter as one blank row (`or [{}]`),
         # which would misreport "no match" as "one empty row".
         return NodeResult(records=[], meta={"rows": 0})
-    rows = [{k: ("" if v is None else str(v)) for k, v in r.items()} for r in rows]
+    rows = df.to_dict("records")
     return NodeResult(records=[{"head": {}, "items": rows}], meta={"rows": len(rows)})
 
 

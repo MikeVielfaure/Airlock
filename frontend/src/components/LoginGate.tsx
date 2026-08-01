@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, setToken } from "../lib/api";
 import type { AuthUser } from "../lib/types";
-import { IconCheck, IconPlay } from "../lib/icons";
+import { IconCheck, IconGrid, IconPlay } from "../lib/icons";
 
 interface Props { onReady: (user: AuthUser | null) => void }
 
@@ -50,6 +50,13 @@ export function LoginGate({ onReady }: Props) {
   return (
     <div className="gate">
       <div className="gate-card">
+        <div className="gate-brand">
+          <span className="brand-mark"><IconGrid size={17} /></span>
+          <div>
+            <div className="brand-name">File Explorer</div>
+            <div className="brand-sub">atelier de schéma · csv / xlsx</div>
+          </div>
+        </div>
         <h2>{state.setup ? "Créer le compte administrateur" : "Connexion"}</h2>
         {state.setup && (
           <p className="gate-note">

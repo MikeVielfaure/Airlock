@@ -45,6 +45,7 @@ class ConfigService:
         strict_header: bool = False,
         min_header: bool = False,
         variables: dict[str, str] | None = None,
+        ref_variables: list[str] | None = None,
         table_marker: str | None = None,
         table_index: int = 0,
         table_header_mode: str = "local",
@@ -71,6 +72,7 @@ class ConfigService:
             strict_header=strict_header,
             min_header=min_header,
             variables=variables or {},
+            ref_variables=ref_variables or [],
             header=header_config,
             Fields=fields,
             filters=filters or {},
@@ -98,6 +100,8 @@ class ConfigService:
             d["min_header"] = True
         if getattr(config, "variables", None):
             d["variables"] = dict(config.variables)
+        if getattr(config, "ref_variables", None):
+            d["ref_variables"] = list(config.ref_variables)
         if getattr(config, "filters", None):
             d["filters"] = dict(config.filters)
         if config.delete_char_delimiter:
@@ -190,6 +194,7 @@ class ConfigService:
             strict_header=strict_header,
             min_header=min_header,
             variables=data.get("variables") or {},
+            ref_variables=data.get("ref_variables") or [],
             delete_char_delimiter=data.get("delete_char_delimiter", False),
             header=header,
             Fields=fields,
