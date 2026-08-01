@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../lib/api";
-import type { RunRow, VariableRow } from "../lib/types";
+import type { RunRow, VariableRow, VariableSchema } from "../lib/types";
 import {
   IconCheck, IconCode, IconLayers, IconReset, IconSave, IconWarn,
 } from "../lib/icons";
@@ -196,6 +196,68 @@ function Vars({ notify }: Props) {
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
   const [testing, setTesting] = useState(false);
 
+  // Known tables (external_db) / endpoints (api) declared on the connection
+  // being edited — only meaningful once it has an id (a schema needs a real
+  // connection to hang off), reloaded whenever that id changes.
+  const [schemas, setSchemas] = useState<VariableSchema[]>([]);
+  const [schemaName, setSchemaName] = useState("");
+  const [schemaCols, setSchemaCols] = useState<{ name: string; type: string }[]>([{ name: "", type: "string" }]);
+  const [schemaPath, setSchemaPath] = useState("");
+  const [schemaMethod, setSchemaMethod] = useState("GET");
+  const [schemaDataPath, setSchemaDataPath] = useState("");
+  const [schemaDetectQuery, setSchemaDetectQuery] = useState("");
+  const [detecting, setDetecting] = useState(false);
+
+  const refreshSchemas = useCallback(async () => {
+    if (!draft.id) { setSchemas([]); return; }
+    try { setSchemas(await api.listConnectionSchemas(draft.id)); }
+    catch { setSchemas([]); }
+  }, [draft.id]);
+  useEffect(() => { refreshSchemas(); }, [refreshSchemas]);
+
+  const resetSchemaForm = () => {
+    setSchemaName(""); setSchemaCols([{ name: "", type: "string" }]);
+    setSchemaPath(""); setSchemaMethod("GET"); setSchemaDataPath("");
+    setSchemaDetectQuery("");
+  };
+
+  /** Run the query/call once and propose columns — a starting point to
+   * correct by hand, not a substitute for reviewing it. */
+  const detectSchema = async () => {
+    if (!draft.id) return;
+    setDetecting(true);
+    try {
+      const body = draft.kind === "api"
+        ? { path: schemaPath, method: schemaMethod, data_path: schemaDataPath }
+        : { query: schemaDetectQuery };
+      const r = await api.detectConnectionSchema(draft.id, body);
+      if (r.columns.length === 0) { notify("Aucune colonne trouvée dans la réponse.", "err"); return; }
+      setSchemaCols(r.columns);
+      notify(`${r.columns.length} colonne(s) détectée(s) — vérifiez les types avant d'enregistrer.`, "ok");
+    } catch (e) { notify(e instanceof Error ? e.message : String(e), "err"); }
+    finally { setDetecting(false); }
+  };
+
+  const saveSchema = async () => {
+    if (!draft.id || !schemaName.trim()) return;
+    const cols = schemaCols.filter((c) => c.name.trim());
+    try {
+      await api.saveConnectionSchema(draft.id, {
+        name: schemaName.trim(), columns: cols,
+        path: schemaPath, method: schemaMethod, data_path: schemaDataPath,
+      });
+      resetSchemaForm();
+      refreshSchemas();
+      notify(`Schéma « ${schemaName.trim()} » enregistré.`, "ok");
+    } catch (e) { notify(e instanceof Error ? e.message : String(e), "err"); }
+  };
+
+  const removeSchema = async (name: string) => {
+    if (!draft.id) return;
+    try { await api.deleteConnectionSchema(draft.id, name); refreshSchemas(); }
+    catch (e) { notify(e instanceof Error ? e.message : String(e), "err"); }
+  };
+
   const refresh = useCallback(async () => {
     try {
       setRows(await api.listVariables());
@@ -208,16 +270,19 @@ function Vars({ notify }: Props) {
   const resetDraft = (scope = draft.scope) => {
     setDraft({ name: "", value: "", scope, secret: false, kind: "value" });
     setTestResult(null);
+    resetSchemaForm();
   };
 
   const startNew = (kind: VariableRow["kind"]) => {
     setDraft({ name: "", value: "", scope: "environment", secret: false, kind });
     setConn({}); setConnUseTls(true); setTestResult(null);
+    resetSchemaForm();
   };
 
   const edit = (v: VariableRow) => {
     setDraft({ ...v });
     setTestResult(null);
+    resetSchemaForm();
     if (v.kind !== "value") {
       try {
         const data = JSON.parse(v.value) as Record<string, unknown>;
@@ -286,11 +351,11 @@ function Vars({ notify }: Props) {
   return (
     <div className="ops-body">
       <p className="ops-hint">
-        A value that several flows share — a base URL, a threshold, a key, or a
-        structured connection (a hotfolder, an smtp relay). The same name
-        resolves differently depending on where it is read, most specific
-        winning: <strong>brick → flow → environment → global</strong>. Nothing
-        has to be renamed to be specialised.
+        Une valeur que plusieurs flux partagent — une URL de base, un seuil,
+        une clé, ou une connexion structurée (un hotfolder, un relais smtp).
+        Le même nom se résout différemment selon où il est lu, le plus
+        spécifique l'emportant : <strong>brique → flux → environnement →
+        global</strong>. Rien à renommer pour se spécialiser.
       </p>
 
       <div className="ops-referentiel">
@@ -447,6 +512,81 @@ function Vars({ notify }: Props) {
                      onChange={(e) => setConn({ ...conn, auth_header: e.target.value })} />
               <input placeholder="token" type="password" value={conn.token ?? ""}
                      onChange={(e) => setConn({ ...conn, token: e.target.value })} />
+            </div>
+          )}
+
+          {(draft.kind === "external_db" || draft.kind === "api") && (
+            <div className="ops-schemas">
+              <div className="ops-h3">{draft.kind === "api" ? "Endpoints connus" : "Tables connues"}</div>
+              {!draft.id ? (
+                <p className="ops-hint">Enregistrez d'abord la connexion pour pouvoir y déclarer
+                  {draft.kind === "api" ? " des endpoints" : " des tables"} connu(e)s, réutilisables
+                  ensuite pour construire une requête et proposer l'autocomplétion.</p>
+              ) : (
+                <>
+                  {schemas.length === 0 ? (
+                    <p className="ops-hint">Aucun{draft.kind === "api" ? " endpoint" : "e table"} déclaré(e) pour l'instant.</p>
+                  ) : (
+                    schemas.map((sc) => (
+                      <div key={sc.name} className="ops-schema-row">
+                        <strong>{sc.name}</strong>
+                        <span className="ops-hint">
+                          {sc.columns.map((c) => `${c.name}:${c.type}`).join(", ") || "aucune colonne"}
+                          {draft.kind === "api" && sc.path ? ` · ${sc.method} ${sc.path}` : ""}
+                        </span>
+                        <button className="btn sm" onClick={() => removeSchema(sc.name)}>Supprimer</button>
+                      </div>
+                    ))
+                  )}
+                  <div className="ops-form" style={{ marginTop: 8 }}>
+                    <input placeholder={draft.kind === "api" ? "nom de l'endpoint" : "nom de la table"}
+                           value={schemaName} onChange={(e) => setSchemaName(e.target.value)} />
+                    {draft.kind === "api" && (
+                      <>
+                        <input placeholder="path" value={schemaPath}
+                               onChange={(e) => setSchemaPath(e.target.value)} />
+                        <select value={schemaMethod} onChange={(e) => setSchemaMethod(e.target.value)}>
+                          {["GET", "POST", "PUT", "DELETE"].map((m) => <option key={m} value={m}>{m}</option>)}
+                        </select>
+                        <input placeholder="chemin dans la réponse (optionnel)" value={schemaDataPath}
+                               onChange={(e) => setSchemaDataPath(e.target.value)} />
+                      </>
+                    )}
+                  </div>
+                  {draft.kind === "external_db" && (
+                    <div className="ops-form">
+                      <input placeholder="requête d'exemple, ex. SELECT * FROM ma_table" style={{ flex: 1 }}
+                             value={schemaDetectQuery} onChange={(e) => setSchemaDetectQuery(e.target.value)} />
+                    </div>
+                  )}
+                  <button className="btn sm" disabled={detecting ||
+                            (draft.kind === "external_db" && !schemaDetectQuery.trim())}
+                          onClick={detectSchema}>
+                    {detecting ? "Détection…" : "Détecter les colonnes"}
+                  </button>
+                  <span className="ops-hint">Colonnes attendues</span>
+                  {schemaCols.map((c, i) => (
+                    <div className="sql-pair" key={i}>
+                      <input placeholder="nom de colonne" value={c.name}
+                             onChange={(e) => setSchemaCols(schemaCols.map((x, j) =>
+                               (j === i ? { ...x, name: e.target.value } : x)))} />
+                      <select value={c.type} onChange={(e) => setSchemaCols(schemaCols.map((x, j) =>
+                        (j === i ? { ...x, type: e.target.value } : x)))}>
+                        {["string", "integer", "float", "date", "boolean"].map((t) =>
+                          <option key={t} value={t}>{t}</option>)}
+                      </select>
+                      <button className="hclear" onClick={() => setSchemaCols(schemaCols.filter((_, j) => j !== i))}>×</button>
+                    </div>
+                  ))}
+                  <button className="btn sm" onClick={() => setSchemaCols([...schemaCols, { name: "", type: "string" }])}>
+                    + colonne
+                  </button>
+                  <button className="btn sm primary" style={{ marginLeft: 8 }}
+                          disabled={!schemaName.trim()} onClick={saveSchema}>
+                    Enregistrer le schéma
+                  </button>
+                </>
+              )}
             </div>
           )}
 

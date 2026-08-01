@@ -9,7 +9,6 @@ import type {
   RunRow,
   VariableRow,
   MappingSuggestion,
-  PivotConvertResponse,
   PivotObjectResponse,
   DatasetInfo,
   DatasetWriteLog,
@@ -37,6 +36,7 @@ import type {
   SourceInfo,
   TablePreview,
   TcoResponse,
+  VariableSchema,
 } from "./types";
 
 // Body for the YAML export endpoint.
@@ -213,18 +213,19 @@ export const api = {
   },
 
   attachExternalDbSource: (sid: string, name: string, connection: string, query: string,
-                          params: Record<string, string>) =>
+                          params: Record<string, string>, schemaName?: string) =>
     fetch(`${BASE}/files/${sid}/sources/external_db`, {
       method: "POST", headers: authHeaders({ "Content-Type": "application/json" }),
-      body: JSON.stringify({ name, connection, query, params }),
+      body: JSON.stringify({ name, connection, query, params, schema_name: schemaName ?? null }),
     }).then((r) => json<SourceInfo>(r)),
 
   attachApiSource: (sid: string, name: string, connection: string, path: string, method: string,
-                   responseKind: string, dataPath: string, body?: Record<string, unknown>) =>
+                   responseKind: string, dataPath: string, body?: Record<string, unknown>,
+                   schemaName?: string) =>
     fetch(`${BASE}/files/${sid}/sources/api`, {
       method: "POST", headers: authHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({ name, connection, path, method, response_kind: responseKind,
-                            data_path: dataPath, body: body ?? null }),
+                            data_path: dataPath, body: body ?? null, schema_name: schemaName ?? null }),
     }).then((r) => json<SourceInfo>(r)),
 
   detachSource: (sid: string, name: string) =>
@@ -235,6 +236,48 @@ export const api = {
   listAvailableVariables: (kind = "") =>
     fetch(`${BASE}/variables/available${kind ? `?kind=${encodeURIComponent(kind)}` : ""}`,
          { headers: authHeaders() }).then((r) => json<AvailableVariable[]>(r)),
+
+  /** Known tables (BDD externe) / endpoints (API) declared on a connection. */
+  listConnectionSchemas: (variableId: string) =>
+    fetch(`${BASE}/variables/${variableId}/schemas`, { headers: authHeaders() })
+      .then((r) => json<VariableSchema[]>(r)),
+
+  saveConnectionSchema: (variableId: string, body: VariableSchema) =>
+    fetch(`${BASE}/variables/${variableId}/schemas`, {
+      method: "POST", headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify(body),
+    }).then((r) => json<VariableSchema>(r)),
+
+  deleteConnectionSchema: (variableId: string, name: string) =>
+    fetch(`${BASE}/variables/${variableId}/schemas/${encodeURIComponent(name)}`,
+         { method: "DELETE", headers: authHeaders() }).then((r) => json<{ ok: boolean }>(r)),
+
+  /** Run the query/call once and propose columns + inferred types — filling
+   * the schema form, not saving it. */
+  detectConnectionSchema: (variableId: string, body: { query?: string; params?: Record<string, string>;
+                           path?: string; method?: string; response_kind?: string;
+                           data_path?: string; body?: Record<string, unknown> }) =>
+    fetch(`${BASE}/variables/${variableId}/detect-schema`, {
+      method: "POST", headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify(body),
+    }).then((r) => json<{ columns: { name: string; type: string }[] }>(r)),
+
+  /** Start a session directly from a BDD externe query / an API answer —
+   * the same doorway an upload is, alongside it. */
+  createSessionFromExternalDb: (connection: string, query: string, params: Record<string, string>,
+                               schemaName?: string) =>
+    fetch(`${BASE}/files/from-external-db`, {
+      method: "POST", headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ connection, query, params, schema_name: schemaName ?? null }),
+    }).then((r) => json<FileResponse>(r)),
+
+  createSessionFromApi: (connection: string, path: string, method: string, responseKind: string,
+                        dataPath: string, schemaName?: string, body?: Record<string, unknown>) =>
+    fetch(`${BASE}/files/from-api`, {
+      method: "POST", headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ connection, path, method, response_kind: responseKind,
+                            data_path: dataPath, schema_name: schemaName ?? null, body: body ?? null }),
+    }).then((r) => json<FileResponse>(r)),
 
   getRows: (
     sid: string,
@@ -497,6 +540,26 @@ export const api = {
       body: JSON.stringify({ email }),
     }).then((r) => json<{ token: string; as_email: string; by_email: string }>(r)),
 
+  setUserPassword: (userId: string, password: string) =>
+    fetch(`${BASE}/admin/users/${userId}/password`, {
+      method: "POST", headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ password }),
+    }).then((r) => json<{ id: string; email: string }>(r)),
+
+  deactivateUser: (userId: string) =>
+    fetch(`${BASE}/admin/users/${userId}/deactivate`, { method: "POST", headers: authHeaders() })
+      .then((r) => json<{ id: string; email: string; active: boolean }>(r)),
+
+  reactivateUser: (userId: string) =>
+    fetch(`${BASE}/admin/users/${userId}/reactivate`, { method: "POST", headers: authHeaders() })
+      .then((r) => json<{ id: string; email: string; active: boolean }>(r)),
+
+  deleteUser: (userId: string, confirmEmail: string) =>
+    fetch(`${BASE}/admin/users/${userId}`, {
+      method: "DELETE", headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ confirm_email: confirmEmail }),
+    }).then((r) => json<{ deleted: string }>(r)),
+
   listProviders: () => fetch(`${BASE}/admin/providers`, { headers: authHeaders() })
     .then((r) => json<Record<string, unknown>[]>(r)),
 
@@ -705,14 +768,6 @@ export const api = {
       .then((r) => json<PivotObjectResponse>(r));
   },
 
-  /** source → pivot → target: one code path for every conversion. */
-  convertThroughPivot: (fields: Record<string, string | File | undefined>) => {
-    const fd = new FormData();
-    Object.entries(fields).forEach(([k, v]) => { if (v !== undefined && v !== "") fd.append(k, v as never); });
-    return fetch(`${BASE}/pivot/convert`, { method: "POST", body: fd, headers: authHeaders() })
-      .then((r) => json<PivotConvertResponse>(r));
-  },
-
   // ── editable rows (v14) ───────────────────────────────────────
   /** The working table as it stands: edits applied, deleted rows excluded. */
   rowsPreview: (sid: string, limit = 150) =>
@@ -768,6 +823,24 @@ export const api = {
 
   archiveDataset: (id: string) =>
     fetch(`${BASE}/datasets/${id}`, { method: "DELETE", headers: authHeaders() }).then((r) => json<{ archived: string }>(r)),
+
+  // ── sharing a table (v41) ─────────────────────────────────────
+  listDatasetGrants: (id: string) =>
+    fetch(`${BASE}/datasets/${id}/grants`, { headers: authHeaders() }).then((r) =>
+      json<{ owner_id: string; is_managed: boolean; my_permission: string;
+             grants: { subject_kind: string; subject: string; label: string; permission: string }[] }>(r)),
+
+  setDatasetGrant: (id: string, body: { email?: string; role?: string; environment?: string;
+                    permission?: string }) =>
+    fetch(`${BASE}/datasets/${id}/grants`, {
+      method: "POST", headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify(body),
+    }).then((r) => json<{ grants: { subject_kind: string; subject: string; label: string;
+                                    permission: string }[] }>(r)),
+
+  removeDatasetGrant: (id: string, subject: string, kind: string) =>
+    fetch(`${BASE}/datasets/${id}/grants/${encodeURIComponent(subject)}?kind=${kind}`,
+         { method: "DELETE", headers: authHeaders() }).then((r) => json<{ revoked: string }>(r)),
 
   /** Dry run: same verdict as a write, without touching anything. */
   preflightDataset: (sid: string, body: DatasetWriteBody) =>

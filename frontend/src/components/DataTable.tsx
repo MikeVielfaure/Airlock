@@ -3,6 +3,7 @@ import type { CSSProperties } from "react";
 import type { CellStatus, FieldType, ProcessResponse, RowsMutationResponse, TablePreview } from "../lib/types";
 import { api } from "../lib/api";
 import { IconMaximize, IconMinimize, IconPlay, IconReset, IconSave } from "../lib/icons";
+import { InfoTip } from "./InfoTip";
 
 interface Props {
   preview: TablePreview | null;
@@ -382,6 +383,11 @@ export function DataTable(props: Props) {
         <span className="sub">
           {result ? "Validé — les cellules colorées signalent les erreurs, nettoyages et valeurs calculées." : "Valeurs brutes. Lancez la validation pour appliquer vos règles."}
         </span>
+        <InfoTip>
+          <p><b>À quoi ça sert</b> — voir les données, filtrées et triées, et déclencher le contrôle qui applique les règles du Schéma et les calculs.</p>
+          <p><b>Comment faire</b> — « Lancer la validation » applique tout ; ensuite, filtrez sous chaque colonne, triez en cliquant un nom, glissez les en-têtes pour réordonner. « Modifier les cellules » corrige une valeur à la main.</p>
+          <p><b>Ce qu'il faut</b> — un fichier chargé. Avant la première validation, seul un échantillon brut est visible.</p>
+        </InfoTip>
         <span style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
           <button className="btn sm" title={fullscreen ? "Quitter le plein écran (Échap)" : "Afficher le tableau en grand"}
             onClick={() => setFullscreen((v) => !v)}>

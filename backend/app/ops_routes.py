@@ -18,6 +18,7 @@ import time
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
+import pandas as pd
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import select
@@ -30,7 +31,11 @@ from app.db_models import FlowRun, FlowRunStep, User
 from app.flow_graph import FlowGraph
 from app.services import auth_service as auth
 from app.services import permissions as perms
+from app.services.file_service import FileService
 from app.services.flow_runner import FlowError, RunContext, run_graph
+from app.services.function_service import FunctionService
+
+_files = FileService()
 
 router = APIRouter(prefix="/api", tags=["ops"])
 
@@ -95,20 +100,194 @@ def resolved_variable_kinds(env: str = "", graph_id: str = "", node_id: str = ""
 def list_available_variables(kind: str = "", env: str = "",
                              _cap=Depends(require_capability("variables.read")),
                              s: Session = Depends(get_session)):
-    """Names (and, for the non-secret ones, values) a picker outside the
-    référentiel itself may offer — a calculated column's variable list, or a
-    source-attachment connection select. Uses the resolved cascade, never the
-    raw administration listing: a shadowed global must not appear pickable
-    when an environment override exists. A secret is excluded outright, not
-    masked — it exists to connect, never to be read back into a value that
-    could end up in a computed column or an export."""
+    """Names, ids (and, for the non-secret ones, values) a picker outside the
+    référentiel itself may offer — a calculated column's variable list, a
+    source-attachment connection select, or the id needed to list the known
+    tables/endpoints declared on a connection. Uses the resolved cascade,
+    never the raw administration listing: a shadowed global must not appear
+    pickable when an environment override exists. A secret is excluded
+    outright, not masked — it exists to connect, never to be read back into
+    a value that could end up in a computed column or an export."""
     scope = env or repo.DEFAULT_ENV
+    rows = repo.resolve_variable_rows(s, environment=scope)
+    secrets = repo.secret_names(s)
+    out = [{"id": v.id, "name": n, "kind": v.kind, "value": v.value}
+           for n, v in rows.items() if n not in secrets and (not kind or v.kind == kind)]
+    return sorted(out, key=lambda v: v["name"])
+
+
+class SchemaColumn(BaseModel):
+    name: str
+    type: str = "string"
+
+
+class VariableSchemaIn(BaseModel):
+    name: str
+    columns: List[SchemaColumn] = Field(default_factory=list)
+    # api-only, ignored for external_db — a schema does not know its own
+    # kind, so both sets of fields simply coexist on the same shape.
+    path: str = ""
+    method: str = "GET"
+    data_path: str = ""
+
+
+def _schema_out(row) -> dict:
+    sj = row.schema_json or {}
+    types = sj.get("types") or {}
+    return {"name": row.name,
+            "columns": [{"name": c, "type": types.get(c, "string")} for c in sj.get("columns", [])],
+            "path": sj.get("path", ""), "method": sj.get("method", "GET"),
+            "data_path": sj.get("data_path", "")}
+
+
+@router.get("/variables/{variable_id}/schemas")
+def list_connection_schemas(variable_id: str,
+                            _cap=Depends(require_capability("variables.read")),
+                            s: Session = Depends(get_session)):
+    """The tables (BDD externe) or endpoints (API) already known on this
+    connection — what a query-builder or an autocomplete list reads from."""
+    return [_schema_out(r) for r in repo.list_variable_schemas(s, variable_id)]
+
+
+@router.post("/variables/{variable_id}/schemas")
+def save_connection_schema(variable_id: str, req: VariableSchemaIn,
+                           user: User = Depends(require_user),
+                           s: Session = Depends(get_session)):
+    v = repo.get_variable(s, variable_id)
+    _require_variable_write(s, user, v.scope, v.environment)
+    name = req.name.strip()
+    if not name:
+        raise HTTPException(422, "Un schéma a besoin d'un nom.")
+    schema_json = {
+        "columns": [c.name for c in req.columns],
+        "types": {c.name: c.type for c in req.columns},
+        "path": req.path, "method": req.method, "data_path": req.data_path,
+    }
+    row = repo.set_variable_schema(s, variable_id, name, schema_json)
+    commit(s)
+    return _schema_out(row)
+
+
+class DetectSchemaIn(BaseModel):
+    environment: str = ""
+    # external_db
+    query: str = ""
+    params: Dict[str, str] = Field(default_factory=dict)
+    # api
+    path: str = ""
+    method: str = "GET"
+    response_kind: str = "json"
+    data_path: str = ""
+    body: Optional[dict] = None
+
+
+def _infer_column_type(series: "pd.Series") -> str:
+    """Best-effort guess from a sample of values, in the same vocabulary as
+    FieldConfig.type — a starting point for the form to prefill, never a
+    silent authority: the person declaring the schema still reviews and
+    corrects it before saving. Reuses FunctionService.check_type_value, the
+    one type-checking engine, rather than a second ad hoc guesser."""
+    sample = series.dropna().astype(str)
+    sample = sample[sample.str.strip() != ""].head(50)
+    if sample.empty:
+        return "string"
+    fs = FunctionService()
+    for t in ("integer", "float", "date", "boolean"):
+        if sample.map(lambda v: fs.check_type_value(t, v)).all():
+            return t
+    return "string"
+
+
+@router.post("/variables/{variable_id}/detect-schema")
+def detect_connection_schema(variable_id: str, req: DetectSchemaIn, env: str = "",
+                             _cap=Depends(require_capability("variables.read")),
+                             s: Session = Depends(get_session)):
+    """
+    Run the query/call once and propose columns + inferred types — filling
+    in the schema form, not saving it. "Enregistrer" on the form is still
+    the explicit step that commits a known table/endpoint; this only saves
+    the person from typing every column name and type by hand.
+    """
+    from app.services import connections
+
+    v = repo.get_variable(s, variable_id)
+    scope = env or req.environment or v.environment or repo.DEFAULT_ENV
     values = repo.resolve_variables(s, environment=scope)
     kinds = repo.resolve_variable_kinds(s, environment=scope)
-    secrets = repo.secret_names(s)
-    out = [{"name": n, "kind": k, "value": values.get(n, "")}
-           for n, k in kinds.items() if n not in secrets and (not kind or k == kind)]
-    return sorted(out, key=lambda v: v["name"])
+    try:
+        conn = connections.parse_connection(v.name, values.get(v.name), kinds.get(v.name), v.kind)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+
+    if v.kind == "external_db":
+        from app.services import external_db
+        query = req.query.strip()
+        if not query:
+            raise HTTPException(422, "La requête ne peut pas être vide.")
+        url = conn.get("url")
+        if not url:
+            raise HTTPException(422, f"La connexion « {v.name} » n'a pas d'URL.")
+        try:
+            df = external_db.run_query(url, query, req.params, 200)
+        except external_db.QueryTooLarge as e:
+            raise HTTPException(413, str(e))
+        except Exception as e:  # noqa: BLE001 — surface the query failure to the client
+            raise HTTPException(422, f"Échec de la requête : {e}")
+    elif v.kind == "api":
+        import json as _json
+
+        from app.services import api_source
+        base = (conn.get("base_url") or "").rstrip("/")
+        rel = req.path.lstrip("/")
+        url = f"{base}/{rel}" if rel else base
+        if not url:
+            raise HTTPException(422, f"La connexion « {v.name} » n'a pas de base_url.")
+        headers = {}
+        if conn.get("token"):
+            headers[conn.get("auth_header") or "Authorization"] = conn["token"]
+        try:
+            raw, _status = api_source.call(url, req.method.upper(), headers, req.body, 20.0)
+        except api_source.ApiCallError as e:
+            raise HTTPException(422, str(e))
+        try:
+            if req.response_kind == "xlsx":
+                df = _files.load_xlsx_raw(raw, sheet=0)
+            elif req.response_kind == "csv":
+                df, _enc, _delim = _files.load_csv_raw(raw, "AUTO", None)
+            else:
+                payload = _json.loads(raw)
+                payload = api_source.walk_json_path(payload, req.data_path)
+                if payload is None:
+                    payload = []
+                if isinstance(payload, dict):
+                    payload = [payload]
+                if not isinstance(payload, list):
+                    raise HTTPException(422, "La réponse JSON n'est ni une liste ni un objet.")
+                rows = [r for r in payload if isinstance(r, dict)]
+                df = pd.DataFrame(rows).astype("string").fillna("") if rows else pd.DataFrame()
+        except api_source.ApiCallError as e:
+            raise HTTPException(422, str(e))
+        except ValueError:
+            raise HTTPException(422, f"{url} n'a pas renvoyé de JSON.")
+        except HTTPException:
+            raise
+        except Exception as e:  # noqa: BLE001 — surface a malformed response to the client
+            raise HTTPException(422, f"Impossible de lire la réponse : {e}")
+    else:
+        raise HTTPException(409, f"« {v.name} » n'est ni une connexion BDD externe ni API.")
+
+    return {"columns": [{"name": str(c), "type": _infer_column_type(df[c])} for c in df.columns]}
+
+
+@router.delete("/variables/{variable_id}/schemas/{name}")
+def delete_connection_schema(variable_id: str, name: str,
+                             user: User = Depends(require_user),
+                             s: Session = Depends(get_session)):
+    v = repo.get_variable(s, variable_id)
+    _require_variable_write(s, user, v.scope, v.environment)
+    repo.remove_variable_schema(s, variable_id, name)
+    commit(s)
+    return {"ok": True}
 
 
 def _require_variable_write(s: Session, user: User, scope: str, environment: str) -> None:

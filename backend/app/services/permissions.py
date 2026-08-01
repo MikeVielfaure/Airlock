@@ -63,6 +63,11 @@ CAPABILITIES: Dict[str, dict] = {
     # Creating a table is not the same as filling one: an operator feeds the
     # tables the business defined, an editor may invent new ones.
     "dataset.create": {"min": "editor", "label": "Créer une table"},
+    # Enforced per-dataset, not here: `repo.can_on_dataset(perm, "manage")` in
+    # `dataset_routes.py::set_dataset_grant` — an owner may share a table they
+    # manage even below this rank, so a blanket role check would be both wrong
+    # (too strict for an owner) and not enough (too loose for a non-owner
+    # operator). Listed for discoverability, not as the actual gate.
     "dataset.share": {"min": "operator", "label": "Partager une table dont on est propriétaire"},
     "dataset.delete": {"min": "admin", "label": "Archiver une table"},
 
@@ -72,6 +77,7 @@ CAPABILITIES: Dict[str, dict] = {
     "env.profile": {"min": "admin", "label": "Configurer l'environnement"},
     "members.manage": {"min": "admin", "label": "Gérer les membres"},
     "keys.create": {"min": "admin", "label": "Créer une clé de confidentialité"},
+    "keys.audit": {"min": "admin", "label": "Lire le journal des révélations"},
     # Note: *using* a key is not a capability at all — it depends on holding the
     # key, not on a role. Roles and key holders are separate on purpose, so that
     # being an administrator never implies being able to read salaries.

@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState } from "react";
 import type { CellStatus, ProcessResponse, ReportRow } from "../lib/types";
 import { IconDownload, IconUpload } from "../lib/icons";
+import { InfoTip } from "./InfoTip";
 
 const STATUSES: CellStatus[] = ["ERROR", "CLEANED", "MAPPING_KO", "MAPPING_OK", "NO_TCO", "OK"];
 type Shape = "long" | "by_id" | "pivot";
@@ -129,6 +130,11 @@ export function ReportPanel({ result, sid, notify, onLoadReport }: Props) {
       <div className="sec-h">
         <h3>Rapport</h3>
         <span className="sub">Une ligne par cellule vérifiée.</span>
+        <InfoTip>
+          <p><b>À quoi ça sert</b> — voir précisément ce qui s'est passé sur chaque cellule contrôlée : erreur, nettoyage, correspondance TCO.</p>
+          <p><b>Comment faire</b> — choisissez la forme (plat, groupé par id, ou pivot id × colonne) selon ce que vous voulez lire ; « plat » est le plus détaillé.</p>
+          <p><b>Ce qu'il faut</b> — une validation déjà lancée dans Données. Sans elle, le rapport est vide.</p>
+        </InfoTip>
         <span style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
           <label className="csub">Forme
             <select className="mono-input" style={{ marginLeft: 4 }} value={shape} onChange={(e) => setShape(e.target.value as Shape)}>

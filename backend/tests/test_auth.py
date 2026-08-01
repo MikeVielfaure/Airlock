@@ -289,6 +289,134 @@ def test_a_test_account_and_its_roles_are_created_in_one_call():
     assert again.json()["environments"]["rh"] == "editor"
 
 
+def test_a_superadmin_can_reset_anyones_password():
+    _signup("chef@boite.fr")
+    chef, _ = _login("chef@boite.fr")
+    client.post("/api/admin/quick-user",
+                json={"email": "marie@rh.fr", "memberships": {"rh": "operator"}},
+                headers=_h(chef))
+    marie_id = [u for u in client.get("/api/admin/users", headers=_h(chef)).json()
+               if u["email"] == "marie@rh.fr"][0]["id"]
+
+    r = client.post(f"/api/admin/users/{marie_id}/password",
+                    json={"password": "nouveaumdp1"}, headers=_h(chef))
+    assert r.status_code == 200, r.text
+
+    # the old password no longer works, the new one does
+    assert _login("marie@rh.fr", "motdepasse1")[1].status_code == 401
+    assert _login("marie@rh.fr", "nouveaumdp1")[1].status_code == 200
+
+
+def test_resetting_a_password_is_superadmin_only():
+    _signup("chef@boite.fr")
+    chef, _ = _login("chef@boite.fr")
+    client.post("/api/admin/quick-user",
+                json={"email": "op@rh.fr", "memberships": {"rh": "operator"}}, headers=_h(chef))
+    op, _ = _login("op@rh.fr")
+    marie_id = [u for u in client.get("/api/admin/users", headers=_h(chef)).json()
+               if u["email"] == "op@rh.fr"][0]["id"]
+    r = client.post(f"/api/admin/users/{marie_id}/password",
+                    json={"password": "nouveaumdp1"}, headers=_h(op))
+    assert r.status_code == 403
+
+
+def test_a_reset_password_still_needs_eight_characters():
+    _signup("chef@boite.fr")
+    chef, _ = _login("chef@boite.fr")
+    chef_id = client.get("/api/auth/me", headers=_h(chef)).json()["id"]
+    r = client.post(f"/api/admin/users/{chef_id}/password",
+                    json={"password": "court"}, headers=_h(chef))
+    assert r.status_code == 422
+
+
+def test_deactivating_an_account_blocks_sign_in_without_erasing_it():
+    _signup("chef@boite.fr")
+    chef, _ = _login("chef@boite.fr")
+    client.post("/api/admin/quick-user",
+                json={"email": "marie@rh.fr", "memberships": {"rh": "operator"}},
+                headers=_h(chef))
+    marie_tok, _ = _login("marie@rh.fr")
+    marie_id = [u for u in client.get("/api/admin/users", headers=_h(chef)).json()
+               if u["email"] == "marie@rh.fr"][0]["id"]
+
+    r = client.post(f"/api/admin/users/{marie_id}/deactivate", headers=_h(chef))
+    assert r.status_code == 200, r.text
+
+    # the login itself is refused, and the token she already held stops working
+    assert _login("marie@rh.fr")[1].status_code == 401
+    assert client.get("/api/auth/me", headers=_h(marie_tok)).status_code == 401
+
+    # nothing about the account was erased — membership survives
+    users = client.get("/api/admin/users", headers=_h(chef)).json()
+    marie = [u for u in users if u["email"] == "marie@rh.fr"][0]
+    assert marie["active"] is False and marie["environments"] == {"rh": "operator"}
+
+    resurrect = client.post(f"/api/admin/users/{marie_id}/reactivate", headers=_h(chef))
+    assert resurrect.status_code == 200
+    assert _login("marie@rh.fr")[1].status_code == 200
+
+
+def _del_user(user_id, confirm_email, token):
+    return client.request("DELETE", f"/api/admin/users/{user_id}",
+                          json={"confirm_email": confirm_email}, headers=_h(token))
+
+
+def test_the_last_active_superadmin_cannot_be_deactivated_or_deleted():
+    _signup("chef@boite.fr")
+    chef, _ = _login("chef@boite.fr")
+    chef_id = client.get("/api/auth/me", headers=_h(chef)).json()["id"]
+
+    # not even by someone else, and not by themselves either
+    assert client.post(f"/api/admin/users/{chef_id}/deactivate", headers=_h(chef)).status_code == 422
+    assert _del_user(chef_id, "chef@boite.fr", chef).status_code == 422  # self-delete refused first
+
+    client.post("/api/admin/quick-user",
+                json={"email": "second@boite.fr", "password": "secondpwd1", "memberships": {}},
+                headers=_h(chef))
+    # promote "second" so chef stops being the only one, then chef can be dealt with
+    from app.db import session_scope
+    from app.db_models import User
+    with session_scope() as s:
+        s.query(User).filter(User.email == "second@boite.fr").update({"is_superadmin": True})
+
+    other, _ = _login("second@boite.fr", "secondpwd1")
+    r = _del_user(chef_id, "chef@boite.fr", other)
+    assert r.status_code == 200, r.text
+
+
+def test_deleting_an_account_needs_the_email_typed_and_is_irreversible():
+    _signup("chef@boite.fr")
+    chef, _ = _login("chef@boite.fr")
+    client.post("/api/admin/quick-user",
+                json={"email": "paul@rh.fr", "memberships": {"rh": "viewer"}}, headers=_h(chef))
+    paul_id = [u for u in client.get("/api/admin/users", headers=_h(chef)).json()
+              if u["email"] == "paul@rh.fr"][0]["id"]
+
+    assert _del_user(paul_id, "faux@x.fr", chef).status_code == 422
+
+    r = _del_user(paul_id, "paul@rh.fr", chef)
+    assert r.status_code == 200, r.text
+    assert r.json()["deleted"] == "paul@rh.fr"
+
+    users = client.get("/api/admin/users", headers=_h(chef)).json()
+    assert "paul@rh.fr" not in {u["email"] for u in users}
+    # gone for good — no account left to sign into
+    assert _login("paul@rh.fr")[1].status_code == 401
+
+
+def test_deleting_users_is_superadmin_only():
+    _signup("chef@boite.fr")
+    chef, _ = _login("chef@boite.fr")
+    client.post("/api/admin/quick-user",
+                json={"email": "op@rh.fr", "memberships": {"rh": "operator"}}, headers=_h(chef))
+    client.post("/api/admin/quick-user",
+                json={"email": "cible@rh.fr", "memberships": {"rh": "viewer"}}, headers=_h(chef))
+    op, _ = _login("op@rh.fr")
+    cible_id = [u for u in client.get("/api/admin/users", headers=_h(chef)).json()
+               if u["email"] == "cible@rh.fr"][0]["id"]
+    assert _del_user(cible_id, "cible@rh.fr", op).status_code == 403
+
+
 def test_the_state_endpoint_says_what_the_caller_may_do():
     _signup("chef@boite.fr")
     chef, _ = _login("chef@boite.fr")

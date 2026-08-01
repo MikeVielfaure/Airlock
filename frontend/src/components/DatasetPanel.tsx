@@ -325,6 +325,100 @@ function MiniGrid({ p }: { p: TablePreview }) {
   );
 }
 
+type DatasetGrantRow = { subject_kind: string; subject: string; label: string; permission: string };
+
+/** Sharing a table with one person, a whole role, or a whole other
+ * environment — read-only autonomy for the target, without moving
+ * ownership. Reuses the same grants route the backend already exposes,
+ * just never had a screen. */
+function ShareForm({ dataset, notify }: { dataset: DatasetInfo; notify: Props["notify"] }) {
+  const [grants, setGrants] = useState<DatasetGrantRow[]>([]);
+  const [envs, setEnvs] = useState<string[]>([]);
+  const [targetKind, setTargetKind] = useState<"user" | "role" | "environment">("environment");
+  const [email, setEmail] = useState("");
+  const [role, setRole] = useState("viewer");
+  const [env, setEnv] = useState("");
+  const [permission, setPermission] = useState<"read" | "write" | "manage">("read");
+
+  const refreshGrants = useCallback(async () => {
+    try { setGrants((await api.listDatasetGrants(dataset.id)).grants); }
+    catch (e) { notify(e instanceof Error ? e.message : String(e), "err"); }
+  }, [dataset.id, notify]);
+  useEffect(() => { refreshGrants(); }, [refreshGrants]);
+  useEffect(() => {
+    api.listEnvironments().then((r) => { setEnvs(r.environments); setEnv(r.environments[0] || ""); })
+      .catch(() => {});
+  }, []);
+
+  const share = async () => {
+    const body = targetKind === "user" ? { email: email.trim(), permission }
+      : targetKind === "role" ? { role, permission }
+      : { environment: env, permission };
+    if (targetKind === "user" && !email.trim()) return;
+    try {
+      await api.setDatasetGrant(dataset.id, body);
+      setEmail("");
+      await refreshGrants();
+      notify(`« ${dataset.name} » partagée.`, "ok");
+    } catch (e) { notify(e instanceof Error ? e.message : String(e), "err"); }
+  };
+
+  const revoke = async (g: DatasetGrantRow) => {
+    try {
+      await api.removeDatasetGrant(dataset.id, g.subject, g.subject_kind);
+      await refreshGrants();
+      notify(`Accès de « ${g.label} » révoqué.`, "ok");
+    } catch (e) { notify(e instanceof Error ? e.message : String(e), "err"); }
+  };
+
+  return (
+    <div className="ds-share">
+      {grants.length === 0
+        ? <p className="ds-sub">Cette table n'est partagée avec personne d'autre.</p>
+        : (
+          <div className="ds-chips">
+            {grants.map((g) => (
+              <code key={`${g.subject_kind}:${g.subject}`}>
+                {g.subject_kind === "environment" ? "env. " : g.subject_kind === "role" ? "rôle " : ""}
+                {g.label} · {g.permission}
+                <button className="btn sm" onClick={() => revoke(g)}>×</button>
+              </code>
+            ))}
+          </div>
+        )}
+      <div className="ds-radios" style={{ marginTop: 6 }}>
+        {(["environment", "role", "user"] as const).map((k) => (
+          <label key={k} className={`ds-radio ${targetKind === k ? "on" : ""}`}>
+            <input type="radio" checked={targetKind === k} onChange={() => setTargetKind(k)} />
+            <span>{k === "environment" ? "Environnement" : k === "role" ? "Rôle" : "Personne"}</span>
+          </label>
+        ))}
+      </div>
+      <div className="ds-field">
+        {targetKind === "user" && (
+          <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="email" />
+        )}
+        {targetKind === "role" && (
+          <select value={role} onChange={(e) => setRole(e.target.value)}>
+            {["viewer", "operator", "editor", "admin"].map((r) => <option key={r} value={r}>{r}</option>)}
+          </select>
+        )}
+        {targetKind === "environment" && (
+          <select value={env} onChange={(e) => setEnv(e.target.value)}>
+            {envs.map((e) => <option key={e} value={e}>{e}</option>)}
+          </select>
+        )}
+        <select value={permission} onChange={(e) => setPermission(e.target.value as typeof permission)}>
+          <option value="read">lecture</option>
+          <option value="write">écriture</option>
+          <option value="manage">gestion</option>
+        </select>
+        <button className="btn sm primary" onClick={share}>Partager</button>
+      </div>
+    </div>
+  );
+}
+
 function DatasetList({ datasets, openId, setOpenId, rows, setRows, writes, setWrites, refresh, notify, onOpenSession }: {
   datasets: DatasetInfo[]; openId: string; setOpenId: (s: string) => void;
   rows: TablePreview | null; setRows: (t: TablePreview | null) => void;
@@ -332,6 +426,8 @@ function DatasetList({ datasets, openId, setOpenId, rows, setRows, writes, setWr
   refresh: () => Promise<void>; notify: Props["notify"];
   onOpenSession?: Props["onOpenSession"];
 }) {
+  const [shareId, setShareId] = useState("");
+
   const open = async (d: DatasetInfo) => {
     if (openId === d.id) { setOpenId(""); setRows(null); return; }
     try {
@@ -360,11 +456,15 @@ function DatasetList({ datasets, openId, setOpenId, rows, setRows, writes, setWr
                         catch (e) { notify(e instanceof Error ? e.message : String(e), "err"); }
                       }}>Ouvrir dans Data</button>
             )}
+            <button className="btn sm" onClick={() => setShareId(shareId === d.id ? "" : d.id)}>
+              {shareId === d.id ? "Fermer le partage" : "Partager"}
+            </button>
             <button className="btn sm" onClick={async () => {
               await api.archiveDataset(d.id); await refresh();
               notify(`Table « ${d.name} » archivée.`, "ok");
             }}>Archiver</button>
           </div>
+          {shareId === d.id && <ShareForm dataset={d} notify={notify} />}
           {openId === d.id && rows && (
             <>
               <MiniGrid p={rows} />

@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { AvailableVariable, ComputedColumn, DatasetInfo, SourceInfo, StyleRule } from "../lib/types";
+import type { AvailableVariable, ComputedColumn, DatasetInfo, SourceInfo, StyleRule, VariableSchema } from "../lib/types";
 import { api } from "../lib/api";
 import type { ArtefactInfo } from "../lib/types";
 import { IconCode, IconReset, IconUpload, IconDownload } from "../lib/icons";
+import { InfoTip } from "./InfoTip";
 
 interface Props {
   sid: string | null;
@@ -290,13 +291,27 @@ export function ComputedPanel({ sid, columns, computed, setComputed, sqlComputed
   const [dbName, setDbName] = useState("");
   const [dbQuery, setDbQuery] = useState("");
   const [dbParams, setDbParams] = useState<{ key: string; value: string }[]>([]);
+  const [dbSchemas, setDbSchemas] = useState<VariableSchema[]>([]);
+  const [dbSchemaName, setDbSchemaName] = useState("");
   const dbConnections = available.filter((v) => v.kind === "external_db");
+
+  const pickDbConn = async (name: string) => {
+    setDbConn(name); setDbSchemaName(""); setDbSchemas([]);
+    const v = dbConnections.find((c) => c.name === name);
+    if (!v) return;
+    try { setDbSchemas(await api.listConnectionSchemas(v.id)); } catch { setDbSchemas([]); }
+  };
+  const pickDbSchemaName = (name: string) => {
+    setDbSchemaName(name);
+    const sc = dbSchemas.find((s) => s.name === name);
+    if (sc) setDbQuery(`SELECT ${sc.columns.map((c) => c.name).join(", ") || "*"} FROM ${name}`);
+  };
 
   const attachExternalDb = async () => {
     if (!sid || !dbName.trim() || !dbConn || !dbQuery.trim()) return;
     const params = Object.fromEntries(dbParams.filter((p) => p.key.trim()).map((p) => [p.key.trim(), p.value]));
     try {
-      await api.attachExternalDbSource(sid, dbName.trim(), dbConn, dbQuery.trim(), params);
+      await api.attachExternalDbSource(sid, dbName.trim(), dbConn, dbQuery.trim(), params, dbSchemaName || undefined);
       setDbName(""); setDbQuery(""); setDbParams([]);
       refreshSources();
       notify(`Source « ${dbName.trim()} » attachée.`, "ok");
@@ -311,7 +326,21 @@ export function ComputedPanel({ sid, columns, computed, setComputed, sqlComputed
   const [apiResponseKind, setApiResponseKind] = useState<"json" | "csv" | "xlsx">("json");
   const [apiDataPath, setApiDataPath] = useState("");
   const [apiBody, setApiBody] = useState("");
+  const [apiSchemas, setApiSchemas] = useState<VariableSchema[]>([]);
+  const [apiSchemaName, setApiSchemaName] = useState("");
   const apiConnections = available.filter((v) => v.kind === "api");
+
+  const pickApiConn = async (name: string) => {
+    setApiConn(name); setApiSchemaName(""); setApiSchemas([]);
+    const v = apiConnections.find((c) => c.name === name);
+    if (!v) return;
+    try { setApiSchemas(await api.listConnectionSchemas(v.id)); } catch { setApiSchemas([]); }
+  };
+  const pickApiSchemaName = (name: string) => {
+    setApiSchemaName(name);
+    const sc = apiSchemas.find((s) => s.name === name);
+    if (sc) { setApiPath(sc.path ?? ""); setApiMethod(sc.method ?? "GET"); setApiDataPath(sc.data_path ?? ""); }
+  };
 
   const attachApi = async () => {
     if (!sid || !apiName.trim() || !apiConn) return;
@@ -322,7 +351,7 @@ export function ComputedPanel({ sid, columns, computed, setComputed, sqlComputed
     }
     try {
       await api.attachApiSource(sid, apiName.trim(), apiConn, apiPath, apiMethod,
-        apiResponseKind, apiDataPath, body);
+        apiResponseKind, apiDataPath, body, apiSchemaName || undefined);
       setApiName(""); setApiPath(""); setApiDataPath(""); setApiBody("");
       refreshSources();
       notify(`Source « ${apiName.trim()} » attachée.`, "ok");
@@ -492,7 +521,13 @@ export function ComputedPanel({ sid, columns, computed, setComputed, sqlComputed
 
         {tab === "columns" && (
           <div className="tab-panel">
-            <p className="hint">Dérivez de nouvelles colonnes à partir des colonnes existantes. Appliqué sur les valeurs nettoyées lors d'une validation.</p>
+            <p className="hint">Dérivez de nouvelles colonnes à partir des colonnes existantes. Appliqué sur les valeurs nettoyées lors d'une validation.
+              <InfoTip>
+                <p><b>À quoi ça sert</b> — créer une colonne dont la valeur dépend d'autres colonnes (concaténation, condition, calcul…).</p>
+                <p><b>Comment faire</b> — « Ajouter une colonne », nommez-la, écrivez une expression avec <code>[nom_colonne]</code>. Cliquez une colonne dans la barre du bas pour l'insérer sans la taper.</p>
+                <p><b>Ce qu'il faut</b> — rien de particulier : ça marche dès qu'un fichier est chargé.</p>
+              </InfoTip>
+            </p>
             <div className="filterbar">
               <button className="btn primary sm" onClick={() => add()}><IconCode size={14} /> Ajouter une colonne</button>
               {TEMPLATES.map((t) => (
@@ -579,6 +614,11 @@ export function ComputedPanel({ sid, columns, computed, setComputed, sqlComputed
               Requêtes DuckDB contre <code>self</code> (cette session, colonne <code>_row_id</code> incluse) et les
               sources attachées — jointures, fenêtres, agrégations que les colonnes calculées ne peuvent pas faire.
               Le résultat doit renvoyer <code>_row_id</code> ; sans lui, la requête est refusée.
+              <InfoTip>
+                <p><b>À quoi ça sert</b> — croiser cette session avec une autre table, un fichier ou une base externe pour compléter ou remplacer des valeurs.</p>
+                <p><b>Comment faire</b> — écrivez une requête SQL (DuckDB) ; <code>self</code> désigne la session courante. « Remplacer » écrase la colonne, « Compléter le vide » ne touche que les cellules vides.</p>
+                <p><b>Ce qu'il faut</b> — au moins une source attachée dans l'onglet « Sources » pour joindre autre chose que la session elle-même.</p>
+              </InfoTip>
             </p>
             <div className="filterbar">
               <button className="btn primary sm" onClick={addSql}><IconCode size={14} /> Ajouter un bloc SQL</button>
@@ -605,6 +645,11 @@ export function ComputedPanel({ sid, columns, computed, setComputed, sqlComputed
               une condition simple avec <code>STYLE(color, bold, italic)</code>, ou une requête
               multi-source (même préfixe SELECT/WITH que le SQL avancé) renvoyant directement une
               couleur.
+              <InfoTip>
+                <p><b>À quoi ça sert</b> — mettre en évidence des lignes selon une condition (ex. colorer en orange un âge mineur), sans changer la donnée.</p>
+                <p><b>Comment faire</b> — choisissez la colonne à styler, écrivez <code>IF(condition, STYLE("couleur", "1"), STYLE())</code> ; ou une requête SQL renvoyant juste une couleur.</p>
+                <p><b>Ce qu'il faut</b> — la colonne visée doit déjà exister dans le fichier.</p>
+              </InfoTip>
             </p>
             <div className="filterbar">
               <button className="btn primary sm" onClick={addStyleRule}><IconCode size={14} /> Ajouter une règle</button>
@@ -626,7 +671,13 @@ export function ComputedPanel({ sid, columns, computed, setComputed, sqlComputed
 
         {tab === "sources" && (
           <div className="tab-panel">
-            <p className="hint">Une table interne ou un fichier, croisé avec cette session dans une requête SQL ou une règle de mise en forme — sans construire de flux.</p>
+            <p className="hint">Une table interne ou un fichier, croisé avec cette session dans une requête SQL ou une règle de mise en forme — sans construire de flux.
+              <InfoTip>
+                <p><b>À quoi ça sert</b> — donner au SQL avancé et à la mise en forme une autre table à joindre, sans construire un flux visuel.</p>
+                <p><b>Comment faire</b> — choisissez un type (table interne, fichier, base externe, API), donnez un nom : c'est ce nom qui sert dans vos requêtes (<code>FROM self LEFT JOIN nom ...</code>).</p>
+                <p><b>Ce qu'il faut</b> — pour une base externe ou une API, un point de connexion doit déjà exister dans Exploitation → Référentiel.</p>
+              </InfoTip>
+            </p>
             {!sid ? (
               <div className="banner"><span>Chargez d'abord une session.</span></div>
             ) : (
@@ -669,14 +720,30 @@ export function ComputedPanel({ sid, columns, computed, setComputed, sqlComputed
                 </div>
                 <div className="flowform">
                   <div className="frow"><label>Connexion</label>
-                    <select value={dbConn} onChange={(e) => setDbConn(e.target.value)}>
+                    <select value={dbConn} onChange={(e) => pickDbConn(e.target.value)}>
                       <option value="">— choisir —</option>
                       {dbConnections.map((v) => <option key={v.name} value={v.name}>{v.name}</option>)}
                     </select></div>
                   <div className="frow"><label>Nom de la source</label>
                     <input className="mono-input" value={dbName} placeholder="ex. clients_externe"
                       onChange={(e) => setDbName(e.target.value.replace(/\s+/g, "_"))} /></div>
+                  {dbConn && (
+                    <div className="frow"><label>Schéma connu</label>
+                      <select value={dbSchemaName} onChange={(e) => pickDbSchemaName(e.target.value)}>
+                        <option value="">— requête libre —</option>
+                        {dbSchemas.map((s) => <option key={s.name} value={s.name}>{s.name}</option>)}
+                      </select></div>
+                  )}
                 </div>
+                {dbSchemaName && (
+                  <div className="chipbar">
+                    <span className="chiplabel">insérer une colonne :</span>
+                    {(dbSchemas.find((s) => s.name === dbSchemaName)?.columns ?? []).map((c) => (
+                      <button key={c.name} type="button" className="microchip"
+                        onClick={() => setDbQuery((q) => q + c.name)}>{c.name}</button>
+                    ))}
+                  </div>
+                )}
                 <textarea className="mono-input" rows={3} style={{ width: "100%", marginTop: 6 }}
                   placeholder="SELECT * FROM clients WHERE pays = :pays"
                   value={dbQuery} onChange={(e) => setDbQuery(e.target.value)} />
@@ -703,13 +770,20 @@ export function ComputedPanel({ sid, columns, computed, setComputed, sqlComputed
                 </div>
                 <div className="flowform">
                   <div className="frow"><label>Connexion</label>
-                    <select value={apiConn} onChange={(e) => setApiConn(e.target.value)}>
+                    <select value={apiConn} onChange={(e) => pickApiConn(e.target.value)}>
                       <option value="">— choisir —</option>
                       {apiConnections.map((v) => <option key={v.name} value={v.name}>{v.name}</option>)}
                     </select></div>
                   <div className="frow"><label>Nom de la source</label>
                     <input className="mono-input" value={apiName} placeholder="ex. commandes_api"
                       onChange={(e) => setApiName(e.target.value.replace(/\s+/g, "_"))} /></div>
+                  {apiConn && (
+                    <div className="frow"><label>Endpoint connu</label>
+                      <select value={apiSchemaName} onChange={(e) => pickApiSchemaName(e.target.value)}>
+                        <option value="">— chemin libre —</option>
+                        {apiSchemas.map((s) => <option key={s.name} value={s.name}>{s.name}</option>)}
+                      </select></div>
+                  )}
                   <div className="frow"><label>Chemin</label>
                     <input value={apiPath} placeholder="orders" onChange={(e) => setApiPath(e.target.value)} /></div>
                   <div className="frow"><label>Méthode</label>
@@ -746,7 +820,13 @@ export function ComputedPanel({ sid, columns, computed, setComputed, sqlComputed
 
         {tab === "library" && (
           <div className="tab-panel">
-            <p className="hint">Enregistre cet ensemble côté serveur, versionné — réutilisable dans un flux.</p>
+            <p className="hint">Enregistre cet ensemble côté serveur, versionné — réutilisable dans un flux.
+              <InfoTip>
+                <p><b>À quoi ça sert</b> — réutiliser le même ensemble de colonnes calculées, blocs SQL et règles de mise en forme dans une autre session ou un flux.</p>
+                <p><b>Comment faire</b> — donnez un nom et « Enregistrer » (ou choisissez un ensemble existant pour l'enregistrer comme nouvelle version). « Charger » remplace les colonnes/règles actuelles.</p>
+                <p><b>Ce qu'il faut</b> — au moins une colonne calculée, un bloc SQL ou une règle valide.</p>
+              </InfoTip>
+            </p>
             <div className="flowform">
               <div className="frow"><label>Enregistrer sous</label>
                 <select value={saveTarget} onChange={(e) => setSaveTarget(e.target.value)}>

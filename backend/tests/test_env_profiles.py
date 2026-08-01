@@ -144,6 +144,24 @@ def test_a_row_without_a_target_is_refused():
     assert "MME" in r.json()["detail"]
 
 
+def test_extending_a_comma_delimited_correspondence_table_keeps_old_rows():
+    """The table builder (frontend) writes comma-separated CSV, while an older
+    upload may be semicolon-separated — appending must not assume either and
+    must not silently drop the existing rows into a mis-split column."""
+    tco = client.post("/api/artefacts/tco",
+                      json={"name": "corr-comma", "environment": "rh",
+                            "csv": "SOURCE_VALUE,TARGET_LABEL\nMR,MASCULIN\n"}).json()
+    r = client.post("/api/environments/tco/append", json={
+        "artefact_id": tco["id"],
+        "rows": [{"TYPE": "", "SOURCE_VALUE": "MME", "TARGET_LABEL": "FEMININ"}]})
+    assert r.status_code == 200, r.text
+    assert r.json()["version_no"] == 2
+    assert r.json()["rows"] == 2                     # old row preserved, not lost
+
+    v2 = client.get(f"/api/artefacts/tco/{tco['id']}/versions/2").json()
+    assert "MR" in v2["body"]["csv"] and "MASCULIN" in v2["body"]["csv"]
+
+
 def test_a_correspondence_table_can_carry_a_type_column():
     """One table then serves several fields instead of one table per field."""
     from app.services.tco_service import TcoService

@@ -272,6 +272,35 @@ export default function App() {
     }
   }, [adoptSession, toast]);
 
+  /** Start a session directly from an external SQL query or an API call,
+   *  reusing a connection declared in the référentiel — same "server built
+   *  a session, activate it" shape as startBlank. */
+  const startExternalDb = useCallback(async (
+    connection: string, query: string, params: Record<string, string>,
+    schemaName: string | undefined, label: string,
+  ) => {
+    try {
+      const res = await api.createSessionFromExternalDb(connection, query, params, schemaName);
+      adoptSession(res, label);
+      toast("Session démarrée depuis la source SQL externe.", "ok");
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Impossible de démarrer la session.", "err");
+    }
+  }, [adoptSession, toast]);
+
+  const startApi = useCallback(async (
+    connection: string, path: string, method: string, responseKind: string,
+    dataPath: string, schemaName: string | undefined, label: string,
+  ) => {
+    try {
+      const res = await api.createSessionFromApi(connection, path, method, responseKind, dataPath, schemaName);
+      adoptSession(res, label);
+      toast("Session démarrée depuis la source API.", "ok");
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Impossible de démarrer la session.", "err");
+    }
+  }, [adoptSession, toast]);
+
   const changeSheet = useCallback((name: string) => {
     if (rawFileRef.current) onUpload(rawFileRef.current, { sheet: name });
   }, [onUpload]);
@@ -811,6 +840,8 @@ export default function App() {
                 delimiterKey={delimiterKey} setDelimiterKey={setDelimiterKey}
                 onUpload={onUpload}
                 onStartBlank={startBlank}
+                onStartExternalDb={startExternalDb}
+                onStartApi={startApi}
                 onGoTab={(t) => setTab(t as Tab)}
                 canChooseConfig={!configImposed && may("config.write")}
               />

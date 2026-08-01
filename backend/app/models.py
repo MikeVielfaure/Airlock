@@ -128,6 +128,7 @@ class AttachExternalDbSource(BaseModel):
     connection: str          # référentiel variable name, kind "external_db"
     query: str
     params: Dict[str, str] = Field(default_factory=dict)
+    schema_name: Optional[str] = None   # a known table declared on this connection, if any
 
 
 class AttachApiSource(BaseModel):
@@ -138,6 +139,24 @@ class AttachApiSource(BaseModel):
     body: Optional[dict] = None
     response_kind: str = "json"   # json | csv | xlsx
     data_path: str = ""           # dot path into the JSON payload — only when response_kind == "json"
+    schema_name: Optional[str] = None   # a known endpoint declared on this connection, if any
+
+
+class ExternalDbSessionRequest(BaseModel):
+    connection: str
+    query: str
+    params: Dict[str, str] = Field(default_factory=dict)
+    schema_name: Optional[str] = None
+
+
+class ApiSessionRequest(BaseModel):
+    connection: str
+    path: str = ""
+    method: str = "GET"
+    body: Optional[dict] = None
+    response_kind: str = "json"
+    data_path: str = ""
+    schema_name: Optional[str] = None
 
 
 class ExportRequest(BaseModel):

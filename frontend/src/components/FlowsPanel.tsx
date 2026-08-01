@@ -2,6 +2,47 @@ import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../lib/api";
 import type { ArtefactInfo, FlowInfo, ReportRow, RunInfo } from "../lib/types";
 import { IconLayers, IconPlay, IconReset } from "../lib/icons";
+import { InfoTip } from "./InfoTip";
+
+/** Split one CSV line into cells, honouring double-quoted values (with ""
+ * as an escaped quote) — enough for the short, single-line cells a TCO
+ * table holds; embedded newlines inside a quoted cell are not supported. */
+function parseCsvLine(line: string): string[] {
+  const out: string[] = [];
+  let cur = "", inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (inQuotes) {
+      if (c === '"') {
+        if (line[i + 1] === '"') { cur += '"'; i++; } else { inQuotes = false; }
+      } else cur += c;
+    } else if (c === '"') inQuotes = true;
+    else if (c === ",") { out.push(cur); cur = ""; }
+    else cur += c;
+  }
+  out.push(cur);
+  return out;
+}
+
+function csvEscape(v: string): string {
+  return /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
+}
+
+type TcoRow = { type: string; source: string; target: string };
+
+/** TYPE is only emitted when at least one row uses it, so a plain
+ * two-column TCO stays exactly as simple as before. */
+function tcoRowsToCsv(rows: TcoRow[]): string {
+  const useType = rows.some((r) => r.type.trim());
+  const header = useType ? ["TYPE", "SOURCE_VALUE", "TARGET_LABEL"] : ["SOURCE_VALUE", "TARGET_LABEL"];
+  const lines = [header.join(",")];
+  for (const r of rows) {
+    if (!r.source.trim() && !r.target.trim()) continue;
+    const cells = useType ? [r.type, r.source, r.target] : [r.source, r.target];
+    lines.push(cells.map(csvEscape).join(","));
+  }
+  return lines.join("\n");
+}
 
 interface Props {
   notify: (msg: string, kind?: "ok" | "err" | "info") => void;
@@ -53,6 +94,9 @@ export function FlowsPanel({ notify, onOpenReport }: Props) {
   // tco mini-form
   const [tcoName, setTcoName] = useState("");
   const tcoFileRef = useRef<HTMLInputElement>(null);
+  const [tcoMode, setTcoMode] = useState<"build" | "upload">("build");
+  const [tcoTarget, setTcoTarget] = useState("");
+  const [tcoRows, setTcoRows] = useState<TcoRow[]>([{ type: "", source: "", target: "" }]);
 
   // run state
   const [runningFlow, setRunningFlow] = useState<string | null>(null);
@@ -101,6 +145,59 @@ export function FlowsPanel({ notify, onOpenReport }: Props) {
       await api.createArtefact("tco", { name: tcoName.trim(), csv });
       setTcoName(""); if (tcoFileRef.current) tcoFileRef.current.value = "";
       notify("TCO enregistré dans la bibliothèque.", "ok");
+      refresh();
+    } catch (e) { notify(e instanceof Error ? e.message : "Échec de l'enregistrement du TCO.", "err"); }
+  };
+
+  const addTcoRow = () => setTcoRows([...tcoRows, { type: "", source: "", target: "" }]);
+  const removeTcoRow = (i: number) => setTcoRows(tcoRows.filter((_, j) => j !== i));
+  const setTcoRow = (i: number, patch: Partial<TcoRow>) =>
+    setTcoRows(tcoRows.map((r, j) => (j === i ? { ...r, ...patch } : r)));
+
+  /** Picking an existing TCO loads its latest CSV back into rows — editing
+   * it and saving adds a version, it never overwrites the one being edited. */
+  const loadTcoForEdit = async (id: string) => {
+    setTcoTarget(id);
+    if (!id) { setTcoRows([{ type: "", source: "", target: "" }]); return; }
+    const a = tcos.find((t) => t.id === id);
+    if (!a) return;
+    try {
+      const v = await api.getArtefactVersion("tco", id, a.latest_version_no);
+      const csv = String((v.body as { csv?: string }).csv ?? "");
+      const lines = csv.split(/\r?\n/).filter((l) => l.trim());
+      if (lines.length < 2) { setTcoRows([{ type: "", source: "", target: "" }]); return; }
+      const header = parseCsvLine(lines[0]).map((h) => h.trim().toUpperCase());
+      const iType = header.indexOf("TYPE");
+      const iSrc = header.findIndex((h) => ["SOURCE_VALUE", "SOURCE"].includes(h));
+      const iTgt = header.findIndex((h) => ["TARGET_LABEL", "TARGET", "LABEL"].includes(h));
+      const rows = lines.slice(1).map((l) => {
+        const cells = parseCsvLine(l);
+        return {
+          type: iType >= 0 ? (cells[iType] ?? "") : "",
+          source: iSrc >= 0 ? (cells[iSrc] ?? "") : "",
+          target: iTgt >= 0 ? (cells[iTgt] ?? "") : "",
+        };
+      });
+      setTcoRows(rows.length ? rows : [{ type: "", source: "", target: "" }]);
+    } catch (e) { notify(e instanceof Error ? e.message : "Échec du chargement du TCO.", "err"); }
+  };
+
+  const saveTcoTable = async () => {
+    const valid = tcoRows.filter((r) => r.source.trim() && r.target.trim());
+    if (!valid.length) { notify("Ajoutez au moins une ligne avec une valeur source et un label cible.", "err"); return; }
+    const csv = tcoRowsToCsv(tcoRows);
+    try {
+      if (tcoTarget) {
+        const a = await api.addArtefactVersion("tco", tcoTarget, { csv });
+        notify(`TCO mis à jour — nouvelle version v${a.latest_version_no}.`, "ok");
+      } else {
+        if (!tcoName.trim()) { notify("Donnez un nom à ce TCO.", "err"); return; }
+        await api.createArtefact("tco", { name: tcoName.trim(), csv });
+        notify(`TCO « ${tcoName.trim()} » enregistré dans la bibliothèque.`, "ok");
+        setTcoName("");
+      }
+      setTcoRows([{ type: "", source: "", target: "" }]);
+      setTcoTarget("");
       refresh();
     } catch (e) { notify(e instanceof Error ? e.message : "Échec de l'enregistrement du TCO.", "err"); }
   };
@@ -312,13 +409,68 @@ export function FlowsPanel({ notify, onOpenReport }: Props) {
               );
             })}
           </div>
-          <div className="flowform" style={{ marginTop: 12 }}>
-            <div className="frow"><label>Nom du nouveau TCO</label>
-              <input value={tcoName} onChange={(e) => setTcoName(e.target.value)} placeholder="ex. civilites" /></div>
-            <div className="frow"><label>Fichier CSV</label>
-              <input type="file" ref={tcoFileRef} accept=".csv,.txt" /></div>
-            <button className="btn" onClick={saveTco}>Enregistrer le TCO dans la bibliothèque</button>
+          <div className="sec-h" style={{ marginTop: 12 }}>
+            <h3 style={{ fontSize: 14 }}>Table de correspondance (TCO)</h3>
+            <span className="sub">Une valeur source (ex. « M ») mappée vers un label cible (ex. « MASCULIN »), utilisée par le mapping des champs.
+              <InfoTip>
+                <p><b>À quoi ça sert</b> — un TCO vérifie qu'une valeur de champ correspond bien au label attendu (le mapping configuré sur le champ), au lieu de laisser passer n'importe quelle valeur.</p>
+                <p><b>Comment faire</b> — construisez le tableau ligne par ligne (valeur source → label cible), ou importez un CSV déjà prêt. La colonne « Type » est optionnelle : renseignez-la si une même table sert plusieurs champs (ex. CIVILITE et PAYS dans le même fichier).</p>
+                <p><b>Ce qu'il faut</b> — au moins une ligne avec une valeur source et un label cible. Enregistrer ajoute une nouvelle version si vous avez choisi un TCO existant — l'ancienne version reste inchangée.</p>
+              </InfoTip>
+            </span>
           </div>
+          <div className="filterbar">
+            <button className={`btn sm ${tcoMode === "build" ? "primary" : ""}`} onClick={() => setTcoMode("build")}>
+              Construire un tableau
+            </button>
+            <button className={`btn sm ${tcoMode === "upload" ? "primary" : ""}`} onClick={() => setTcoMode("upload")}>
+              Importer un fichier CSV
+            </button>
+          </div>
+
+          {tcoMode === "build" ? (
+            <div className="flowform" style={{ marginTop: 8 }}>
+              <div className="frow"><label>Ajouter une version à</label>
+                <select value={tcoTarget} onChange={(e) => loadTcoForEdit(e.target.value)}>
+                  <option value="">— nouveau TCO —</option>
+                  {tcos.map((t) => <option key={t.id} value={t.id}>{t.name} (v{t.latest_version_no})</option>)}
+                </select></div>
+              {!tcoTarget && (
+                <div className="frow"><label>Nom du nouveau TCO</label>
+                  <input value={tcoName} onChange={(e) => setTcoName(e.target.value)} placeholder="ex. civilites" /></div>
+              )}
+              <table className="grid" style={{ marginTop: 8, width: "100%" }}>
+                <thead><tr><th>Type (optionnel)</th><th>Valeur source</th><th>Label cible</th><th></th></tr></thead>
+                <tbody>
+                  {tcoRows.map((r, i) => (
+                    <tr key={i}>
+                      <td><input className="mono-input" value={r.type} placeholder="ex. CIVILITE"
+                        onChange={(e) => setTcoRow(i, { type: e.target.value })} /></td>
+                      <td><input className="mono-input" value={r.source} placeholder="ex. M"
+                        onChange={(e) => setTcoRow(i, { source: e.target.value })} /></td>
+                      <td><input className="mono-input" value={r.target} placeholder="ex. MASCULIN"
+                        onChange={(e) => setTcoRow(i, { target: e.target.value })} /></td>
+                      <td><button className="hclear" onClick={() => removeTcoRow(i)}>×</button></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <div className="filterbar" style={{ marginTop: 6 }}>
+                <button className="btn sm" onClick={addTcoRow}>+ ligne</button>
+                <button className="btn primary" onClick={saveTcoTable}>
+                  {tcoTarget ? "Enregistrer comme nouvelle version" : "Enregistrer le TCO dans la bibliothèque"}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="flowform" style={{ marginTop: 8 }}>
+              <div className="frow"><label>Nom du nouveau TCO</label>
+                <input value={tcoName} onChange={(e) => setTcoName(e.target.value)} placeholder="ex. civilites" /></div>
+              <div className="frow"><label>Fichier CSV</label>
+                <input type="file" ref={tcoFileRef} accept=".csv,.txt" /></div>
+              <button className="btn" onClick={saveTco}>Enregistrer le TCO dans la bibliothèque</button>
+            </div>
+          )}
         </>
       )}
     </div>

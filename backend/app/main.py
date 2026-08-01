@@ -28,7 +28,7 @@ from app.models import (
     FieldConfig, FileResponse, HeaderRequest, ImportRequest, ImportResponse,
     MatchInfo, Presets, ProcessRequest, ProcessResponse, ProcessStats, RowsResponse, TablePreview, TcoResponse,
     PipelineResponse, SourceInfo, AttachDatasetSource, ReorderRowRequest,
-    AttachExternalDbSource, AttachApiSource,
+    AttachExternalDbSource, AttachApiSource, ExternalDbSessionRequest, ApiSessionRequest,
 )
 from app.services.config_service import ConfigService
 from app.services.file_service import FileService
@@ -301,6 +301,7 @@ async def upload_file(
     table_index: int = Form(0),
     table_header_mode: str = Form("local"),
     preview_limit: int = Form(500),
+    _cap=Depends(require_capability("file.upload")),
 ):
     raw = await file.read()
     if not raw:
@@ -360,6 +361,28 @@ async def upload_file(
 # Attached sources — extra frames a session can cross-reference in SQL
 # ══════════════════════════════════════════════════════════════════════
 MAX_SOURCE_ROWS = 200_000    # a source lives in memory next to the session
+
+
+def _check_declared_schema(s: DbSession, connection: str, scope: str,
+                           schema_name: Optional[str], df: pd.DataFrame) -> None:
+    """A declared schema is a contract: a column it names but the result
+    doesn't have, or a value that doesn't match the declared type, refuses
+    the source (422) — never a silent partial accept. No `schema_name`, or
+    no schema found under that name, is simply unchecked: declaring one is
+    opt-in, never required to use a connection at all."""
+    if not schema_name:
+        return
+    from app.services import schema_check
+    row = repo.resolve_variable_rows(s, environment=scope).get(connection)
+    if row is None:
+        return
+    schema = repo.get_variable_schema(s, row.id, schema_name)
+    if schema is None:
+        return
+    try:
+        schema_check.validate_against_schema(df, schema.schema_json)
+    except ValueError as e:
+        raise HTTPException(422, str(e))
 
 
 @app.get("/api/files/{sid}/sources", response_model=list[SourceInfo])
@@ -466,6 +489,7 @@ def attach_external_db_source(sid: str, req: AttachExternalDbSource, env: str = 
     except Exception as e:  # noqa: BLE001 — surface the query failure to the client
         raise HTTPException(422, f"Échec de la requête : {e}")
 
+    _check_declared_schema(s, req.connection, scope, req.schema_name, df)
     sess.attached[name] = df
     return SourceInfo(name=name, columns=list(df.columns), row_count=int(len(df)))
 
@@ -539,6 +563,7 @@ def attach_api_source(sid: str, req: AttachApiSource, env: str = "",
     if len(df) > MAX_SOURCE_ROWS:
         raise HTTPException(413, f"La réponse contient plus de {MAX_SOURCE_ROWS} lignes.")
 
+    _check_declared_schema(s, req.connection, scope, req.schema_name, df)
     sess.attached[name] = df
     return SourceInfo(name=name, columns=list(df.columns), row_count=int(len(df)))
 
@@ -678,6 +703,116 @@ def create_blank_session(req: BlankSessionRequest):
         preview=_preview(store.get(sid).active_df(), 500),
         seeded_fields=seeded_fields or None,
     )
+
+
+@app.post("/api/files/from-external-db", response_model=FileResponse)
+def create_session_from_external_db(req: ExternalDbSessionRequest, env: str = "",
+        _cap=Depends(require_capability("file.upload")),
+        s: DbSession = Depends(get_session)):
+    """
+    Start a session directly from a read-only, parameter-bound query against
+    a saved BDD externe connection — the same doorway a CSV upload is,
+    alongside it in Schéma & Règles rather than a second concept. Reuses
+    `external_db.run_query`, exactly what an attached source and the
+    `external_db` flow brick already call.
+    """
+    from app.services import connections, external_db
+
+    query = req.query.strip()
+    if not query:
+        raise HTTPException(422, "La requête ne peut pas être vide.")
+
+    scope = env or repo.DEFAULT_ENV
+    values = repo.resolve_variables(s, environment=scope)
+    kinds = repo.resolve_variable_kinds(s, environment=scope)
+    try:
+        conn = connections.parse_connection(
+            req.connection, values.get(req.connection), kinds.get(req.connection), "external_db")
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+    url = conn.get("url")
+    if not url:
+        raise HTTPException(422, f"La connexion « {req.connection} » n'a pas d'URL.")
+
+    try:
+        df = external_db.run_query(url, query, req.params, MAX_SOURCE_ROWS)
+    except external_db.QueryTooLarge as e:
+        raise HTTPException(413, str(e))
+    except Exception as e:  # noqa: BLE001 — surface the query failure to the client
+        raise HTTPException(422, f"Échec de la requête : {e}")
+
+    _check_declared_schema(s, req.connection, scope, req.schema_name, df)
+    sid = store.create(df, file_type="SQL", encoding="N/A", delimiter="N/A")
+    return FileResponse(session_id=sid, type="SQL", encoding="N/A", delimiter="N/A",
+                        preview=_preview(df, 150))
+
+
+@app.post("/api/files/from-api", response_model=FileResponse)
+def create_session_from_api(req: ApiSessionRequest, env: str = "",
+        _cap=Depends(require_capability("file.upload")),
+        s: DbSession = Depends(get_session)):
+    """
+    Start a session directly from a saved API connection's answer — data
+    (JSON, walked to `data_path`) or a file (CSV/XLSX), chosen explicitly by
+    `response_kind` exactly like the attached-source counterpart.
+    """
+    from app.services import api_source, connections
+
+    scope = env or repo.DEFAULT_ENV
+    values = repo.resolve_variables(s, environment=scope)
+    kinds = repo.resolve_variable_kinds(s, environment=scope)
+    try:
+        conn = connections.parse_connection(
+            req.connection, values.get(req.connection), kinds.get(req.connection), "api")
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+
+    base = (conn.get("base_url") or "").rstrip("/")
+    rel = req.path.lstrip("/")
+    url = f"{base}/{rel}" if rel else base
+    if not url:
+        raise HTTPException(422, f"La connexion « {req.connection} » n'a pas de base_url.")
+    headers = {}
+    if conn.get("token"):
+        headers[conn.get("auth_header") or "Authorization"] = conn["token"]
+
+    try:
+        raw, _status = api_source.call(url, req.method.upper(), headers, req.body, 20.0)
+    except api_source.ApiCallError as e:
+        raise HTTPException(422, str(e))
+
+    try:
+        if req.response_kind == "xlsx":
+            df = _files.load_xlsx_raw(raw, sheet=0)
+        elif req.response_kind == "csv":
+            df, _enc, _delim = _files.load_csv_raw(raw, _AUTO, None)
+        else:
+            payload = json.loads(raw)
+            payload = api_source.walk_json_path(payload, req.data_path)
+            if payload is None:
+                payload = []
+            if isinstance(payload, dict):
+                payload = [payload]
+            if not isinstance(payload, list):
+                raise HTTPException(422, "La réponse JSON n'est ni une liste ni un objet.")
+            rows = [r for r in payload if isinstance(r, dict)]
+            df = pd.DataFrame(rows).astype("string").fillna("") if rows else pd.DataFrame()
+    except api_source.ApiCallError as e:
+        raise HTTPException(422, str(e))
+    except ValueError:
+        raise HTTPException(422, f"{url} n'a pas renvoyé de JSON.")
+    except HTTPException:
+        raise
+    except Exception as e:  # noqa: BLE001 — surface a bad file/response to the client
+        raise HTTPException(422, f"Impossible de lire la réponse : {e}")
+
+    if len(df) > MAX_SOURCE_ROWS:
+        raise HTTPException(413, f"La réponse contient plus de {MAX_SOURCE_ROWS} lignes.")
+
+    _check_declared_schema(s, req.connection, scope, req.schema_name, df)
+    sid = store.create(df, file_type="API", encoding="N/A", delimiter="N/A")
+    return FileResponse(session_id=sid, type="API", encoding="N/A", delimiter="N/A",
+                        preview=_preview(df, 150))
 
 
 def _missing_keys(sensitivity: dict) -> list:
@@ -1200,6 +1335,7 @@ def get_report(
     value: str = "status",               # pivot cell: status | message | final
     fmt: str = "json",                   # json | csv | xlsx
     download: int = 0,
+    _cap=Depends(require_capability("report.read")),
 ):
     """
     Flexible report generation over the last run. The same data can be shaped as:
@@ -1303,6 +1439,7 @@ def export_table(
     delimiter: str = ";",
     filename: str = "export",
     filters: str = "",
+    _cap=Depends(require_capability("file.export")),
 ):
     """
     Export the processed table (or the working table if nothing has been run

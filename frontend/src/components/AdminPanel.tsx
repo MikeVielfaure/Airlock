@@ -4,6 +4,7 @@ import type { AuthUser, EnvProfile } from "../lib/types";
 import {
   IconCheck, IconCode, IconLayers, IconPlay, IconReset, IconSave, IconTable, IconWarn,
 } from "../lib/icons";
+import { InfoTip } from "./InfoTip";
 
 interface Props {
   me: AuthUser | null;
@@ -108,6 +109,11 @@ function Sandbox({ envs, notify, onIdentityChange }: {
         ne peut pas travailler. Ici : on fabrique un compte, on lui donne un rôle,
         on emprunte son identité, on regarde. Un compte d'essai est un vrai
         compte — c'est seulement le chemin qui est court.
+        <InfoTip>
+          <p><b>À quoi ça sert</b> — créer un compte réel, avec mot de passe, rôle et environnement en une seule fois — pas besoin de préparer l'environnement avant, il se crée de fait par l'appartenance.</p>
+          <p><b>Comment faire</b> — email, mot de passe (8 caractères min., « motdepasse1 » par défaut), environnement et rôle, puis « Créer / mettre à jour ». Le même email réutilisé met simplement à jour ce compte.</p>
+          <p><b>Ce qu'il faut</b> — être administrateur général pour utiliser ce raccourci.</p>
+        </InfoTip>
       </p>
 
       <div className="ad-form">
@@ -157,6 +163,8 @@ function Users({ envs, notify }: { envs: string[]; notify: Props["notify"] }) {
   const [members, setMembers] = useState<Member[]>([]);
   const [email, setEmail] = useState("");
   const [role, setRole] = useState("operator");
+  const [pwEdits, setPwEdits] = useState<Record<string, string>>({});
+  const [delConfirm, setDelConfirm] = useState<Record<string, string>>({});
 
   const refresh = useCallback(async () => {
     try { setRows(await api.listUsers()); } catch (e) {
@@ -183,6 +191,7 @@ function Users({ envs, notify }: { envs: string[]; notify: Props["notify"] }) {
               <td>
                 <strong>{u.email}</strong>
                 {u.is_superadmin && <span className="ad-tag">admin général</span>}
+                {!u.active && <span className="ad-tag danger">désactivé</span>}
               </td>
               <td className="ad-chips">
                 {Object.entries(u.environments).map(([e, r]) => (
@@ -191,7 +200,7 @@ function Users({ envs, notify }: { envs: string[]; notify: Props["notify"] }) {
                 {Object.keys(u.environments).length === 0 && <em>aucun</em>}
               </td>
               <td>{u.sso.join(", ") || "—"}</td>
-              <td>
+              <td className="ad-chips">
                 {!u.is_superadmin && (
                   <button className="btn sm" onClick={async () => {
                     try {
@@ -201,6 +210,46 @@ function Users({ envs, notify }: { envs: string[]; notify: Props["notify"] }) {
                     } catch (e) { notify(e instanceof Error ? e.message : String(e), "err"); }
                   }}>Voir comme</button>
                 )}
+                <input type="password" placeholder="nouveau mot de passe" style={{ width: 150 }}
+                       value={pwEdits[u.id] ?? ""}
+                       onChange={(e) => setPwEdits({ ...pwEdits, [u.id]: e.target.value })} />
+                <button className="btn sm" disabled={(pwEdits[u.id] ?? "").length < 8}
+                        onClick={async () => {
+                          try {
+                            await api.setUserPassword(u.id, pwEdits[u.id]);
+                            setPwEdits({ ...pwEdits, [u.id]: "" });
+                            notify(`Mot de passe changé pour ${u.email}.`, "ok");
+                          } catch (e) { notify(e instanceof Error ? e.message : String(e), "err"); }
+                        }}>Changer le mot de passe</button>
+                {u.active ? (
+                  <button className="btn sm" onClick={async () => {
+                    try {
+                      await api.deactivateUser(u.id);
+                      await refresh();
+                      notify(`Compte « ${u.email} » désactivé.`, "ok");
+                    } catch (e) { notify(e instanceof Error ? e.message : String(e), "err"); }
+                  }}>Désactiver</button>
+                ) : (
+                  <button className="btn sm" onClick={async () => {
+                    try {
+                      await api.reactivateUser(u.id);
+                      await refresh();
+                      notify(`Compte « ${u.email} » réactivé.`, "ok");
+                    } catch (e) { notify(e instanceof Error ? e.message : String(e), "err"); }
+                  }}>Réactiver</button>
+                )}
+                <input placeholder={`tapez « ${u.email} » pour supprimer`} style={{ width: 220 }}
+                       value={delConfirm[u.id] ?? ""}
+                       onChange={(e) => setDelConfirm({ ...delConfirm, [u.id]: e.target.value })} />
+                <button className="btn sm danger" disabled={delConfirm[u.id] !== u.email}
+                        onClick={async () => {
+                          try {
+                            await api.deleteUser(u.id, delConfirm[u.id]);
+                            setDelConfirm({ ...delConfirm, [u.id]: "" });
+                            await refresh();
+                            notify(`Compte « ${u.email} » supprimé.`, "ok");
+                          } catch (e) { notify(e instanceof Error ? e.message : String(e), "err"); }
+                        }}>Supprimer</button>
               </td>
             </tr>
           ))}

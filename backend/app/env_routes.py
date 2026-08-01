@@ -24,6 +24,7 @@ from app import repository as repo
 from app.db import commit, get_session
 from app.auth_routes import require_capability, require_user
 from app.db_models import Artefact, CryptoKey, Dataset, EnvironmentProfile
+from app.services.tco_service import TcoService
 
 router = APIRouter(prefix="/api/environments", tags=["environments"])
 
@@ -323,8 +324,17 @@ def append_tco(req: TcoAppendIn, s: Session = Depends(get_session),
         if art.kind != "tco":
             raise HTTPException(409, f"Artefact '{art.name}' is a {art.kind}, not a tco.")
 
-    old = pd.read_csv(pd.io.common.StringIO(existing_csv), sep=";", dtype=str) \
-        if existing_csv.strip() else pd.DataFrame()
+    # The stored CSV's delimiter is whatever it was written with — a comma
+    # from the table builder, a semicolon from an older upload — so it is
+    # re-read through the same auto-detecting parser used everywhere else,
+    # never a hardcoded separator that would silently mis-split one of them.
+    if existing_csv.strip():
+        try:
+            old = TcoService().load_tco(existing_csv.encode("utf-8"))
+        except ValueError as e:
+            raise HTTPException(409, f"Table de correspondance existante illisible : {e}")
+    else:
+        old = pd.DataFrame()
     add = pd.DataFrame([{k: v for k, v in r.items()
                          if k in ("TYPE", "SOURCE_VALUE", "TARGET_LABEL")} for r in rows])
     merged = pd.concat([old, add], ignore_index=True) if len(old) else add

@@ -32,9 +32,21 @@ export interface SourceInfo {
  * calculated column's variable list, or a source-attachment connection
  * select. Secrets never appear here at all. */
 export interface AvailableVariable {
+  id: string;
   name: string;
   kind: string;
   value: string;
+}
+
+/** A known table (BDD externe) or endpoint (API) declared on a connection
+ * point — reusable, and checked: attaching or starting a session against a
+ * schema name refuses (422) if the result doesn't match. */
+export interface VariableSchema {
+  name: string;
+  columns: { name: string; type: string }[];
+  path?: string;
+  method?: string;
+  data_path?: string;
 }
 
 export interface FieldConfig {

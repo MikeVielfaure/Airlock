@@ -28,6 +28,7 @@ from app.db import commit, get_session
 from app.db_models import CryptoKey, KeyHolder, RevealEvent, User
 from app.services import auth_service as auth
 from app.services import crypto_service as crypto
+from app.services import permissions as perms
 
 router = APIRouter(prefix="/api/keys", tags=["confidentiality"])
 
@@ -99,7 +100,7 @@ def create_key(req: KeyIn, scope: str = Depends(current_env),
                user: User = Depends(require_user), s: Session = Depends(get_session)):
     """Create a key. Refuses without a master key rather than storing something
     that only looks protected."""
-    if getattr(user, "id", "") and not auth.can(auth.role_in(s, user, scope), "admin"):
+    if getattr(user, "id", "") and not perms.can(auth.role_in(s, user, scope), "keys.create"):
         raise HTTPException(403, f"Creating a key needs the 'admin' role in '{scope}'.")
     name = (req.name or "").strip()
     if not name:
@@ -235,7 +236,7 @@ def list_reveals(limit: int = 50, scope: str = Depends(current_env),
                  user: User = Depends(require_user), s: Session = Depends(get_session)):
     """Who looked at what. Readable by environment admins — an audit trail only
     its subject can read is not an audit trail."""
-    if getattr(user, "id", "") and not auth.can(auth.role_in(s, user, scope), "admin"):
+    if getattr(user, "id", "") and not perms.can(auth.role_in(s, user, scope), "keys.audit"):
         raise HTTPException(403, f"Reading the reveal trail needs 'admin' in '{scope}'.")
     rows = s.scalars(select(RevealEvent).where(RevealEvent.environment == scope)
                      .order_by(RevealEvent.created_at.desc())

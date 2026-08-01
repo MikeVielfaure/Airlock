@@ -331,6 +331,33 @@ class VariableRestriction(Base):
                                        name="uq_variable_restriction"),)
 
 
+class VariableSchema(Base):
+    """
+    A named, reusable table (external_db) or endpoint (api) known to a
+    connection point — declared once, checked every time it is used.
+
+    A schema does not know its own kind; the connection above it does. The
+    same shape (`columns`, `types`, plus `path`/`method`/`data_path` when
+    relevant) works for both, so a query-builder or an autocomplete list
+    reads one thing regardless of which kind of source it is helping with.
+    Absence of a schema means "unchecked" — today's behaviour for a
+    connection, preserved: declaring one is opt-in, never required to use
+    the connection at all.
+    """
+    __tablename__ = "variable_schemas"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_uuid)
+    variable_id: Mapped[str] = mapped_column(
+        ForeignKey("variables.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(120))
+    schema_json: Mapped[dict] = mapped_column(JSONBody, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now,
+                                                 onupdate=_now)
+
+    __table_args__ = (UniqueConstraint("variable_id", "name", name="uq_variable_schema"),)
+
+
 class FlowRun(Base):
     """
     One execution of a flow, kept whether it succeeded or not.

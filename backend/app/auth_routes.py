@@ -15,7 +15,7 @@ from typing import Any, Dict, List, Optional
 import httpx
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app import repository as repo
@@ -110,20 +110,6 @@ def require_capability(capability: str):
             raise HTTPException(
                 403, f"« {spec.get('label', capability)} » demande le rôle "
                      f"'{spec.get('min', '?')}' dans '{scope}' (vous êtes '{role}').")
-        return user
-    return _dep
-
-
-def require_role(needed: str):
-    """Guard a route on a role within the requested environment."""
-    def _dep(env: str = "", user: User = Depends(require_user),
-             s: Session = Depends(get_session)) -> User:
-        if not user.id:
-            return user
-        role = auth.role_in(s, user, env or repo.DEFAULT_ENV)
-        if not auth.can(role, needed):
-            raise HTTPException(403, f"This action needs the '{needed}' role "
-                                     f"in '{env or repo.DEFAULT_ENV}'.")
         return user
     return _dep
 
@@ -387,7 +373,7 @@ class MemberIn(BaseModel):
 @admin_router.get("/environments/{env}/members")
 def list_members(env: str, user: User = Depends(require_user),
                  s: Session = Depends(get_session)):
-    if user.id and not auth.can(auth.role_in(s, user, env), "admin"):
+    if user.id and not perms.can(auth.role_in(s, user, env), "members.manage"):
         raise HTTPException(403, f"You do not administer '{env}'.")
     rows = s.scalars(select(Membership).where(Membership.environment == env))
     out = []
@@ -410,7 +396,7 @@ def set_member(env: str, req: MemberIn, user: User = Depends(require_user),
     lands on whoever holds the superadmin account, and that person becomes the
     bottleneck by the third team onboarded.
     """
-    if user.id and not auth.can(auth.role_in(s, user, env), "admin"):
+    if user.id and not perms.can(auth.role_in(s, user, env), "members.manage"):
         raise HTTPException(403, f"You do not administer '{env}'.")
     target = auth.find_user(s, req.email)
     if target is None:
@@ -432,7 +418,7 @@ def set_member(env: str, req: MemberIn, user: User = Depends(require_user),
 @admin_router.delete("/environments/{env}/members/{user_id}")
 def remove_member(env: str, user_id: str, user: User = Depends(require_user),
                   s: Session = Depends(get_session)):
-    if user.id and not auth.can(auth.role_in(s, user, env), "admin"):
+    if user.id and not perms.can(auth.role_in(s, user, env), "members.manage"):
         raise HTTPException(403, f"You do not administer '{env}'.")
     m = s.scalar(select(Membership).where(Membership.user_id == user_id,
                                           Membership.environment == env))
@@ -451,6 +437,121 @@ def list_users(user: User = Depends(require_user), s: Session = Depends(get_sess
              "environments": auth.memberships_of(s, u.id),
              "sso": [i.provider for i in u.identities]}
             for u in s.scalars(select(User))]
+
+
+class SetPasswordIn(BaseModel):
+    password: str
+
+
+@admin_router.post("/users/{user_id}/password")
+def set_user_password(user_id: str, req: SetPasswordIn,
+                      user: User = Depends(require_user), s: Session = Depends(get_session)):
+    """
+    Reset someone's password — the account keeps its identity and role
+    memberships, only the credential changes. Superadmin only: this bypasses
+    the person entirely, so it must not be something an environment admin
+    can do to a colleague.
+    """
+    if user.id and not user.is_superadmin:
+        raise HTTPException(403, "Superadmin only.")
+    target = s.get(User, user_id)
+    if target is None:
+        raise HTTPException(404, "Compte introuvable.")
+    try:
+        target.password_hash = auth.hash_password(req.password)
+    except auth.AuthError as e:
+        raise HTTPException(422, str(e))
+    commit(s)
+    return {"id": target.id, "email": target.email}
+
+
+def _is_last_active_superadmin(s: Session, target: User) -> bool:
+    """Losing every superadmin at once means nobody left who can create,
+    deactivate, or delete an account — the install locks itself out."""
+    if not (target.is_superadmin and target.active):
+        return False
+    others = s.scalars(select(User).where(User.is_superadmin == True,  # noqa: E712
+                                          User.active == True, User.id != target.id))  # noqa: E712
+    return next(iter(others), None) is None
+
+
+@admin_router.post("/users/{user_id}/deactivate")
+def deactivate_user(user_id: str, user: User = Depends(require_user),
+                    s: Session = Depends(get_session)):
+    """
+    Block an account from signing in without erasing anything — memberships,
+    grants and the audit trail (RevealEvent, who-granted-what) stay exactly
+    as they are. The reversible default: prefer this over deleting outright.
+    """
+    if user.id and not user.is_superadmin:
+        raise HTTPException(403, "Superadmin only.")
+    target = s.get(User, user_id)
+    if target is None:
+        raise HTTPException(404, "Compte introuvable.")
+    if target.id == user.id:
+        raise HTTPException(422, "Vous ne pouvez pas désactiver votre propre compte.")
+    if _is_last_active_superadmin(s, target):
+        raise HTTPException(409, "C'est le dernier administrateur général actif — "
+                                 "désignez-en un autre avant de désactiver celui-ci.")
+    target.active = False
+    s.execute(delete(AuthSession).where(AuthSession.user_id == target.id))
+    commit(s)
+    return {"id": target.id, "email": target.email, "active": target.active}
+
+
+@admin_router.post("/users/{user_id}/reactivate")
+def reactivate_user(user_id: str, user: User = Depends(require_user),
+                    s: Session = Depends(get_session)):
+    if user.id and not user.is_superadmin:
+        raise HTTPException(403, "Superadmin only.")
+    target = s.get(User, user_id)
+    if target is None:
+        raise HTTPException(404, "Compte introuvable.")
+    target.active = True
+    commit(s)
+    return {"id": target.id, "email": target.email, "active": target.active}
+
+
+class DeleteUserIn(BaseModel):
+    confirm_email: str = ""
+
+
+@admin_router.delete("/users/{user_id}")
+def delete_user(user_id: str, req: DeleteUserIn,
+               user: User = Depends(require_user), s: Session = Depends(get_session)):
+    """
+    Erase an account for good — memberships and SSO identities cascade with
+    it (they describe the account, not history). What stays, deliberately:
+    RevealEvent and every `granted_by`/`created_by` trail, because losing who
+    did something the moment they leave would be worse than a name nobody
+    holds any more — the same reasoning as deleting an environment.
+
+    Typed confirmation because there is no undo: unlike deactivating, this
+    cannot be walked back by flipping a flag.
+    """
+    from app.db_models import DatasetGrant, KeyHolder
+
+    if user.id and not user.is_superadmin:
+        raise HTTPException(403, "Superadmin only.")
+    target = s.get(User, user_id)
+    if target is None:
+        raise HTTPException(404, "Compte introuvable.")
+    if target.id == user.id:
+        raise HTTPException(422, "Vous ne pouvez pas supprimer votre propre compte.")
+    if _is_last_active_superadmin(s, target):
+        raise HTTPException(409, "C'est le dernier administrateur général actif — "
+                                 "désignez-en un autre avant de supprimer celui-ci.")
+    if req.confirm_email != target.email:
+        raise HTTPException(422, "Tapez l'adresse e-mail du compte pour confirmer la suppression.")
+
+    s.execute(delete(AuthSession).where(AuthSession.user_id == target.id))
+    s.execute(delete(KeyHolder).where(KeyHolder.user_id == target.id))
+    s.execute(delete(DatasetGrant).where(DatasetGrant.subject_kind == "user",
+                                         DatasetGrant.subject == target.id))
+    email = target.email
+    s.delete(target)   # cascades memberships + SSO identities via the ORM relationship
+    commit(s)
+    return {"deleted": email}
 
 
 # ══════════════════════════════════════════════════════════════════════

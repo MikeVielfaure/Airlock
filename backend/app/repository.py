@@ -23,7 +23,7 @@ from sqlalchemy.orm import Session
 
 from app.db_models import (
     Artefact, ArtefactGrant, ArtefactVersion, Dataset, DatasetRow, DatasetWrite,
-    Flow, FlowRun, DatasetGrant, FlowRunStep, Run, Variable, VariableRestriction,
+    Flow, FlowRun, DatasetGrant, FlowRunStep, Run, Variable, VariableRestriction, VariableSchema,
 )
 
 
@@ -138,13 +138,6 @@ def resolve_ref(s: Session, artefact_id: str, version_no: Optional[int]) -> Arte
         ArtefactVersion.version_no == target))
     if ver is None:
         raise NotFound(f"Version {target} of artefact {artefact_id} not found.")
-    return ver
-
-
-def get_version_by_id(s: Session, version_id: str) -> ArtefactVersion:
-    ver = s.get(ArtefactVersion, version_id)
-    if ver is None:
-        raise NotFound(f"Version {version_id} not found.")
     return ver
 
 
@@ -532,6 +525,15 @@ def resolve_variable_kinds(s: Session, *, environment: str = "", graph_id: str =
                                    node_id=node_id).items()}
 
 
+def resolve_variable_rows(s: Session, *, environment: str = "", graph_id: str = "",
+                          node_id: str = "") -> dict:
+    """The full cascade as rows, not just values or kinds — lets a caller
+    reach a row's id (e.g. to look up a schema declared on it) in the same
+    single resolution pass `resolve_variables`/`resolve_variable_kinds`
+    already do, rather than a second query per name."""
+    return _resolve_variable_rows(s, environment=environment, graph_id=graph_id, node_id=node_id)
+
+
 def secret_names(s: Session) -> set:
     """Names whose values must never reach a screen or a journal."""
     return {v.name for v in s.scalars(select(Variable).where(Variable.secret.is_(True)))}
@@ -569,6 +571,36 @@ def remove_variable_restriction(s: Session, variable_id: str, environment: str) 
         VariableRestriction.environment == environment))
     if r is not None:
         s.delete(r)
+
+
+# ── known tables / endpoints on a connection point ───────────────────
+def list_variable_schemas(s: Session, variable_id: str) -> list[VariableSchema]:
+    return list(s.scalars(select(VariableSchema)
+                          .where(VariableSchema.variable_id == variable_id)
+                          .order_by(VariableSchema.name)))
+
+
+def get_variable_schema(s: Session, variable_id: str, name: str) -> Optional[VariableSchema]:
+    return s.scalar(select(VariableSchema).where(
+        VariableSchema.variable_id == variable_id, VariableSchema.name == name))
+
+
+def set_variable_schema(s: Session, variable_id: str, name: str,
+                        schema_json: dict) -> VariableSchema:
+    existing = get_variable_schema(s, variable_id, name)
+    if existing is not None:
+        existing.schema_json = schema_json
+        return existing
+    row = VariableSchema(variable_id=variable_id, name=name, schema_json=schema_json)
+    s.add(row)
+    s.flush()
+    return row
+
+
+def remove_variable_schema(s: Session, variable_id: str, name: str) -> None:
+    row = get_variable_schema(s, variable_id, name)
+    if row is not None:
+        s.delete(row)
 
 
 def mask_deep(value, secrets: dict):

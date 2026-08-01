@@ -82,7 +82,7 @@ def test_holding_a_key_is_not_a_role_and_admin_does_not_imply_it():
 
 # ── the HR case ──────────────────────────────────────────────────────
 def test_an_operator_runs_files_but_cannot_rewrite_the_configuration(team):
-    sid = client.post("/api/files",
+    sid = client.post("/api/files?env=rh",
                       files={"file": ("f.csv", io.BytesIO(b"A\nx\n"), "text/csv")},
                       data={"file_type": "CSV", "encoding": "AUTO", "delimiter": ";"},
                       headers=_h(team["operator"])).json()["session_id"]
@@ -160,15 +160,26 @@ def test_archiving_shared_material_is_an_admin_act(team):
 def test_a_viewer_reads_but_does_not_act(team):
     assert client.get("/api/artefacts/config?env=rh",
                       headers=_h(team["viewer"])).status_code == 200
-    sid = client.post("/api/files",
+    # Uploading is itself an act (`file.upload` needs operator) — done here by
+    # an operator so the test isolates the one thing it actually checks:
+    # a viewer may not run a file that already exists.
+    sid = client.post("/api/files?env=rh",
                       files={"file": ("f.csv", io.BytesIO(b"A\nx\n"), "text/csv")},
                       data={"file_type": "CSV", "encoding": "AUTO", "delimiter": ";"},
-                      headers=_h(team["viewer"])).json()["session_id"]
+                      headers=_h(team["operator"])).json()["session_id"]
     ko = client.post(f"/api/files/{sid}/process?env=rh",
                      json={"visible_cols": ["A"],
                            "fields": {"A": {"name": ["A"], "type": "string"}}},
                      headers=_h(team["viewer"]))
     assert ko.status_code == 403
+
+
+def test_a_viewer_cannot_upload_a_file(team):
+    r = client.post("/api/files?env=rh",
+                    files={"file": ("f.csv", io.BytesIO(b"A\nx\n"), "text/csv")},
+                    data={"file_type": "CSV", "encoding": "AUTO", "delimiter": ";"},
+                    headers=_h(team["viewer"]))
+    assert r.status_code == 403
 
 
 def test_an_editor_designs_but_does_not_administer(team):

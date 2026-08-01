@@ -40,13 +40,10 @@ from sqlalchemy.orm import Session
 from app.db_models import (
     AuthProvider, AuthSession, Membership, User, UserIdentity,
 )
+from app.services.permissions import ROLE_RANK
 
 SESSION_DAYS = 8
 ROLES = ("admin", "editor", "operator", "viewer")
-# What each role may do, coarsest first. Kept as an ordered ladder rather than a
-# free set of permissions: four comprehensible levels beat twenty checkboxes
-# nobody configures correctly.
-ROLE_RANK = {"viewer": 0, "operator": 1, "editor": 2, "admin": 3}
 
 
 class AuthError(Exception):
@@ -126,12 +123,6 @@ def role_in(s: Session, user: User, environment: str) -> Optional[str]:
     m = s.scalar(select(Membership).where(Membership.user_id == user.id,
                                           Membership.environment == environment))
     return m.role if m else None
-
-
-def can(role: Optional[str], needed: str) -> bool:
-    if role is None:
-        return False
-    return ROLE_RANK.get(role, -1) >= ROLE_RANK.get(needed, 99)
 
 
 # ── sessions ──────────────────────────────────────────────────────────
