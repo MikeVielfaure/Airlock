@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { FieldConfig, HeaderConfig, Presets, ProcessStats } from "../lib/types";
 import { FieldEditor } from "./FieldEditor";
 import { IconEdit } from "../lib/icons";
+import { InfoTip } from "./InfoTip";
 
 interface Props {
   columns: string[];
@@ -84,6 +85,11 @@ export function SchemaPanel(p: Props) {
         <div className="sec-h">
           <h3>Structure</h3>
           <span className="sub">Nettoyez la structure du fichier avant d'appliquer les règles de champs.</span>
+          <InfoTip>
+            <p><b>À quoi ça sert</b> — retirer les lignes parasites autour de l'en-tête (vides, doublons) avant de définir les champs.</p>
+            <p><b>Comment faire</b> — cochez les options utiles, puis « Appliquer la structure ». En-tête strict/minimum contrôlent que les colonnes du fichier correspondent à la config.</p>
+            <p><b>Ce qu'il faut</b> — un fichier chargé ; ces options sont facultatives, à false par défaut.</p>
+          </InfoTip>
           <button className="btn sm" style={{ marginLeft: "auto" }} onClick={p.applyHeader}>Appliquer la structure</button>
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 24px", marginTop: 8 }}>
@@ -127,6 +133,11 @@ export function SchemaPanel(p: Props) {
           <span className="sub">
             {p.visible.length}/{allColumns.length} actif(s) · cliquer pour activer/désactiver, crayon pour configurer
           </span>
+          <InfoTip>
+            <p><b>À quoi ça sert</b> — décider quelles colonnes sont traitées, et les règles qui s'appliquent à chacune (type, nettoyage, correspondance TCO).</p>
+            <p><b>Comment faire</b> — cliquez un champ pour l'activer/désactiver ; le crayon ouvre son détail (type, regex, longueur, renommage…).</p>
+            <p><b>Ce qu'il faut</b> — un fichier chargé pour voir les colonnes réelles ; sans fichier, seule la config existante s'affiche.</p>
+          </InfoTip>
           <span style={{ marginLeft: "auto", display: "flex", gap: 6, alignItems: "center" }}>
             <label className="check" style={{ padding: 0, marginRight: 4 }}>
               <input type="checkbox" checked={hideInactive} onChange={(e) => setHideInactive(e.target.checked)} />

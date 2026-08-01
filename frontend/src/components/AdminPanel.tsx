@@ -76,6 +76,7 @@ function Sandbox({ envs, notify, onIdentityChange }: {
   envs: string[]; notify: Props["notify"]; onIdentityChange: () => void;
 }) {
   const [email, setEmail] = useState("essai@test.local");
+  const [password, setPassword] = useState("motdepasse1");
   const [env, setEnv] = useState("default");
   const [role, setRole] = useState("operator");
   const [made, setMade] = useState<{ email: string; environments: Record<string, string> }[]>([]);
@@ -84,10 +85,10 @@ function Sandbox({ envs, notify, onIdentityChange }: {
   const create = async () => {
     setBusy(true);
     try {
-      const r = await api.quickUser(email, { [env]: role });
+      const r = await api.quickUser(email, { [env]: role }, password || "motdepasse1");
       setMade((m) => [{ email: r.email, environments: r.environments },
                       ...m.filter((x) => x.email !== r.email)]);
-      notify(`« ${r.email} » prêt — ${env} : ${role}. Mot de passe : motdepasse1`, "ok");
+      notify(`« ${r.email} » prêt — ${env} : ${role}. Mot de passe : ${password || "motdepasse1"}`, "ok");
     } catch (e) { notify(e instanceof Error ? e.message : String(e), "err"); }
     finally { setBusy(false); }
   };
@@ -113,6 +114,8 @@ function Sandbox({ envs, notify, onIdentityChange }: {
       <div className="ad-form">
         <input value={email} onChange={(e) => setEmail(e.target.value)}
                placeholder="email du compte d'essai" />
+        <input value={password} onChange={(e) => setPassword(e.target.value)}
+               placeholder="mot de passe (8 caractères min.)" title="Laisser tel quel pour garder motdepasse1" />
         <input value={env} onChange={(e) => setEnv(e.target.value)}
                placeholder="environnement" list="ad-envs" />
         <datalist id="ad-envs">{envs.map((e) => <option key={e} value={e} />)}</datalist>

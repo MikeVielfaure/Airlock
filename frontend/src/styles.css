@@ -213,6 +213,24 @@ textarea { resize: vertical; min-height: 64px; }
 .sec-h { display: flex; align-items: baseline; gap: 10px; margin: 0 0 4px; }
 .sec-h h3 { font-family: var(--display); font-weight: 600; font-size: 15px; margin: 0; }
 .sec-h .sub { color: var(--ink-faint); font-size: 12.5px; }
+
+/* ---------- info tooltip ---------- */
+.infotip { position: relative; display: inline-flex; vertical-align: middle; margin-left: 2px; }
+.infotip-btn {
+  border: none; background: none; padding: 0; margin: 0; cursor: pointer;
+  color: var(--ink-faint); display: inline-flex; align-items: center; line-height: 0;
+}
+.infotip-btn:hover { color: var(--accent); }
+.infotip-pop {
+  position: absolute; top: calc(100% + 6px); left: 0; z-index: 80; width: 300px;
+  background: var(--panel); border: 1px solid var(--line-strong); border-radius: var(--r-sm);
+  padding: 11px 13px; font-size: 12.5px; line-height: 1.6; color: var(--ink-soft);
+  box-shadow: 0 10px 28px rgba(20, 20, 40, 0.14); text-align: left;
+}
+.infotip-pop.right { left: auto; right: 0; }
+.infotip-pop b { color: var(--ink); font-weight: 600; }
+.infotip-pop p { margin: 0 0 6px; }
+.infotip-pop p:last-child { margin-bottom: 0; }
 .sec + .sec { margin-top: 26px; }
 
 /* visibility pills */

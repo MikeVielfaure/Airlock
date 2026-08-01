@@ -3,6 +3,7 @@ import type { AvailableVariable, ComputedColumn, DatasetInfo, SourceInfo, StyleR
 import { api } from "../lib/api";
 import type { ArtefactInfo } from "../lib/types";
 import { IconCode, IconReset, IconUpload, IconDownload } from "../lib/icons";
+import { InfoTip } from "./InfoTip";
 
 interface Props {
   sid: string | null;
@@ -492,7 +493,13 @@ export function ComputedPanel({ sid, columns, computed, setComputed, sqlComputed
 
         {tab === "columns" && (
           <div className="tab-panel">
-            <p className="hint">Dérivez de nouvelles colonnes à partir des colonnes existantes. Appliqué sur les valeurs nettoyées lors d'une validation.</p>
+            <p className="hint">Dérivez de nouvelles colonnes à partir des colonnes existantes. Appliqué sur les valeurs nettoyées lors d'une validation.
+              <InfoTip>
+                <p><b>À quoi ça sert</b> — créer une colonne dont la valeur dépend d'autres colonnes (concaténation, condition, calcul…).</p>
+                <p><b>Comment faire</b> — « Ajouter une colonne », nommez-la, écrivez une expression avec <code>[nom_colonne]</code>. Cliquez une colonne dans la barre du bas pour l'insérer sans la taper.</p>
+                <p><b>Ce qu'il faut</b> — rien de particulier : ça marche dès qu'un fichier est chargé.</p>
+              </InfoTip>
+            </p>
             <div className="filterbar">
               <button className="btn primary sm" onClick={() => add()}><IconCode size={14} /> Ajouter une colonne</button>
               {TEMPLATES.map((t) => (
@@ -579,6 +586,11 @@ export function ComputedPanel({ sid, columns, computed, setComputed, sqlComputed
               Requêtes DuckDB contre <code>self</code> (cette session, colonne <code>_row_id</code> incluse) et les
               sources attachées — jointures, fenêtres, agrégations que les colonnes calculées ne peuvent pas faire.
               Le résultat doit renvoyer <code>_row_id</code> ; sans lui, la requête est refusée.
+              <InfoTip>
+                <p><b>À quoi ça sert</b> — croiser cette session avec une autre table, un fichier ou une base externe pour compléter ou remplacer des valeurs.</p>
+                <p><b>Comment faire</b> — écrivez une requête SQL (DuckDB) ; <code>self</code> désigne la session courante. « Remplacer » écrase la colonne, « Compléter le vide » ne touche que les cellules vides.</p>
+                <p><b>Ce qu'il faut</b> — au moins une source attachée dans l'onglet « Sources » pour joindre autre chose que la session elle-même.</p>
+              </InfoTip>
             </p>
             <div className="filterbar">
               <button className="btn primary sm" onClick={addSql}><IconCode size={14} /> Ajouter un bloc SQL</button>
@@ -605,6 +617,11 @@ export function ComputedPanel({ sid, columns, computed, setComputed, sqlComputed
               une condition simple avec <code>STYLE(color, bold, italic)</code>, ou une requête
               multi-source (même préfixe SELECT/WITH que le SQL avancé) renvoyant directement une
               couleur.
+              <InfoTip>
+                <p><b>À quoi ça sert</b> — mettre en évidence des lignes selon une condition (ex. colorer en orange un âge mineur), sans changer la donnée.</p>
+                <p><b>Comment faire</b> — choisissez la colonne à styler, écrivez <code>IF(condition, STYLE("couleur", "1"), STYLE())</code> ; ou une requête SQL renvoyant juste une couleur.</p>
+                <p><b>Ce qu'il faut</b> — la colonne visée doit déjà exister dans le fichier.</p>
+              </InfoTip>
             </p>
             <div className="filterbar">
               <button className="btn primary sm" onClick={addStyleRule}><IconCode size={14} /> Ajouter une règle</button>
@@ -626,7 +643,13 @@ export function ComputedPanel({ sid, columns, computed, setComputed, sqlComputed
 
         {tab === "sources" && (
           <div className="tab-panel">
-            <p className="hint">Une table interne ou un fichier, croisé avec cette session dans une requête SQL ou une règle de mise en forme — sans construire de flux.</p>
+            <p className="hint">Une table interne ou un fichier, croisé avec cette session dans une requête SQL ou une règle de mise en forme — sans construire de flux.
+              <InfoTip>
+                <p><b>À quoi ça sert</b> — donner au SQL avancé et à la mise en forme une autre table à joindre, sans construire un flux visuel.</p>
+                <p><b>Comment faire</b> — choisissez un type (table interne, fichier, base externe, API), donnez un nom : c'est ce nom qui sert dans vos requêtes (<code>FROM self LEFT JOIN nom ...</code>).</p>
+                <p><b>Ce qu'il faut</b> — pour une base externe ou une API, un point de connexion doit déjà exister dans Exploitation → Référentiel.</p>
+              </InfoTip>
+            </p>
             {!sid ? (
               <div className="banner"><span>Chargez d'abord une session.</span></div>
             ) : (
@@ -746,7 +769,13 @@ export function ComputedPanel({ sid, columns, computed, setComputed, sqlComputed
 
         {tab === "library" && (
           <div className="tab-panel">
-            <p className="hint">Enregistre cet ensemble côté serveur, versionné — réutilisable dans un flux.</p>
+            <p className="hint">Enregistre cet ensemble côté serveur, versionné — réutilisable dans un flux.
+              <InfoTip>
+                <p><b>À quoi ça sert</b> — réutiliser le même ensemble de colonnes calculées, blocs SQL et règles de mise en forme dans une autre session ou un flux.</p>
+                <p><b>Comment faire</b> — donnez un nom et « Enregistrer » (ou choisissez un ensemble existant pour l'enregistrer comme nouvelle version). « Charger » remplace les colonnes/règles actuelles.</p>
+                <p><b>Ce qu'il faut</b> — au moins une colonne calculée, un bloc SQL ou une règle valide.</p>
+              </InfoTip>
+            </p>
             <div className="flowform">
               <div className="frow"><label>Enregistrer sous</label>
                 <select value={saveTarget} onChange={(e) => setSaveTarget(e.target.value)}>
