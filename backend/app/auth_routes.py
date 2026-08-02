@@ -237,6 +237,7 @@ class ProviderIn(BaseModel):
     discovery_url: str = ""
     authorize_url: str = ""
     token_url: str = ""
+    jwks_url: str = ""
     issuer: str = ""
     scopes: str = "openid email profile"
     groups_claim: str = "groups"
@@ -248,9 +249,9 @@ def _provider_out(p: AuthProvider) -> dict:
     return {"id": p.id, "name": p.name, "kind": p.kind, "enabled": p.enabled,
             "client_id": p.client_id, "has_secret": bool(p.client_secret),
             "discovery_url": p.discovery_url, "authorize_url": p.authorize_url,
-            "token_url": p.token_url, "issuer": p.issuer, "scopes": p.scopes,
-            "groups_claim": p.groups_claim, "claim_mappings": p.claim_mappings or [],
-            "auto_provision": p.auto_provision}
+            "token_url": p.token_url, "jwks_url": p.jwks_url, "issuer": p.issuer,
+            "scopes": p.scopes, "groups_claim": p.groups_claim,
+            "claim_mappings": p.claim_mappings or [], "auto_provision": p.auto_provision}
 
 
 @admin_router.get("/providers")
@@ -274,7 +275,7 @@ async def save_provider(req: ProviderIn, user: User = Depends(require_user),
         p = AuthProvider(name=req.name)
         s.add(p)
     for f in ("kind", "enabled", "client_id", "discovery_url", "authorize_url",
-              "token_url", "issuer", "scopes", "groups_claim", "auto_provision"):
+              "token_url", "jwks_url", "issuer", "scopes", "groups_claim", "auto_provision"):
         setattr(p, f, getattr(req, f))
     if req.client_secret:                 # an empty field keeps the stored secret
         p.client_secret = req.client_secret
@@ -349,7 +350,7 @@ async def sso_callback(name: str, req: SsoCallbackIn, request: Request,
         except Exception as e:  # noqa: BLE001
             raise HTTPException(502, f"Could not reach the identity provider: {e}")
         try:
-            claims = auth.decode_id_token(payload.get("id_token", ""))
+            claims = auth.decode_id_token(payload.get("id_token", ""), p)
         except auth.AuthError as e:
             raise HTTPException(401, str(e))
 

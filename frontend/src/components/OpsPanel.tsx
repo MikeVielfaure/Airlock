@@ -243,7 +243,7 @@ function Vars({ notify }: Props) {
     const cols = schemaCols.filter((c) => c.name.trim());
     try {
       await api.saveConnectionSchema(draft.id, {
-        name: schemaName.trim(), columns: cols,
+        name: schemaName.trim(), columns: cols, query: schemaDetectQuery,
         path: schemaPath, method: schemaMethod, data_path: schemaDataPath,
       });
       resetSchemaForm();
@@ -555,8 +555,9 @@ function Vars({ notify }: Props) {
                   </div>
                   {draft.kind === "external_db" && (
                     <div className="ops-form">
-                      <input placeholder="requête d'exemple, ex. SELECT * FROM ma_table" style={{ flex: 1 }}
-                             value={schemaDetectQuery} onChange={(e) => setSchemaDetectQuery(e.target.value)} />
+                      <input placeholder="requête, ex. SELECT * FROM ma_table — enregistrée avec le schéma"
+                             style={{ flex: 1 }} value={schemaDetectQuery}
+                             onChange={(e) => setSchemaDetectQuery(e.target.value)} />
                     </div>
                   )}
                   <button className="btn sm" disabled={detecting ||

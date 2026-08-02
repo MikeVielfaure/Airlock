@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useState } from "react";
 import { api, setToken } from "../lib/api";
 import type { AuthUser, EnvProfile } from "../lib/types";
 import {
@@ -221,6 +221,7 @@ function Users({ envs, notify }: { envs: string[]; notify: Props["notify"] }) {
                             notify(`Mot de passe changé pour ${u.email}.`, "ok");
                           } catch (e) { notify(e instanceof Error ? e.message : String(e), "err"); }
                         }}>Changer le mot de passe</button>
+                <div style={{ flexBasis: "100%", height: 0 }} />
                 {u.active ? (
                   <button className="btn sm" onClick={async () => {
                     try {
@@ -238,8 +239,8 @@ function Users({ envs, notify }: { envs: string[]; notify: Props["notify"] }) {
                     } catch (e) { notify(e instanceof Error ? e.message : String(e), "err"); }
                   }}>Réactiver</button>
                 )}
-                <input placeholder={`tapez « ${u.email} » pour supprimer`} style={{ width: 220 }}
-                       value={delConfirm[u.id] ?? ""}
+                <input placeholder="email pour confirmer" title={`Tapez « ${u.email} » pour confirmer la suppression.`}
+                       style={{ width: 170 }} value={delConfirm[u.id] ?? ""}
                        onChange={(e) => setDelConfirm({ ...delConfirm, [u.id]: e.target.value })} />
                 <button className="btn sm danger" disabled={delConfirm[u.id] !== u.email}
                         onClick={async () => {
@@ -424,10 +425,18 @@ function Envs({ envs, notify, refreshEnvs, onIdentityChange }: {
                      onChange={(e) => setProfile({ ...profile, tco_editable: e.target.checked })} />
               table de correspondance modifiable
             </label>
+            <label className="ad-check">
+              Onglets ouverts max. par personne
+              <input type="number" min={0} step={1} className="mono-input" style={{ width: 70, marginLeft: 6 }}
+                     value={profile.max_open_tabs}
+                     onChange={(e) => setProfile({ ...profile, max_open_tabs: Math.max(0, Number(e.target.value) || 0) })} />
+              <span className="ad-note" style={{ margin: 0 }}>0 = illimité</span>
+            </label>
             <button className="btn" onClick={async () => {
               try {
                 const saved = await api.saveEnvProfile(sel, {
-                  modules: profile.modules, tco_editable: profile.tco_editable });
+                  modules: profile.modules, tco_editable: profile.tco_editable,
+                  max_open_tabs: profile.max_open_tabs });
                 setProfile(saved);
                 notify(`Profil de « ${sel} » enregistré.`, "ok");
                 // The workshop reads its own environment's profile once, on
@@ -605,7 +614,7 @@ function Envs({ envs, notify, refreshEnvs, onIdentityChange }: {
 /* ── SSO ─────────────────────────────────────────────────────────── */
 function Sso({ envs, notify }: { envs: string[]; notify: Props["notify"] }) {
   const [rows, setRows] = useState<Record<string, unknown>[]>([]);
-  const [name, setName] = useState("corp");
+  const [name, setName] = useState("");
   const [clientId, setClientId] = useState("");
   const [secret, setSecret] = useState("");
   const [discovery, setDiscovery] = useState("");
@@ -625,7 +634,7 @@ function Sso({ envs, notify }: { envs: string[]; notify: Props["notify"] }) {
         groupe lui retire réellement l'accès.
       </p>
       <div className="ad-form">
-        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="nom" />
+        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="nom (ex. corp)" />
         <input value={clientId} onChange={(e) => setClientId(e.target.value)}
                placeholder="client id" />
         <input value={secret} onChange={(e) => setSecret(e.target.value)} type="password"
@@ -670,7 +679,7 @@ function Sso({ envs, notify }: { envs: string[]; notify: Props["notify"] }) {
 
       {rows.length > 0 && (
         <table className="ad-table">
-          <thead><tr><th>Fournisseur</th><th>Client</th><th>Secret</th><th>Groupes</th></tr></thead>
+          <thead><tr><th>Fournisseur</th><th>Client</th><th>Secret</th><th>Groupes</th><th>id_token</th></tr></thead>
           <tbody>
             {rows.map((p, i) => (
               <tr key={i}>
@@ -678,6 +687,11 @@ function Sso({ envs, notify }: { envs: string[]; notify: Props["notify"] }) {
                 <td>{String(p.client_id || "—")}</td>
                 <td>{p.has_secret ? "enregistré" : <em>absent</em>}</td>
                 <td>{((p.claim_mappings as unknown[]) || []).length}</td>
+                <td>{p.jwks_url
+                  ? <span className="ad-tag">signature vérifiée</span>
+                  : <span className="ad-tag danger" title="Aucune clé de signature connue pour ce fournisseur — relancez la découverte, ou vérifiez que le document OIDC publie bien jwks_uri.">
+                      non vérifiée
+                    </span>}</td>
               </tr>
             ))}
           </tbody>
@@ -741,8 +755,8 @@ function Overview({ notify }: { notify: Props["notify"] }) {
         </thead>
         <tbody>
           {data.environments.map((e) => (
-            <>
-              <tr key={e.name}>
+            <Fragment key={e.name}>
+              <tr>
                 <td>
                   <strong>{e.label}</strong>
                   {!e.has_profile && <span className="ad-note"> · sans profil</span>}
@@ -784,7 +798,7 @@ function Overview({ notify }: { notify: Props["notify"] }) {
                 </td>
               </tr>
               {open === e.name && (
-                <tr key={`${e.name}-d`} className="ad-detail">
+                <tr className="ad-detail">
                   <td colSpan={6}>
                     <div className="ad-modules">
                       {data.modules.map((m) => (
@@ -819,7 +833,7 @@ function Overview({ notify }: { notify: Props["notify"] }) {
                   </td>
                 </tr>
               )}
-            </>
+            </Fragment>
           ))}
         </tbody>
       </table>

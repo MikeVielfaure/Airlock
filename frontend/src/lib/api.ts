@@ -204,6 +204,20 @@ export const api = {
       body: JSON.stringify({ name, dataset_id: datasetId }),
     }).then((r) => json<SourceInfo>(r)),
 
+  /** Another open tab's working table, attached as a source — same
+   * mechanism as a dataset or an external source, a snapshot at attach
+   * time. */
+  attachSessionSource: (sid: string, name: string, sourceSid: string) =>
+    fetch(`${BASE}/files/${sid}/sources/session`, {
+      method: "POST", headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ name, source_sid: sourceSid }),
+    }).then((r) => json<SourceInfo>(r)),
+
+  /** Free the session's row — the multi-tab bar's "close" action. */
+  dropSession: (sid: string) =>
+    fetch(`${BASE}/files/${sid}`, { method: "DELETE", headers: authHeaders() })
+      .then((r) => json<{ dropped: string }>(r)),
+
   attachUploadSource: (sid: string, name: string, file: File) => {
     const fd = new FormData();
     fd.append("name", name);
@@ -708,6 +722,15 @@ export const api = {
       body: JSON.stringify({ ...body, environment: CURRENT_ENV }),
     }).then((r) => json<{ graph: unknown; artefact_id: string | null;
                           skipped: string[]; steps: number }>(r)),
+
+  // ── a session, made a correspondence table — same doorway, alongside it ──
+  saveSessionAsTco: (sid: string, body: { source_column: string; target_column: string;
+                     type_column?: string; type_value?: string;
+                     artefact_id?: string; name?: string; description?: string }) =>
+    fetch(`${BASE}/files/${sid}/to-tco`, {
+      method: "POST", headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ ...body, environment: CURRENT_ENV }),
+    }).then((r) => json<{ artefact_id: string; version_no: number; rows: number }>(r)),
 
   // ── visual flows (v18) ────────────────────────────────────────
   flowBricks: () => fetch(`${BASE}/graphs/bricks`, { headers: authHeaders() })

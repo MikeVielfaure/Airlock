@@ -123,7 +123,7 @@ def suggest_mapping(kind: str, target_id: str, req: SuggestIn,
     completes it rather than discovering the gap after the load.
     """
     try:
-        sess = store.get(req.session_id)
+        sess = store.get(s, req.session_id)
     except KeyError:
         raise HTTPException(404, f"Session {req.session_id} not found.")
     schema, _ = _target_schema(s, kind, target_id, scope)
@@ -185,7 +185,7 @@ class LoadIn(BaseModel):
 def _prepare(s: Session, kind: str, target_id: str, scope: str, req: LoadIn):
     """Build the frame that would land, and everything wrong with it."""
     try:
-        sess = store.get(req.session_id)
+        sess = store.get(s, req.session_id)
     except KeyError:
         raise HTTPException(404, f"Session {req.session_id} not found.")
     schema, target = _target_schema(s, kind, target_id, scope)

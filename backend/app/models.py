@@ -263,6 +263,11 @@ class AttachDatasetSource(BaseModel):
     dataset_id: str
 
 
+class AttachSessionSource(BaseModel):
+    name: str
+    source_sid: str
+
+
 class RowsResponse(BaseModel):
     columns: List[str]
     data: List[List[str]]

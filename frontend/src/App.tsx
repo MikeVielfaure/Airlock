@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, setEnvironment, setToken } from "./lib/api";
+import { canOpenTab } from "./lib/tabs";
 import {
   defaultField, defaultHeader,
   type ComputedColumn, type StyleRule,
@@ -102,6 +103,165 @@ export default function App() {
   }, []);
 
   const rawFileRef = useRef<File | null>(null);   // last uploaded file (for sheet re-load)
+  const [deletedTotal, setDeletedTotal] = useState(0);
+  // The environment's profile — needed early for the tab cap (openNewTab's
+  // callers check profile.max_open_tabs), populated later by the env-switch
+  // effect further down; declared here only so callbacks defined below can
+  // depend on it without a temporal-dead-zone error.
+  const [profile, setProfile] = useState<EnvProfile | null>(null);
+
+  // ── multiple open tabs ────────────────────────────────────────────
+  // One session is "live" at a time (the state above, exactly as before
+  // tabs existed); every OTHER open tab keeps its state in this cache
+  // instead. Config/computed/style rules are never persisted server-side
+  // (confirmed: they only ever travel to /process on demand), so switching
+  // tabs cannot just re-fetch from the backend — it has to be a real
+  // client-side snapshot, restored on the way back.
+  type TabSnapshot = {
+    sid: string | null; loadedName: string | null;
+    meta: { encoding: string; delimiter: string } | null;
+    sheet: string | null; sheets: string[]; tableCount: number;
+    tableMarker: string; tableIndex: number; tableHeaderMode: "local" | "global";
+    preview: TablePreview | null; columns: string[]; visible: string[]; unmapped: string[];
+    configYaml: string | null; configFields: Record<string, FieldConfig>;
+    unmatchedConfig: FieldConfig[]; header: HeaderConfig; fields: Record<string, FieldConfig>;
+    tco: TcoResponse | null; computed: ComputedColumn[]; sqlComputed: ComputedColumn[];
+    styleRules: StyleRule[]; tableFilters: Record<string, string>;
+    configVariables: Record<string, string>; refVariables: string[];
+    strictHeader: boolean; minHeader: boolean; result: ProcessResponse | null;
+    tab: Tab; deletedTotal: number; rawFile: File | null;
+  };
+
+  const [tabs, setTabs] = useState<{ sid: string; label: string }[]>([]);
+  const tabStash = useRef<Record<string, TabSnapshot>>({});
+
+  const snapshotCurrent = useCallback((): TabSnapshot => ({
+    sid, loadedName, meta, sheet, sheets, tableCount, tableMarker, tableIndex, tableHeaderMode,
+    preview, columns, visible, unmapped, configYaml, configFields, unmatchedConfig, header, fields,
+    tco, computed, sqlComputed, styleRules, tableFilters, configVariables, refVariables,
+    strictHeader, minHeader, result, tab, deletedTotal, rawFile: rawFileRef.current,
+  }), [sid, loadedName, meta, sheet, sheets, tableCount, tableMarker, tableIndex, tableHeaderMode,
+      preview, columns, visible, unmapped, configYaml, configFields, unmatchedConfig, header, fields,
+      tco, computed, sqlComputed, styleRules, tableFilters, configVariables, refVariables,
+      strictHeader, minHeader, result, tab, deletedTotal]);
+
+  const restoreSnapshot = useCallback((snap: TabSnapshot) => {
+    rawFileRef.current = snap.rawFile;
+    setSid(snap.sid); setLoadedName(snap.loadedName); setMeta(snap.meta);
+    setSheet(snap.sheet); setSheets(snap.sheets); setTableCount(snap.tableCount);
+    setTableMarker(snap.tableMarker); setTableIndex(snap.tableIndex); setTableHeaderMode(snap.tableHeaderMode);
+    setPreview(snap.preview); setColumns(snap.columns); setVisible(snap.visible); setUnmapped(snap.unmapped);
+    setConfigYaml(snap.configYaml); setConfigFields(snap.configFields); setUnmatchedConfig(snap.unmatchedConfig);
+    setHeader(snap.header); setFields(snap.fields); setTco(snap.tco);
+    setComputed(snap.computed); setSqlComputed(snap.sqlComputed); setStyleRules(snap.styleRules);
+    setTableFilters(snap.tableFilters); setConfigVariables(snap.configVariables); setRefVariables(snap.refVariables);
+    setStrictHeader(snap.strictHeader); setMinHeader(snap.minHeader); setResult(snap.result);
+    setTab(snap.tab); setDeletedTotal(snap.deletedTotal);
+  }, []);
+
+  /** Register a brand-new session as its own tab. Stashes whatever was
+   * live before, but never restores anything — the caller (adoptSession,
+   * onUpload for a genuinely new file) sets fresh values right after this,
+   * exactly as it did before tabs existed. */
+  const openNewTab = useCallback((newSid: string, label: string) => {
+    if (sid) tabStash.current[sid] = snapshotCurrent();
+    setTabs((ts) => ts.some((t) => t.sid === newSid) ? ts : [...ts, { sid: newSid, label }]);
+  }, [sid, snapshotCurrent]);
+
+  /** Rebuild a minimal live view straight from the server — the fallback for
+   * a tab whose in-memory snapshot is gone (a page reload wiped `tabStash`,
+   * a `useRef`, while the session itself survives server-side). Only
+   * structure/preview come back; config, computed columns and style rules
+   * were never persisted server-side in the first place (confirmed reading
+   * `session.py`), so this is a fresh look at the table, not an undo. */
+  const restoreTabFromServer = useCallback(async (targetSid: string, label: string) => {
+    try {
+      const prev = await api.rowsPreview(targetSid);
+      if (sid) tabStash.current[sid] = snapshotCurrent();
+      rawFileRef.current = null;
+      setSid(targetSid); setLoadedName(label); setMeta(null);
+      setSheet(null); setSheets([]); setTableCount(0);
+      setTableMarker(""); setTableIndex(0); setTableHeaderMode("local");
+      setPreview(prev); setColumns(prev.columns); setVisible(prev.columns); setUnmapped([]);
+      setConfigYaml(null); setConfigFields({}); setUnmatchedConfig([]);
+      setHeader(defaultHeader());
+      setFields(Object.fromEntries(prev.columns.map((c) => [c, defaultField(c)])));
+      setTco(null); setComputed([]); setSqlComputed([]); setStyleRules([]);
+      setTableFilters({}); setConfigVariables({}); setRefVariables([]);
+      setStrictHeader(false); setMinHeader(false); setResult(null);
+      setTab("data"); setDeletedTotal(0);
+      return true;
+    } catch {
+      // The session expired or was dropped server-side (TTL, or someone
+      // closed it elsewhere) — the tab it belonged to cannot be reopened.
+      setTabs((ts) => ts.filter((t) => t.sid !== targetSid));
+      delete tabStash.current[targetSid];
+      return false;
+    }
+  }, [sid, snapshotCurrent]);
+
+  /** Switch to an already-open tab: stash the outgoing one, restore the
+   * target from its in-memory snapshot — or, if there isn't one (a reload
+   * emptied the cache), fetch a minimal live view from the server. */
+  const switchToTab = useCallback((targetSid: string) => {
+    if (targetSid === sid) return;
+    const snap = tabStash.current[targetSid];
+    if (snap) {
+      if (sid) tabStash.current[sid] = snapshotCurrent();
+      restoreSnapshot(snap);
+      delete tabStash.current[targetSid];
+      return;
+    }
+    const label = tabs.find((t) => t.sid === targetSid)?.label ?? targetSid;
+    restoreTabFromServer(targetSid, label);
+  }, [sid, snapshotCurrent, restoreSnapshot, tabs, restoreTabFromServer]);
+
+  /** Stash the live tab (still listed in `tabs`, recoverable by clicking it)
+   * and fall back to the source picker — the only way to start a genuinely
+   * new tab once one is already loaded, since the picker itself only
+   * renders while no file is active. */
+  const newTab = useCallback(() => {
+    if (sid) tabStash.current[sid] = snapshotCurrent();
+    rawFileRef.current = null;
+    setSid(null); setLoadedName(null); setMeta(null);
+    setSheet(null); setSheets([]); setTableCount(0);
+    setTableMarker(""); setTableIndex(0); setTableHeaderMode("local");
+    setPreview(null); setColumns([]); setVisible([]); setUnmapped([]);
+    setConfigYaml(null); setConfigFields({}); setUnmatchedConfig([]);
+    setHeader(defaultHeader()); setFields({}); setTco(null);
+    setComputed([]); setSqlComputed([]); setStyleRules([]);
+    setTableFilters({}); setConfigVariables({}); setRefVariables([]);
+    setStrictHeader(false); setMinHeader(false); setResult(null);
+    setTab("schema"); setDeletedTotal(0);
+  }, [sid, snapshotCurrent]);
+
+  // Survive a page reload: the tab bar itself is cheap to keep in
+  // sessionStorage (sid + label only), even though each tab's in-progress
+  // edits are not — those were never durable across a reload anyway (see
+  // `restoreTabFromServer`). Read once on mount, before anything can
+  // overwrite the key with the fresh-boot empty state.
+  const tabsHydrated = useRef(false);
+  useEffect(() => {
+    if (tabsHydrated.current) return;
+    tabsHydrated.current = true;
+    try {
+      const raw = sessionStorage.getItem("fx_tabs");
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as { tabs?: { sid: string; label: string }[]; activeSid?: string | null };
+      if (Array.isArray(parsed.tabs) && parsed.tabs.length) {
+        setTabs(parsed.tabs);
+        if (parsed.activeSid) {
+          const label = parsed.tabs.find((t) => t.sid === parsed.activeSid)?.label ?? parsed.activeSid;
+          restoreTabFromServer(parsed.activeSid, label);
+        }
+      }
+    } catch { /* corrupt or unavailable sessionStorage: start empty, as before */ }
+  }, [restoreTabFromServer]);
+
+  useEffect(() => {
+    try { sessionStorage.setItem("fx_tabs", JSON.stringify({ tabs, activeSid: sid })); }
+    catch { /* sessionStorage unavailable (private mode) — tabs just won't survive a reload */ }
+  }, [tabs, sid]);
 
   useEffect(() => { api.presets().then(setPresets).catch(() => toast("Impossible de joindre l'API.", "err")); }, [toast]);
 
@@ -177,6 +337,17 @@ export default function App() {
         tableIndex: indexToUse,
         tableHeaderMode: modeToUse,
       });
+      // `over` means this call is correcting the sheet/table slice of the
+      // ALREADY-open tab (self-recursion below, or a re-applied config) —
+      // never a new tab. Only a bare call (the user picking a file) opens one.
+      if (!over) {
+        if (!canOpenTab(profile?.max_open_tabs ?? 0, tabs.length)) {
+          toast(`Limite de ${profile?.max_open_tabs} onglet(s) ouvert(s) atteinte pour cet environnement.`, "err");
+          api.dropSession(res.session_id).catch(() => {});
+          return;
+        }
+        openNewTab(res.session_id, file.name);
+      }
       rawFileRef.current = file;
       setSid(res.session_id);
       setLoadedName(file.name);
@@ -192,11 +363,12 @@ export default function App() {
       setUnmapped([]);
       setConfigFields({});
       setUnmatchedConfig([]);
-      setComputed([]);
+      setComputed([]); setSqlComputed([]); setStyleRules([]);
       setTableFilters({});
-      setConfigVariables({});
+      setConfigVariables({}); setRefVariables([]);
       setStrictHeader(false);
       setMinHeader(false);
+      setDeletedTotal(0);
       setFields(Object.fromEntries(cols.map((c) => [c, defaultField(c)])));
       setResult(null);
       setTab("schema");
@@ -212,7 +384,7 @@ export default function App() {
         }
       }
     } catch (e) { toast(String((e as Error).message), "err"); }
-  }, [presets, delimiterKey, fileType, encoding, sheet, tableMarker, tableIndex, tableHeaderMode, configYaml, matchConfig, toast]);
+  }, [presets, delimiterKey, fileType, encoding, sheet, tableMarker, tableIndex, tableHeaderMode, configYaml, matchConfig, toast, openNewTab, profile, tabs]);
 
   /**
    * Adopt a session created server-side by another route — today the EDI pivot.
@@ -220,6 +392,12 @@ export default function App() {
    * validation machinery applies to it unchanged.
    */
   const adoptSession = useCallback((res: FileResponse, label = "edi-pivot.csv") => {
+    if (!canOpenTab(profile?.max_open_tabs ?? 0, tabs.length)) {
+      toast(`Limite de ${profile?.max_open_tabs} onglet(s) ouvert(s) atteinte pour cet environnement.`, "err");
+      api.dropSession(res.session_id).catch(() => {});
+      return;
+    }
+    openNewTab(res.session_id, label);       // stash whatever tab was live, register this one
     rawFileRef.current = null;               // no local raw file behind this one
     setSid(res.session_id);
     setLoadedName(label);
@@ -230,16 +408,20 @@ export default function App() {
     const cols = res.preview.columns;
     setColumns(cols); setVisible(cols);
     setUnmapped([]); setConfigFields({}); setUnmatchedConfig([]);
-    setComputed([]); setTableFilters({}); setConfigVariables({});
+    setComputed([]); setSqlComputed([]); setStyleRules([]);
+    setTableFilters({}); setConfigVariables({}); setRefVariables([]);
     setStrictHeader(false);
     setMinHeader(false);
+    setConfigYaml(null);
+    setHeader(defaultHeader());
+    setDeletedTotal(0);
     // A session seeded from a config carries its rules; otherwise start plain.
     setFields(res.seeded_fields && Object.keys(res.seeded_fields).length
       ? Object.fromEntries(cols.map((c) => [c, res.seeded_fields![c] ?? defaultField(c)]))
       : Object.fromEntries(cols.map((c) => [c, defaultField(c)])));
     setResult(null);
     setTab("schema");
-  }, []);
+  }, [openNewTab, profile, tabs, toast]);
 
   /**
    * Load a report that did not come from running validation just now — either
@@ -422,17 +604,36 @@ export default function App() {
 
   // Clear everything without reloading the page.
   const resetAll = useCallback(() => {
+    // "Everything" includes every other open tab, not just the live one —
+    // free them server-side too rather than leaving them for the TTL sweep.
+    tabs.forEach((t) => api.dropSession(t.sid).catch(() => {}));
+    if (sid && !tabs.some((t) => t.sid === sid)) api.dropSession(sid).catch(() => {});
+    setTabs([]); tabStash.current = {};
     rawFileRef.current = null;
     setSid(null); setLoadedName(null); setMeta(null);
     setSheet(null); setSheets([]);
     setPreview(null); setColumns([]); setVisible([]); setUnmapped([]);
-    setFields({}); setComputed([]); setResult(null);
+    setFields({}); setComputed([]); setSqlComputed([]); setStyleRules([]); setResult(null);
     setTco(null); setConfigYaml(null); setConfigFields({}); setUnmatchedConfig([]);
     setTableFilters({}); setHeader(defaultHeader()); setTab("schema");
     setConfigVariables({}); setRefVariables([]); setStrictHeader(false); setMinHeader(false);
     setTableMarker(""); setTableIndex(0); setTableHeaderMode("local"); setTableCount(0);
+    setDeletedTotal(0);
     toast("Reset — everything cleared.", "ok");
-  }, [toast]);
+  }, [toast, tabs, sid]);
+
+  const closeTab = useCallback((targetSid: string) => {
+    api.dropSession(targetSid).catch(() => {});   // best-effort — the TTL sweep would catch it anyway
+    delete tabStash.current[targetSid];
+    const remaining = tabs.filter((t) => t.sid !== targetSid);
+    setTabs(remaining);
+    if (targetSid !== sid) return;                // closing a background tab: nothing live to change
+    const next = remaining[remaining.length - 1];
+    if (!next) { resetAll(); return; }
+    const snap = tabStash.current[next.sid];
+    if (snap) { restoreSnapshot(snap); delete tabStash.current[next.sid]; }
+    else { restoreTabFromServer(next.sid, next.label); }
+  }, [tabs, sid, restoreSnapshot, resetAll, restoreTabFromServer]);
 
   // ── yaml export (lazy, when on yaml tab) ─────────────────
   useEffect(() => {
@@ -490,10 +691,6 @@ export default function App() {
     return m;
   }, [fields, columns]);
 
-  // Discard all manual cell edits: server restores work_df from the raw file
-  // (re-applying the header treatment), we drop the stale result and show the
-  // fresh preview.
-  const [deletedTotal, setDeletedTotal] = useState(0);
   const [envs, setEnvs] = useState<string[]>(["default"]);
   /**
    * The environment and the tab live in the URL.
@@ -510,7 +707,6 @@ export default function App() {
 
   // Switching environment re-scopes every library call. Panels reload their
   // own lists on mount, so changing it here is enough — no prop drilling.
-  const [profile, setProfile] = useState<EnvProfile | null>(null);
   const [me, setMe] = useState<import("./lib/types").AuthUser | null>(null);
   const [gateDone, setGateDone] = useState(false);
 
@@ -743,6 +939,24 @@ export default function App() {
           {envs.map((e) => <option key={e} value={e}>{e}</option>)}
         </select>
       </header>
+      {tabs.length > 0 && (
+        <div className="session-tabs">
+          {tabs.map((t) => (
+            <div key={t.sid} className={`session-tab ${t.sid === sid ? "active" : ""}`}>
+              <button className="session-tab-label" onClick={() => switchToTab(t.sid)} title={t.label}>
+                {t.label}
+              </button>
+              <button className="session-tab-close" title="Fermer cet onglet"
+                      onClick={(e) => { e.stopPropagation(); closeTab(t.sid); }}>×</button>
+            </div>
+          ))}
+          <button className="session-tab-new" onClick={newTab}
+                  disabled={!canOpenTab(profile?.max_open_tabs ?? 0, tabs.length)}
+                  title={canOpenTab(profile?.max_open_tabs ?? 0, tabs.length)
+                    ? "Ouvrir un nouvel onglet"
+                    : `Limite de ${profile?.max_open_tabs} onglet(s) atteinte pour cet environnement`}>+</button>
+        </div>
+      )}
       {tabsNav}
 
       <div className={`body ${FULL_WIDTH.has(tab) || sidebarCollapsed ? "wide" : ""}`}>
@@ -802,7 +1016,8 @@ export default function App() {
                     <Home me={me} env={env} profile={profile} shows={shows}
                           go={(k) => setTab(k as Tab)} />
                   )
-                    : tab === "flows" ? <FlowsPanel notify={toast} onOpenReport={loadReport} />
+                    : tab === "flows" ? <FlowsPanel notify={toast} onOpenReport={loadReport}
+                        sid={sid} columns={effectiveColumns} />
                     : tab === "admin" ? <AdminPanel me={me} notify={toast}
                                                      onIdentityChange={() => window.location.reload()} />
                     : tab === "ops" ? <OpsPanel notify={toast} />
@@ -811,7 +1026,7 @@ export default function App() {
                     : tab === "functions" ? <FunctionsPanel notify={toast} />
                     : tab === "report" ? <ReportPanel result={result} sid={sid} notify={toast} onLoadReport={loadReport} />
                     : tab === "computed" ? (
-                        <ComputedPanel sid={sid} notify={toast} columns={effectiveColumns} computed={computed}
+                        <ComputedPanel sid={sid} tabs={tabs} notify={toast} columns={effectiveColumns} computed={computed}
                           setComputed={setComputed} sqlComputed={sqlComputed} setSqlComputed={setSqlComputed}
                           styleRules={styleRules} setStyleRules={setStyleRules}
                           variables={configVariables}
@@ -868,7 +1083,7 @@ export default function App() {
                   />
                 )}
                 {tab === "computed" && (
-                  <ComputedPanel sid={sid} notify={toast} columns={effectiveColumns} computed={computed} setComputed={setComputed}
+                  <ComputedPanel sid={sid} tabs={tabs} notify={toast} columns={effectiveColumns} computed={computed} setComputed={setComputed}
                     sqlComputed={sqlComputed} setSqlComputed={setSqlComputed}
                     styleRules={styleRules} setStyleRules={setStyleRules}
                     variables={configVariables} setVariables={setConfigVariables}
@@ -887,7 +1102,8 @@ export default function App() {
                     onRowsChanged={onRowsChanged} deletedTotal={deletedTotal} />
                 )}
                 {tab === "report" && <ReportPanel result={result} sid={sid} notify={toast} onLoadReport={loadReport} />}
-                {tab === "flows" && <FlowsPanel notify={toast} onOpenReport={loadReport} />}
+                {tab === "flows" && <FlowsPanel notify={toast} onOpenReport={loadReport}
+                    sid={sid} columns={effectiveColumns} />}
                 {tab === "edi" && <EdiPanel notify={toast} onSession={adoptSession} />}
                 {tab === "canvas" && <FlowCanvas notify={toast}
                     onOpenSession={(res) => { adoptSession(res, "flux"); setTab("schema"); }} />}

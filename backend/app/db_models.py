@@ -31,7 +31,8 @@ import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy import (
-    JSON, Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func,
+    JSON, Boolean, DateTime, ForeignKey, Integer, LargeBinary, String, Text,
+    UniqueConstraint, func,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -447,6 +448,10 @@ class EnvironmentProfile(Base):
     tco_editable: Mapped[bool] = mapped_column(Boolean, default=True)
     # Buttons: [{label, graph_id, params, confirm}] — each one calls a flow.
     actions_json: Mapped[list] = mapped_column(JSONBody, default=list)
+    # How many tabs (open sessions) one person may keep at once here. 0 = no
+    # limit — a session lives in the database now (v37), not process memory,
+    # so the ceiling is about UI clutter and stray abandoned tabs, not RAM.
+    max_open_tabs: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now,
                                                  onupdate=_now)
@@ -706,3 +711,29 @@ class ArtefactGrant(Base):
 
     __table_args__ = (UniqueConstraint("artefact_id", "subject_kind", "subject",
                                        name="uq_artefact_grant"),)
+
+
+class WorkSessionRow(Base):
+    """
+    The interactive workbench session (`app.session.Session`), pickled whole.
+
+    This is what makes `uvicorn --workers 2` and a container restart survive:
+    the process no longer holds the only copy of anyone's work. One blob per
+    session rather than a column per field — `Session` carries DataFrames,
+    Series, sets and an arbitrary Pydantic `header_cfg`, and pickling the
+    object whole round-trips all of that natively instead of hand-rolling a
+    parquet/JSON split that would still need special cases for the `set`
+    fields and the dict-of-Series ones. The blob is only ever written and
+    read by this backend, never accepted from an external caller, so this is
+    the same trust boundary as the rest of the app's data, not a new one.
+
+    Ephemeral by design, same as the in-memory dict it replaces: swept on TTL,
+    never a migration target for anything meant to outlive a browser tab.
+    """
+    __tablename__ = "work_sessions"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    blob: Mapped[bytes] = mapped_column(LargeBinary)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    touched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now,
+                                                 index=True)

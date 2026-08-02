@@ -80,9 +80,9 @@ def _resolve_edi_model(s: Session, model_yaml: Optional[str],
 
 
 # ── reading a source into pivot records ───────────────────────────────
-def _read_flat_frame_from_session(sid: str) -> pd.DataFrame:
+def _read_flat_frame_from_session(sid: str, s: Session) -> pd.DataFrame:
     try:
-        sess = store.get(sid)
+        sess = store.get(s, sid)
     except KeyError:
         raise HTTPException(404, f"Session {sid} not found.")
     return sess.active_df()
@@ -150,7 +150,7 @@ async def to_pivot_object(
 
     if source == "flat":
         if session_id:
-            df = _read_flat_frame_from_session(session_id)
+            df = _read_flat_frame_from_session(session_id, s)
         elif dataset_id:
             df = _read_dataset_frame(s, dataset_id)
         elif file is not None:
@@ -180,7 +180,7 @@ async def to_pivot_object(
 
     if target == "session":
         df = pivot_service.records_to_frame(records)
-        sid = store.create(df, file_type="PIVOT", encoding="N/A", delimiter="N/A")
+        sid = store.create(s, df, file_type="PIVOT", encoding="N/A", delimiter="N/A")
         return {"session_id": sid, "documents": len(records),
                 "preview": _records_preview(records), "checks": checks}
 
@@ -224,7 +224,7 @@ async def convert_through_pivot(
     # ---- read source → pivot records ----
     if source_kind == "flat":
         if session_id:
-            df = _read_flat_frame_from_session(session_id)
+            df = _read_flat_frame_from_session(session_id, s)
         elif dataset_id:
             df = _read_dataset_frame(s, dataset_id)
         elif file is not None:
@@ -308,7 +308,7 @@ async def suggest_mapping(
         m = Mapping(name=f"{model.name} ↔ pivot", source_kind="edi", links=links)
     else:
         if session_id:
-            df = _read_flat_frame_from_session(session_id)
+            df = _read_flat_frame_from_session(session_id, s)
         elif dataset_id:
             df = _read_dataset_frame(s, dataset_id)
         elif file is not None:

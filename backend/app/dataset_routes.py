@@ -13,6 +13,7 @@ the fix lives in the config or in the rows.
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from typing import Dict, List, Optional
 
 import pandas as pd
@@ -100,11 +101,14 @@ def _info(d, row_count: Optional[int] = None) -> DatasetInfo:
 # ══════════════════════════════════════════════════════════════════════
 # Reading the session the same way the export does
 # ══════════════════════════════════════════════════════════════════════
-def _session_or_404(sid: str):
+@contextmanager
+def _session_or_404(sid: str, s: Session):
     try:
-        return store.get(sid)
+        sess = store.get(s, sid)
     except KeyError:
         raise HTTPException(404, "Session inconnue ou expirée.")
+    yield sess
+    store.save(s, sid, sess)
 
 
 def _frame_and_errors(sess, columns: List[str]) -> tuple[pd.DataFrame, set, dict]:
@@ -265,12 +269,12 @@ def dataset_writes(dataset_id: str, limit: int = 30, s: Session = Depends(get_se
 @router.post("/files/{sid}/datasets/preflight", response_model=WriteResponse)
 def preflight(sid: str, req: WriteRequest, s: Session = Depends(get_session)):
     """Dry run. Changes nothing, explains everything."""
-    sess = _session_or_404(sid)
-    _df, _err, _types, target, verdict, _key = _run_preflight(sess, req, s)
-    return WriteResponse(
-        ok=verdict["ok"], blocked_by=verdict["blocked_by"],
-        problems=verdict["problems"], plan=verdict["plan"],
-        dataset=_info(target, repo.count_rows(s, target.id)) if target else None)
+    with _session_or_404(sid, s) as sess:
+        _df, _err, _types, target, verdict, _key = _run_preflight(sess, req, s)
+        return WriteResponse(
+            ok=verdict["ok"], blocked_by=verdict["blocked_by"],
+            problems=verdict["problems"], plan=verdict["plan"],
+            dataset=_info(target, repo.count_rows(s, target.id)) if target else None)
 
 
 @router.post("/files/{sid}/datasets/write", response_model=WriteResponse)
@@ -282,144 +286,144 @@ def write_dataset(sid: str, req: WriteRequest, env: str = "",
     blocking verdict — the refusal itself is logged, because "why did this not
     go through" is exactly the question asked a week later.
     """
-    sess = _session_or_404(sid)
-    df, error_rows, types, target, verdict, key_fields = _run_preflight(sess, req, s)
-    # Writing into an *existing* table is decided by that table, not only by the
-    # environment role: business tables and personal ones cannot share one rule.
-    if target is not None and getattr(user, "id", ""):
-        scope = env or getattr(target, "environment", "") or repo.DEFAULT_ENV
-        perm = repo.dataset_permission(s, target, user, _auth.role_in(s, user, scope),
-                                       environment=scope)
-        if not repo.can_on_dataset(perm, "write"):
-            raise HTTPException(
-                403, f"Vous n'avez pas le droit d'écriture sur la table "
-                     f"« {target.name} » (vous avez « {perm or 'aucun accès'} »).")
-    name = (req.name.strip() or (target.name if target else ""))
-
-    if not verdict["ok"]:
-        w = repo.log_write(
-            s, dataset_id=target.id if target else None, dataset_name=name,
-            mode=req.mode, key_fields=key_fields, source_name=req.source_name,
-            ok=False, blocked_by=verdict["blocked_by"],
-            error=next((p["message"] for p in verdict["problems"]
-                        if p["severity"] == "error"), "Écriture refusée."),
-            problems=verdict["problems"], rows_in=int(len(df)))
-        commit(s)                      # a refusal is a record, not a non-event
-        return WriteResponse(ok=False, blocked_by=verdict["blocked_by"],
-                             problems=verdict["problems"], plan=verdict["plan"],
-                             dataset=_info(target) if target else None, write_id=w.id)
-
-    # ── confidentiality ───────────────────────────────────────────────
-    # Encrypt before anything is written. Doing it here rather than at each
-    # call site means a new way of writing cannot forget: the frame that
-    # reaches storage is already protected.
-    sensitivity = dict(getattr(sess, "sensitivity", {}) or {})
-    if sensitivity:
-        from sqlalchemy import select as _select
-        from app.db_models import CryptoKey as _CK
-        from app.services import crypto_service as _cs
-        alive = {k.name: k.wrapped_key for k in s.scalars(
-            _select(_CK).where(_CK.name.in_(set(sensitivity.values())),
-                               _CK.active.is_(True))) if k.wrapped_key}
-        gone = sorted(set(sensitivity.values()) - set(alive))
-        if gone:
-            raise HTTPException(
-                409, f"Key(s) {', '.join(gone)} no longer exist: this configuration "
-                     f"cannot be used to write confidential columns.")
-        # A confidential column cannot serve as a merge key: ciphertext differs
-        # on every encryption, so the same person would never match themselves.
-        clash = [c for c in key_fields if c in sensitivity]
-        if clash:
-            raise HTTPException(
-                422, f"Column(s) {', '.join(clash)} are confidential and cannot be a "
-                     f"merge key — encrypted values never compare equal.")
-        try:
-            df = _cs.encrypt_frame(df, sensitivity, alive)
-        except _cs.CryptoUnavailable as e:
-            raise HTTPException(503, str(e))
-
-    # Row selection is applied *after* validation so a rejected row stays
-    # rejected even if someone ticked it: approving cannot override a rule.
-    if req.include_rows:
-        keep = [i for i in req.include_rows if i in set(df.index)]
-        df = df.loc[keep]
-    if req.exclude_rows:
-        df = df.drop(index=[i for i in req.exclude_rows if i in set(df.index)],
-                     errors="ignore")
-
-    payload = ds.rows_payload(df, key_fields=key_fields,
-                              error_rows=error_rows, policy=req.policy)
-    schema = ds.schema_of(df, key_fields, types)
-
-    if target is None:
-        if not name:
-            raise HTTPException(422, "Donne un nom à la table à créer.")
-        try:
-            # Creating a table is its own right: not everyone who may write
-            # into an existing one may invent new ones.
-            if getattr(user, "id", "") and not _perms.can(
-                    _auth.role_in(s, user, env or repo.DEFAULT_ENV),
-                    "dataset.create"):
+    with _session_or_404(sid, s) as sess:
+        df, error_rows, types, target, verdict, key_fields = _run_preflight(sess, req, s)
+        # Writing into an *existing* table is decided by that table, not only by the
+        # environment role: business tables and personal ones cannot share one rule.
+        if target is not None and getattr(user, "id", ""):
+            scope = env or getattr(target, "environment", "") or repo.DEFAULT_ENV
+            perm = repo.dataset_permission(s, target, user, _auth.role_in(s, user, scope),
+                                           environment=scope)
+            if not repo.can_on_dataset(perm, "write"):
                 raise HTTPException(
-                    403, "« Créer une table » demande le rôle 'editor'.")
-            target = repo.create_dataset(s, name, schema, req.description)
-            target.owner_id = getattr(user, "id", "")
-            target.is_managed = bool(req.managed)
-        except repo.Conflict as e:
-            raise HTTPException(409, str(e))
-    elif req.mode == "replace":
-        target.schema_json = schema        # replace is allowed to redefine
+                    403, f"Vous n'avez pas le droit d'écriture sur la table "
+                         f"« {target.name} » (vous avez « {perm or 'aucun accès'} »).")
+        name = (req.name.strip() or (target.name if target else ""))
 
-    deleted = updated = written = 0
-    if req.mode == "replace":
-        deleted = repo.delete_all_rows(s, target.id)
-        written = repo.insert_rows(s, target.id, payload)
-    elif req.mode == "append":
-        written = repo.insert_rows(s, target.id, payload)
-    else:                                   # upsert
-        hashes = [r["key_hash"] for r in payload if r["key_hash"]]
-        known = repo.existing_key_map(s, target.id, hashes)
-        to_insert = [r for r in payload if not r["key_hash"] or r["key_hash"] not in known]
-        to_update = [{"id": known[r["key_hash"]], "data": r["data"]}
-                     for r in payload if r["key_hash"] and r["key_hash"] in known]
-        written = repo.insert_rows(s, target.id, to_insert)
-        updated = repo.update_rows(s, to_update)
+        if not verdict["ok"]:
+            w = repo.log_write(
+                s, dataset_id=target.id if target else None, dataset_name=name,
+                mode=req.mode, key_fields=key_fields, source_name=req.source_name,
+                ok=False, blocked_by=verdict["blocked_by"],
+                error=next((p["message"] for p in verdict["problems"]
+                            if p["severity"] == "error"), "Écriture refusée."),
+                problems=verdict["problems"], rows_in=int(len(df)))
+            commit(s)                      # a refusal is a record, not a non-event
+            return WriteResponse(ok=False, blocked_by=verdict["blocked_by"],
+                                 problems=verdict["problems"], plan=verdict["plan"],
+                                 dataset=_info(target) if target else None, write_id=w.id)
 
-    target.row_count = repo.count_rows(s, target.id)
-    rejected = int(len(df)) - len(payload)
-    w = repo.log_write(
-        s, dataset_id=target.id, dataset_name=target.name, mode=req.mode,
-        key_fields=key_fields, source_name=req.source_name, ok=True,
-        problems=[p for p in verdict["problems"] if p["severity"] == "warning"],
-        rows_in=int(len(df)), rows_written=written, rows_updated=updated,
-        rows_rejected=rejected, rows_deleted=deleted)
+        # ── confidentiality ───────────────────────────────────────────────
+        # Encrypt before anything is written. Doing it here rather than at each
+        # call site means a new way of writing cannot forget: the frame that
+        # reaches storage is already protected.
+        sensitivity = dict(getattr(sess, "sensitivity", {}) or {})
+        if sensitivity:
+            from sqlalchemy import select as _select
+            from app.db_models import CryptoKey as _CK
+            from app.services import crypto_service as _cs
+            alive = {k.name: k.wrapped_key for k in s.scalars(
+                _select(_CK).where(_CK.name.in_(set(sensitivity.values())),
+                                   _CK.active.is_(True))) if k.wrapped_key}
+            gone = sorted(set(sensitivity.values()) - set(alive))
+            if gone:
+                raise HTTPException(
+                    409, f"Key(s) {', '.join(gone)} no longer exist: this configuration "
+                         f"cannot be used to write confidential columns.")
+            # A confidential column cannot serve as a merge key: ciphertext differs
+            # on every encryption, so the same person would never match themselves.
+            clash = [c for c in key_fields if c in sensitivity]
+            if clash:
+                raise HTTPException(
+                    422, f"Column(s) {', '.join(clash)} are confidential and cannot be a "
+                         f"merge key — encrypted values never compare equal.")
+            try:
+                df = _cs.encrypt_frame(df, sensitivity, alive)
+            except _cs.CryptoUnavailable as e:
+                raise HTTPException(503, str(e))
 
-    commit(s)
-    return WriteResponse(
-        ok=True, problems=[p for p in verdict["problems"] if p["severity"] == "warning"],
-        plan=verdict["plan"], dataset=_info(target, target.row_count),
-        rows_written=written, rows_updated=updated, rows_rejected=rejected,
-        rows_deleted=deleted, write_id=w.id)
+        # Row selection is applied *after* validation so a rejected row stays
+        # rejected even if someone ticked it: approving cannot override a rule.
+        if req.include_rows:
+            keep = [i for i in req.include_rows if i in set(df.index)]
+            df = df.loc[keep]
+        if req.exclude_rows:
+            df = df.drop(index=[i for i in req.exclude_rows if i in set(df.index)],
+                         errors="ignore")
+
+        payload = ds.rows_payload(df, key_fields=key_fields,
+                                  error_rows=error_rows, policy=req.policy)
+        schema = ds.schema_of(df, key_fields, types)
+
+        if target is None:
+            if not name:
+                raise HTTPException(422, "Donne un nom à la table à créer.")
+            try:
+                # Creating a table is its own right: not everyone who may write
+                # into an existing one may invent new ones.
+                if getattr(user, "id", "") and not _perms.can(
+                        _auth.role_in(s, user, env or repo.DEFAULT_ENV),
+                        "dataset.create"):
+                    raise HTTPException(
+                        403, "« Créer une table » demande le rôle 'editor'.")
+                target = repo.create_dataset(s, name, schema, req.description)
+                target.owner_id = getattr(user, "id", "")
+                target.is_managed = bool(req.managed)
+            except repo.Conflict as e:
+                raise HTTPException(409, str(e))
+        elif req.mode == "replace":
+            target.schema_json = schema        # replace is allowed to redefine
+
+        deleted = updated = written = 0
+        if req.mode == "replace":
+            deleted = repo.delete_all_rows(s, target.id)
+            written = repo.insert_rows(s, target.id, payload)
+        elif req.mode == "append":
+            written = repo.insert_rows(s, target.id, payload)
+        else:                                   # upsert
+            hashes = [r["key_hash"] for r in payload if r["key_hash"]]
+            known = repo.existing_key_map(s, target.id, hashes)
+            to_insert = [r for r in payload if not r["key_hash"] or r["key_hash"] not in known]
+            to_update = [{"id": known[r["key_hash"]], "data": r["data"]}
+                         for r in payload if r["key_hash"] and r["key_hash"] in known]
+            written = repo.insert_rows(s, target.id, to_insert)
+            updated = repo.update_rows(s, to_update)
+
+        target.row_count = repo.count_rows(s, target.id)
+        rejected = int(len(df)) - len(payload)
+        w = repo.log_write(
+            s, dataset_id=target.id, dataset_name=target.name, mode=req.mode,
+            key_fields=key_fields, source_name=req.source_name, ok=True,
+            problems=[p for p in verdict["problems"] if p["severity"] == "warning"],
+            rows_in=int(len(df)), rows_written=written, rows_updated=updated,
+            rows_rejected=rejected, rows_deleted=deleted)
+
+        commit(s)
+        return WriteResponse(
+            ok=True, problems=[p for p in verdict["problems"] if p["severity"] == "warning"],
+            plan=verdict["plan"], dataset=_info(target, target.row_count),
+            rows_written=written, rows_updated=updated, rows_rejected=rejected,
+            rows_deleted=deleted, write_id=w.id)
 
 
 @router.get("/files/{sid}/source", response_model=TablePreview)
-def source_preview(sid: str, limit: int = 100):
+def source_preview(sid: str, limit: int = 100, s: Session = Depends(get_session)):
     """
     The file as it was actually read — before header treatment, renames and
     edits. When a write is blocked on the skeleton, this is what you look at:
     it shows whether the header landed on the right line and whether the
     delimiter split the columns the way you assumed.
     """
-    sess = _session_or_404(sid)
-    df = sess.raw_df
-    limit = max(1, min(int(limit), 1000))
-    head = df.head(limit)
-    return TablePreview(
-        columns=[str(c) for c in df.columns],
-        data=[[("" if v is None else str(v)) for v in row]
-              for row in head.itertuples(index=False, name=None)],
-        total_rows=int(len(df)), shown_rows=int(len(head)),
-        index=[int(i) for i in head.index])
+    with _session_or_404(sid, s) as sess:
+        df = sess.raw_df
+        limit = max(1, min(int(limit), 1000))
+        head = df.head(limit)
+        return TablePreview(
+            columns=[str(c) for c in df.columns],
+            data=[[("" if v is None else str(v)) for v in row]
+                  for row in head.itertuples(index=False, name=None)],
+            total_rows=int(len(df)), shown_rows=int(len(head)),
+            index=[int(i) for i in head.index])
 
 
 def _table_preview(df: pd.DataFrame, limit: int = 500) -> TablePreview:
@@ -480,11 +484,11 @@ def open_dataset(dataset_id: str, limit: int = 50_000, env: str = "",
     df = df.astype("string").fillna("")
     df, masked = ds.mask_encrypted_columns(df)
 
-    sid = store.create(df, file_type="TABLE", encoding="N/A", delimiter="N/A")
-    sess = store.get(sid)
+    sid = store.create(s, df, file_type="TABLE", encoding="N/A", delimiter="N/A")
     if masked:
         # Keep the mark so a later write cannot silently store the mask as data.
-        sess.sensitivity = {c: "?" for c in masked}
+        with store.session(s, sid) as sess:
+            sess.sensitivity = {c: "?" for c in masked}
     return FileResponse(session_id=sid, type="TABLE", encoding="N/A",
                         delimiter="N/A", preview=_table_preview(df))
 

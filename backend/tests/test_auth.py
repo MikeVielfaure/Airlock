@@ -220,6 +220,21 @@ def test_an_sso_granted_role_is_not_editable_by_hand():
     assert "directory" in r.json()["detail"].lower()
 
 
+def test_a_provider_jwks_url_can_be_set_by_hand_and_is_reported_back():
+    """Not every IdP is configured through discovery — jwks_url must be a
+    settable field on its own, not only ever filled in from a discovery doc."""
+    _signup("chef@boite.fr")
+    chef, _ = _login("chef@boite.fr")
+    r = client.post("/api/admin/providers", json={
+        "name": "corp", "client_id": "id", "jwks_url": "https://idp.example/jwks"},
+        headers=_h(chef))
+    assert r.status_code == 200, r.text
+    assert r.json()["jwks_url"] == "https://idp.example/jwks"
+
+    rows = client.get("/api/admin/providers", headers=_h(chef)).json()
+    assert [p for p in rows if p["name"] == "corp"][0]["jwks_url"] == "https://idp.example/jwks"
+
+
 def test_direct_claims_are_only_accepted_while_the_install_is_empty():
     from app.db import session_scope
     from app.db_models import AuthProvider

@@ -1,24 +1,48 @@
 """
 session.py
 ──────────
-In-memory session store.
+Persistent session store — the interactive workbench's raw/working
+DataFrame, TCO, attached sources, edit history and so on, one row per
+session in `work_sessions` (see `WorkSessionRow` in db_models.py).
 
-Each upload gets a session that holds the raw DataFrame, the working
-DataFrame (after header treatment / edits) and an optional TCO table.
-Sessions expire after a TTL so the process doesn't grow without bound.
+This replaces what used to be an in-memory dict: a plain dict meant
+`uvicorn --workers 2` split requests across two processes that never
+shared a copy, and a restart lost every session mid-edit. The blob is
+pickled whole rather than split field by field — `Session` carries
+DataFrames, Series, sets and an arbitrary Pydantic `header_cfg`, and
+pickling the object round-trips all of that natively instead of a bespoke
+(de)serializer that would need special cases for the `set` fields and the
+dict-of-Series ones. The blob is only ever written and read by this
+backend, never accepted from an external caller, so this is the same trust
+boundary as the rest of the app's data, not a new one.
 
-This is deliberately simple — single-process, in-memory. For a multi-worker
-deployment, swap the dict for Redis (store DataFrames as parquet bytes) behind
-the same `get` / `put` interface; nothing else changes.
+The mutation contract stays the same shape callers already use: every
+route used to do `sess = _session(sid)` then mutate attributes directly,
+relying on it being the same in-memory object — mutation *was* persistence.
+`store.session(s, sid)` is that same shape with an explicit save on a clean
+exit: `with store.session(s, sid) as sess: sess.field = ...`. An exception
+raised inside the block skips the save, so a request that fails partway
+through does not persist a half-mutated session — the same "a partial load
+writes nothing" reasoning already applied elsewhere in this app.
 """
 
+from __future__ import annotations
+
+import pickle
 import time
-import threading
 import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import Optional
+from datetime import datetime, timedelta, timezone
+from typing import Iterator, Optional
 
 import pandas as pd
+from sqlalchemy import delete, func, select
+from sqlalchemy.orm import Session as DbSession
+
+from app.db_models import WorkSessionRow
+
+DEFAULT_TTL_SECONDS = 60 * 60
 
 
 @dataclass
@@ -75,45 +99,58 @@ class Session:
         return i
 
 
-class SessionStore:
-    def __init__(self, ttl_seconds: int = 60 * 60):
-        self._ttl = ttl_seconds
-        self._lock = threading.Lock()
-        self._data: dict[str, Session] = {}
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
 
-    def create(self, raw_df: pd.DataFrame, **meta) -> str:
+
+class SessionStore:
+    def __init__(self, ttl_seconds: int = DEFAULT_TTL_SECONDS):
+        self._ttl = ttl_seconds
+
+    def create(self, s: DbSession, raw_df: pd.DataFrame, **meta) -> str:
+        self._sweep(s)
         sid = uuid.uuid4().hex
-        with self._lock:
-            self._sweep_locked()
-            self._data[sid] = Session(
-                raw_df=raw_df,
-                work_df=raw_df.copy(),
-                **meta,
-            )
+        sess = Session(raw_df=raw_df, work_df=raw_df.copy(), **meta)
+        s.add(WorkSessionRow(id=sid, blob=pickle.dumps(sess)))
+        s.commit()
         return sid
 
-    def get(self, sid: str) -> Session:
-        with self._lock:
-            sess = self._data.get(sid)
-            if sess is None:
-                raise KeyError(sid)
-            sess.touched = time.time()
-            return sess
+    def get(self, s: DbSession, sid: str) -> Session:
+        row = s.get(WorkSessionRow, sid)
+        if row is None:
+            raise KeyError(sid)
+        row.touched_at = _now()
+        s.commit()
+        return pickle.loads(row.blob)
 
-    def drop(self, sid: str) -> None:
-        with self._lock:
-            self._data.pop(sid, None)
+    def save(self, s: DbSession, sid: str, sess: Session) -> None:
+        row = s.get(WorkSessionRow, sid)
+        if row is None:
+            raise KeyError(sid)
+        sess.touched = time.time()
+        row.blob = pickle.dumps(sess)
+        row.touched_at = _now()
+        s.commit()
 
-    def count(self) -> int:
-        with self._lock:
-            self._sweep_locked()
-            return len(self._data)
+    def drop(self, s: DbSession, sid: str) -> None:
+        s.execute(delete(WorkSessionRow).where(WorkSessionRow.id == sid))
+        s.commit()
 
-    def _sweep_locked(self) -> None:
-        now = time.time()
-        expired = [k for k, s in self._data.items() if now - s.touched > self._ttl]
-        for k in expired:
-            self._data.pop(k, None)
+    def count(self, s: DbSession) -> int:
+        self._sweep(s)
+        return int(s.scalar(select(func.count()).select_from(WorkSessionRow)) or 0)
+
+    def _sweep(self, s: DbSession) -> None:
+        cutoff = _now() - timedelta(seconds=self._ttl)
+        s.execute(delete(WorkSessionRow).where(WorkSessionRow.touched_at < cutoff))
+
+    @contextmanager
+    def session(self, s: DbSession, sid: str) -> Iterator[Session]:
+        """Get, yield for the caller to mutate freely, save on a clean exit
+        only — see the module docstring for why an exception must not save."""
+        sess = self.get(s, sid)
+        yield sess
+        self.save(s, sid, sess)
 
 
 store = SessionStore()

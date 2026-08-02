@@ -68,6 +68,23 @@ def test_a_profile_is_editable_and_refuses_unknown_modules():
     assert ko.status_code == 422 and "nawak" in ko.json()["detail"]
 
 
+def test_max_open_tabs_defaults_to_unlimited_and_is_editable():
+    client.post("/api/environments", json={"name": "quota", "template": "complet"})
+    p = client.get("/api/environments/quota/profile").json()
+    assert p["max_open_tabs"] == 0                    # 0 = unlimited
+
+    r = client.post("/api/environments/quota/profile", json={"max_open_tabs": 3})
+    assert r.status_code == 200, r.text
+    assert r.json()["max_open_tabs"] == 3
+    assert client.get("/api/environments/quota/profile").json()["max_open_tabs"] == 3
+
+
+def test_max_open_tabs_cannot_be_negative():
+    client.post("/api/environments", json={"name": "quota-neg", "template": "complet"})
+    r = client.post("/api/environments/quota-neg/profile", json={"max_open_tabs": -1})
+    assert r.status_code == 422
+
+
 def test_locking_without_a_configuration_is_refused():
     client.post("/api/environments", json={"name": "vide", "template": "complet"})
     r = client.post("/api/environments/vide/profile", json={"config_locked": True})

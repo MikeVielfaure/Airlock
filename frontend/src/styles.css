@@ -182,6 +182,36 @@ textarea { resize: vertical; min-height: 64px; }
 
 .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 
+/* Open sessions, like sheet tabs — a level above the module nav below it,
+   which only ever operates on whichever one is active. */
+.session-tabs {
+  display: flex; gap: 6px; padding: 8px 22px 0; flex-wrap: wrap;
+  background: var(--panel); flex-shrink: 0;
+}
+.session-tab {
+  display: inline-flex; align-items: center; gap: 4px;
+  background: var(--panel-2); border: 1px solid var(--line); border-bottom: none;
+  border-radius: 6px 6px 0 0; padding: 2px 2px 2px 4px;
+}
+.session-tab.active { background: var(--panel); border-color: var(--accent); }
+.session-tab-label {
+  appearance: none; border: none; background: none; cursor: pointer;
+  font-size: 12px; color: var(--ink-soft); padding: 5px 4px; max-width: 160px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.session-tab.active .session-tab-label { color: var(--ink); font-weight: 500; }
+.session-tab-close {
+  appearance: none; border: none; background: none; cursor: pointer;
+  color: var(--ink-faint); font-size: 13px; line-height: 1; padding: 3px 5px; border-radius: 4px;
+}
+.session-tab-close:hover { color: var(--err); background: var(--err-bg); }
+.session-tab-new {
+  appearance: none; border: 1px solid var(--line); border-bottom: none; background: var(--panel-2);
+  cursor: pointer; color: var(--ink-soft); font-size: 14px; line-height: 1;
+  padding: 6px 10px; border-radius: 6px 6px 0 0; align-self: flex-end;
+}
+.session-tab-new:hover { color: var(--ink); background: var(--panel); }
+
 .tabs {
   display: flex; gap: 2px; padding: 0 22px; flex-wrap: wrap;
   background: var(--panel); border-bottom: 1px solid var(--line); flex-shrink: 0;

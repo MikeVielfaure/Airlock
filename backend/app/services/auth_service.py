@@ -33,7 +33,11 @@ import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
+import time
+
 import bcrypt
+import httpx
+import jwt as _pyjwt
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -167,23 +171,80 @@ def _b64url(data: str) -> bytes:
     return base64.urlsafe_b64decode(data + "=" * (-len(data) % 4))
 
 
-def decode_id_token(id_token: str) -> dict:
-    """
-    Read the claims of an OIDC id_token.
+_JWKS_TTL_SECONDS = 300           # short enough to pick up a rotated key, long enough not to hammer the IdP
+_jwks_cache: dict[str, tuple[float, list[dict]]] = {}
+_ALLOWED_ALGS = ("RS256", "RS384", "RS512", "ES256", "ES384", "ES512")
 
-    Signature verification belongs here and is NOT done: it needs the issuer's
-    JWKS, key rotation and clock-skew handling. Rather than pretend, this
-    function is only ever reached after the token came straight from the token
-    endpoint over TLS — the code path that does not require verification. A
-    deployment accepting id_tokens from anywhere else must verify first.
+
+def _fetch_jwks(jwks_url: str, *, force: bool = False) -> list[dict]:
+    now = time.time()
+    cached = _jwks_cache.get(jwks_url)
+    if not force and cached and now - cached[0] < _JWKS_TTL_SECONDS:
+        return cached[1]
+    resp = httpx.get(jwks_url, timeout=10)
+    resp.raise_for_status()
+    keys = resp.json().get("keys", [])
+    _jwks_cache[jwks_url] = (now, keys)
+    return keys
+
+
+def _find_jwk(jwks_url: str, kid: Optional[str]) -> dict:
+    keys = _fetch_jwks(jwks_url)
+    match = next((k for k in keys if not kid or k.get("kid") == kid), None)
+    if match is None:
+        # The key we want may simply have rotated in since our last fetch —
+        # refresh once before concluding it truly is not published.
+        keys = _fetch_jwks(jwks_url, force=True)
+        match = next((k for k in keys if not kid or k.get("kid") == kid), None)
+    if match is None:
+        raise AuthError("The id_token's signing key is not among the provider's published keys.")
+    return match
+
+
+def decode_id_token(id_token: str, provider: Optional[AuthProvider] = None) -> dict:
+    """
+    Read the claims of an OIDC id_token — verified when the provider has a
+    JWKS on file, since that is what makes a claim trustworthy rather than
+    merely well-formed.
+
+    Without a `provider` (or one with no `jwks_url` captured — never run
+    discovery, or a discovery document missing `jwks_uri`), this falls back
+    to reading the payload unverified. That degraded path is only ever
+    reached after the token came straight from the token endpoint over TLS
+    in the caller, and exists for providers configured before this
+    verification existed — a fresh provider should always have a jwks_url.
     """
     parts = (id_token or "").split(".")
     if len(parts) != 3:
         raise AuthError("Malformed id_token.")
+
+    if provider is None or not provider.jwks_url:
+        try:
+            return json.loads(_b64url(parts[1]))
+        except Exception as exc:  # noqa: BLE001
+            raise AuthError(f"Unreadable id_token: {exc}")
+
     try:
-        return json.loads(_b64url(parts[1]))
+        header = _pyjwt.get_unverified_header(id_token)
     except Exception as exc:  # noqa: BLE001
-        raise AuthError(f"Unreadable id_token: {exc}")
+        raise AuthError(f"Malformed id_token: {exc}")
+    alg = header.get("alg", "")
+    if alg not in _ALLOWED_ALGS:
+        raise AuthError(f"Unsupported or missing id_token signing algorithm '{alg}'.")
+
+    try:
+        jwk = _find_jwk(provider.jwks_url, header.get("kid"))
+        public_key = _pyjwt.PyJWK.from_dict(jwk).key
+        return _pyjwt.decode(
+            id_token, key=public_key, algorithms=[alg],
+            audience=provider.client_id or None, issuer=provider.issuer or None,
+            options={"require": ["exp", "iat"]})
+    except AuthError:
+        raise
+    except _pyjwt.PyJWTError as exc:
+        raise AuthError(f"id_token failed verification: {exc}")
+    except Exception as exc:  # noqa: BLE001 — a JWKS fetch failure must refuse, not crash
+        raise AuthError(f"Could not verify the id_token: {exc}")
 
 
 def apply_claim_mappings(s: Session, user: User, provider: AuthProvider,

@@ -65,7 +65,10 @@ export function SourceSelector({
   const pickDbSchema = (name: string) => {
     setDbSchemaName(name);
     const sc = dbSchemas.find((s) => s.name === name);
-    if (sc) setDbQuery(`SELECT ${sc.columns.map((c) => c.name).join(", ") || "*"} FROM ${name}`);
+    if (sc) {
+      setDbQuery(sc.query?.trim()
+        || `SELECT ${sc.columns.map((c) => c.name).join(", ") || "*"} FROM ${name}`);
+    }
   };
   const startFromDb = () => {
     if (!dbConn || !dbQuery.trim()) return;

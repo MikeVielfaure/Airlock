@@ -99,8 +99,10 @@ def test_a_sql_block_leaves_a_reproducible_history_entry():
         "visible_cols": COLS, "fields": FIELDS,
         "sql_computed": [{"name": "code_lower", "expression":
             "SELECT _row_id, LOWER(CODE) AS code_lower FROM self"}]})
+    from app.db import session_scope
     from app.session import store
-    hist = store.get(sid).history
+    with session_scope() as s:
+        hist = store.get(s, sid).history
     ops = {h["op"]: h for h in hist}
     assert "sql_compute" in ops
     assert ops["sql_compute"]["columns"] == ["code_lower"]

@@ -49,6 +49,11 @@ interface Props {
   /** Feed a run's report straight into the workbench's Report tab, in the
    * same shape a JSON import would produce — one mechanism, two doors in. */
   onOpenReport: (report: ReportRow[], tcoUncovered?: Record<string, { value: string; count: number }[]>) => void;
+  /** The active workbench session, if any — lets a TCO be built from
+   * whatever data already loaded there (file, blank, SQL, API...) instead
+   * of a second, TCO-specific loading path. */
+  sid?: string | null;
+  columns?: string[];
 }
 
 /** A stored run's report is grouped by id (one entry per row, each holding
@@ -72,7 +77,7 @@ function flattenRunReport(rows: { id: string | number;
  * fed from the Yaml / Computed tabs ("save to library") and from the TCO
  * mini-form below.
  */
-export function FlowsPanel({ notify, onOpenReport }: Props) {
+export function FlowsPanel({ notify, onOpenReport, sid, columns = [] }: Props) {
   const [openRun, setOpenRun] = useState<string>("");
   const [openReport, setOpenReport] = useState<ReportRow[]>([]);
   const [openBusy, setOpenBusy] = useState(false);
@@ -94,9 +99,13 @@ export function FlowsPanel({ notify, onOpenReport }: Props) {
   // tco mini-form
   const [tcoName, setTcoName] = useState("");
   const tcoFileRef = useRef<HTMLInputElement>(null);
-  const [tcoMode, setTcoMode] = useState<"build" | "upload">("build");
+  const [tcoMode, setTcoMode] = useState<"build" | "upload" | "session">("build");
   const [tcoTarget, setTcoTarget] = useState("");
   const [tcoRows, setTcoRows] = useState<TcoRow[]>([{ type: "", source: "", target: "" }]);
+  const [tcoSourceCol, setTcoSourceCol] = useState("");
+  const [tcoTargetCol, setTcoTargetCol] = useState("");
+  const [tcoTypeCol, setTcoTypeCol] = useState("");
+  const [tcoTypeValue, setTcoTypeValue] = useState("");
 
   // run state
   const [runningFlow, setRunningFlow] = useState<string | null>(null);
@@ -198,6 +207,22 @@ export function FlowsPanel({ notify, onOpenReport }: Props) {
       }
       setTcoRows([{ type: "", source: "", target: "" }]);
       setTcoTarget("");
+      refresh();
+    } catch (e) { notify(e instanceof Error ? e.message : "Échec de l'enregistrement du TCO.", "err"); }
+  };
+
+  const saveTcoFromSession = async () => {
+    if (!sid || !tcoSourceCol.trim() || !tcoTargetCol.trim()) return;
+    if (!tcoTarget && !tcoName.trim()) { notify("Donnez un nom à ce TCO.", "err"); return; }
+    try {
+      const r = await api.saveSessionAsTco(sid, {
+        source_column: tcoSourceCol, target_column: tcoTargetCol,
+        type_column: tcoTypeCol || undefined, type_value: tcoTypeCol ? undefined : tcoTypeValue,
+        artefact_id: tcoTarget || undefined, name: tcoTarget ? undefined : tcoName.trim(),
+      });
+      notify(`TCO enregistré — v${r.version_no}, ${r.rows} ligne(s).`, "ok");
+      setTcoSourceCol(""); setTcoTargetCol(""); setTcoTypeCol(""); setTcoTypeValue("");
+      setTcoName(""); setTcoTarget("");
       refresh();
     } catch (e) { notify(e instanceof Error ? e.message : "Échec de l'enregistrement du TCO.", "err"); }
   };
@@ -423,12 +448,60 @@ export function FlowsPanel({ notify, onOpenReport }: Props) {
             <button className={`btn sm ${tcoMode === "build" ? "primary" : ""}`} onClick={() => setTcoMode("build")}>
               Construire un tableau
             </button>
+            <button className={`btn sm ${tcoMode === "session" ? "primary" : ""}`} onClick={() => setTcoMode("session")}>
+              Depuis la session active
+            </button>
             <button className={`btn sm ${tcoMode === "upload" ? "primary" : ""}`} onClick={() => setTcoMode("upload")}>
               Importer un fichier CSV
             </button>
           </div>
 
-          {tcoMode === "build" ? (
+          {tcoMode === "session" ? (
+            <div className="flowform" style={{ marginTop: 8 }}>
+              {!sid ? (
+                <p className="csub">Chargez d'abord un fichier ou une session (onglet Schéma & Règles) — peu importe le
+                  moyen, fichier, saisie vierge, source SQL ou API : la session qui en résulte peut devenir un TCO.</p>
+              ) : (
+                <>
+                  <div className="frow"><label>Ajouter une version à</label>
+                    <select value={tcoTarget} onChange={(e) => setTcoTarget(e.target.value)}>
+                      <option value="">— nouveau TCO —</option>
+                      {tcos.map((t) => <option key={t.id} value={t.id}>{t.name} (v{t.latest_version_no})</option>)}
+                    </select></div>
+                  {!tcoTarget && (
+                    <div className="frow"><label>Nom du nouveau TCO</label>
+                      <input value={tcoName} onChange={(e) => setTcoName(e.target.value)} placeholder="ex. civilites" /></div>
+                  )}
+                  <div className="frow"><label>Colonne source</label>
+                    <select value={tcoSourceCol} onChange={(e) => setTcoSourceCol(e.target.value)}>
+                      <option value="">— choisir —</option>
+                      {columns.map((c) => <option key={c} value={c}>{c}</option>)}
+                    </select></div>
+                  <div className="frow"><label>Colonne cible</label>
+                    <select value={tcoTargetCol} onChange={(e) => setTcoTargetCol(e.target.value)}>
+                      <option value="">— choisir —</option>
+                      {columns.map((c) => <option key={c} value={c}>{c}</option>)}
+                    </select></div>
+                  <div className="frow"><label>Colonne type (optionnel)</label>
+                    <select value={tcoTypeCol} onChange={(e) => setTcoTypeCol(e.target.value)}>
+                      <option value="">— aucune —</option>
+                      {columns.map((c) => <option key={c} value={c}>{c}</option>)}
+                    </select></div>
+                  {!tcoTypeCol && (
+                    <div className="frow"><label>Type fixe (optionnel)</label>
+                      <input value={tcoTypeValue} onChange={(e) => setTcoTypeValue(e.target.value)}
+                             placeholder="ex. CIVILITE — laisser vide si la table sert tous les champs" /></div>
+                  )}
+                  <div className="filterbar" style={{ marginTop: 6 }}>
+                    <button className="btn primary" disabled={!tcoSourceCol || !tcoTargetCol}
+                            onClick={saveTcoFromSession}>
+                      {tcoTarget ? "Enregistrer comme nouvelle version" : "Enregistrer le TCO dans la bibliothèque"}
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          ) : tcoMode === "build" ? (
             <div className="flowform" style={{ marginTop: 8 }}>
               <div className="frow"><label>Ajouter une version à</label>
                 <select value={tcoTarget} onChange={(e) => loadTcoForEdit(e.target.value)}>

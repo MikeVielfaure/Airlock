@@ -44,6 +44,7 @@ export interface AvailableVariable {
 export interface VariableSchema {
   name: string;
   columns: { name: string; type: string }[];
+  query?: string;
   path?: string;
   method?: string;
   data_path?: string;
@@ -648,6 +649,7 @@ export interface EnvProfile {
   tco_editable: boolean;
   actions: { label: string; graph_id: string; params?: Record<string, string>;
              confirm?: boolean }[];
+  max_open_tabs: number;
 }
 
 export interface TcoSuggestRow {

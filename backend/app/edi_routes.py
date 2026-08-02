@@ -161,7 +161,7 @@ async def pivot(file: UploadFile = File(...),
         if flat is None:
             flat = edi_service.pivot(records, model, "flat")["flat"]
         from app.session import store
-        sid = store.create(flat, file_type="CSV", encoding="utf-8", delimiter=";")
+        sid = store.create(s, flat, file_type="CSV", encoding="utf-8", delimiter=";")
         return FileResponse(session_id=sid, type="CSV", encoding="utf-8",
                             delimiter=";", sheet=None, sheets=[], table_count=0,
                             preview=_preview(flat))

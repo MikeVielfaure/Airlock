@@ -156,7 +156,7 @@ def adopt(req: RunRequest, s: Session = Depends(get_session),
             413, f"Le résultat contient {len(df)} lignes, au-delà de la limite "
                  f"de 200 000. Utilisez une brique `dataset_write` pour l'écrire par lots.")
 
-    sid = store.create(df, file_type="FLOW", encoding="N/A", delimiter="N/A")
+    sid = store.create(s, df, file_type="FLOW", encoding="N/A", delimiter="N/A")
     return FileResponse(session_id=sid, type="FLOW", encoding="N/A",
                         delimiter="N/A", preview=_table_preview(df))
 

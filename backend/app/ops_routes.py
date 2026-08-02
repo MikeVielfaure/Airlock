@@ -124,6 +124,10 @@ class SchemaColumn(BaseModel):
 class VariableSchemaIn(BaseModel):
     name: str
     columns: List[SchemaColumn] = Field(default_factory=list)
+    # external_db-only: the actual query this table stands for, so picking
+    # it prefills the real thing — joins, filters and all — rather than a
+    # SELECT * FROM table reconstituted from the column list alone.
+    query: str = ""
     # api-only, ignored for external_db — a schema does not know its own
     # kind, so both sets of fields simply coexist on the same shape.
     path: str = ""
@@ -136,6 +140,7 @@ def _schema_out(row) -> dict:
     types = sj.get("types") or {}
     return {"name": row.name,
             "columns": [{"name": c, "type": types.get(c, "string")} for c in sj.get("columns", [])],
+            "query": sj.get("query", ""),
             "path": sj.get("path", ""), "method": sj.get("method", "GET"),
             "data_path": sj.get("data_path", "")}
 
@@ -161,6 +166,7 @@ def save_connection_schema(variable_id: str, req: VariableSchemaIn,
     schema_json = {
         "columns": [c.name for c in req.columns],
         "types": {c.name: c.type for c in req.columns},
+        "query": req.query,
         "path": req.path, "method": req.method, "data_path": req.data_path,
     }
     row = repo.set_variable_schema(s, variable_id, name, schema_json)

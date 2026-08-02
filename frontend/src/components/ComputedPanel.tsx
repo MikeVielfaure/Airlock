@@ -7,6 +7,7 @@ import { InfoTip } from "./InfoTip";
 
 interface Props {
   sid: string | null;
+  tabs?: { sid: string; label: string }[];
   columns: string[];
   computed: ComputedColumn[];
   setComputed: (c: ComputedColumn[]) => void;
@@ -249,7 +250,7 @@ function StyleRuleRow({ rule, columns, serverError, onChange, onRemove }: {
 
 type SubTab = "columns" | "sql" | "sources" | "style" | "library";
 
-export function ComputedPanel({ sid, columns, computed, setComputed, sqlComputed, setSqlComputed,
+export function ComputedPanel({ sid, tabs, columns, computed, setComputed, sqlComputed, setSqlComputed,
                                styleRules, setStyleRules, variables, setVariables,
                                refVariables, setRefVariables, errors,
                                styleErrors, notify }: Props) {
@@ -279,7 +280,9 @@ export function ComputedPanel({ sid, columns, computed, setComputed, sqlComputed
   const [datasets, setDatasets] = useState<DatasetInfo[]>([]);
   const [attachName, setAttachName] = useState("");
   const [attachDatasetId, setAttachDatasetId] = useState("");
+  const [attachSessionSid, setAttachSessionSid] = useState("");
   const uploadRef = useRef<HTMLInputElement>(null);
+  const otherTabs = (tabs ?? []).filter((t) => t.sid !== sid);
   const refreshSources = useCallback(() => {
     if (sid) api.listSources(sid).then(setSources).catch(() => {});
   }, [sid]);
@@ -304,7 +307,10 @@ export function ComputedPanel({ sid, columns, computed, setComputed, sqlComputed
   const pickDbSchemaName = (name: string) => {
     setDbSchemaName(name);
     const sc = dbSchemas.find((s) => s.name === name);
-    if (sc) setDbQuery(`SELECT ${sc.columns.map((c) => c.name).join(", ") || "*"} FROM ${name}`);
+    if (sc) {
+      setDbQuery(sc.query?.trim()
+        || `SELECT ${sc.columns.map((c) => c.name).join(", ") || "*"} FROM ${name}`);
+    }
   };
 
   const attachExternalDb = async () => {
@@ -363,6 +369,16 @@ export function ComputedPanel({ sid, columns, computed, setComputed, sqlComputed
     try {
       await api.attachDatasetSource(sid, attachName.trim(), attachDatasetId);
       setAttachName(""); setAttachDatasetId("");
+      refreshSources();
+      notify(`Source « ${attachName.trim()} » attachée.`, "ok");
+    } catch (e) { notify(e instanceof Error ? e.message : "Échec de l'attachement.", "err"); }
+  };
+
+  const attachSession = async () => {
+    if (!sid || !attachName.trim() || !attachSessionSid) return;
+    try {
+      await api.attachSessionSource(sid, attachName.trim(), attachSessionSid);
+      setAttachName(""); setAttachSessionSid("");
       refreshSources();
       notify(`Source « ${attachName.trim()} » attachée.`, "ok");
     } catch (e) { notify(e instanceof Error ? e.message : "Échec de l'attachement.", "err"); }
@@ -700,6 +716,18 @@ export function ComputedPanel({ sid, columns, computed, setComputed, sqlComputed
                   </button>
                   <input ref={uploadRef} type="file" accept=".csv,.xlsx,.xls" hidden
                     onChange={(e) => { const f = e.target.files?.[0]; if (f) attachUpload(f); e.target.value = ""; }} />
+                  {otherTabs.length > 0 && (
+                    <>
+                      <span style={{ marginLeft: 8 }}>ou</span>
+                      <select value={attachSessionSid} onChange={(e) => setAttachSessionSid(e.target.value)}>
+                        <option value="">— onglet ouvert —</option>
+                        {otherTabs.map((t) => <option key={t.sid} value={t.sid}>{t.label}</option>)}
+                      </select>
+                      <button className="btn sm" disabled={!attachName.trim() || !attachSessionSid} onClick={attachSession}>
+                        Attacher l'onglet
+                      </button>
+                    </>
+                  )}
                 </div>
                 {sources.length === 0 ? (
                   <p className="hint">Aucune source attachée pour l'instant.</p>

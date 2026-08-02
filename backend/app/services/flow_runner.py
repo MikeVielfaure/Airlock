@@ -318,7 +318,7 @@ def _brick_session(node: FlowNode, inputs: List[dict], ctx: RunContext) -> NodeR
     cfg = _resolve(node.config, _subs(ctx))
     sid = cfg.get("session_id") or ""
     try:
-        sess = _store.get(sid)
+        sess = _store.get(ctx.session, sid)
     except KeyError:
         raise FlowError(node.id, f"session '{sid}' is gone — point this source at "
                                  f"a dataset or an API to make the flow durable")

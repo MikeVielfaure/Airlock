@@ -14,6 +14,7 @@ versioning invariants live in exactly one place:
 from __future__ import annotations
 
 import json
+import math
 import uuid
 from datetime import datetime, timezone
 from typing import Optional
@@ -605,15 +606,21 @@ def remove_variable_schema(s: Session, variable_id: str, name: str) -> None:
 
 def mask_deep(value, secrets: dict):
     """
-    Mask secrets anywhere inside a nested structure.
+    Mask secrets anywhere inside a nested structure, and drop non-JSON floats
+    (NaN/Infinity) along the way.
 
     Masking only the obvious field is not enough: a node's metadata carries the
     *resolved* message, so a key substituted into a URL would reach the journal
     through the very record meant to help debug it. Everything written to the
-    journal goes through here.
+    journal goes through here — which also makes it the one place to fix a
+    pandas `NaN` (a valid Python float, an invalid JSON token) before it hits a
+    JSONB column: SQLite's JSON is untyped TEXT and swallows it silently,
+    Postgres's json/jsonb parser rejects it outright.
     """
     if isinstance(value, str):
         return mask_secrets(value, secrets)
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
     if isinstance(value, dict):
         return {k: mask_deep(v, secrets) for k, v in value.items()}
     if isinstance(value, list):

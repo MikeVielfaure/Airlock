@@ -71,6 +71,7 @@ class ProfileIn(BaseModel):
     tco_artefact_id: str = ""
     tco_editable: Optional[bool] = None
     actions: Optional[List[Dict[str, Any]]] = None
+    max_open_tabs: Optional[int] = None
 
 
 class CreateEnvIn(BaseModel):
@@ -92,13 +93,14 @@ def _out(p: EnvironmentProfile) -> dict:
         "config_locked": p.config_locked,
         "tco_artefact_id": p.tco_artefact_id, "tco_editable": p.tco_editable,
         "actions": list(p.actions_json or []),
+        "max_open_tabs": p.max_open_tabs,
     }
 
 
 def _default_profile(name: str) -> dict:
     return {"name": name, "label": name, "description": "", "modules": list(ALL_MODULES),
             "config_artefact_id": "", "config_version_no": None, "config_locked": False,
-            "tco_artefact_id": "", "tco_editable": True, "actions": []}
+            "tco_artefact_id": "", "tco_editable": True, "actions": [], "max_open_tabs": 0}
 
 
 @router.get("/templates")
@@ -142,6 +144,10 @@ def set_profile(name: str, req: ProfileIn, s: Session = Depends(get_session),
         p.tco_editable = req.tco_editable
     if req.actions is not None:
         p.actions_json = list(req.actions)
+    if req.max_open_tabs is not None:
+        if req.max_open_tabs < 0:
+            raise HTTPException(422, "max_open_tabs ne peut pas être négatif.")
+        p.max_open_tabs = req.max_open_tabs
     # A locked configuration that names no configuration would lock users out of
     # a screen they cannot use — refuse it rather than ship a dead end.
     if p.config_locked and not p.config_artefact_id:
