@@ -39,16 +39,16 @@ const MODULES: {
     blurb: "Décoder un fichier EDIFACT, le contrôler contre un modèle, "
          + "le mettre à plat ou le régénérer.",
     icon: <IconGrid size={20} /> },
-  { key: "canvas", label: "Flux",
+  { key: "canvas", label: "Studio Flux",
     blurb: "Assembler des briques : lire une source, transformer, contrôler, "
-         + "écrire — et appeler le tout comme une API.",
+         + "notifier (Email/HTTP), écrire — et appeler le tout comme une API.",
     icon: <IconLayers size={20} /> },
   { key: "mapping", label: "Correspondances",
     blurb: "Relier les champs d'une source aux champs canoniques, avec "
          + "expressions et contraintes.",
     icon: <IconCode size={20} /> },
-  { key: "ops", label: "Exploitation",
-    blurb: "Ce qui a tourné, ce qui a échoué, les messages — et rejouer une "
+  { key: "ops", label: "Exploitation & Audit",
+    blurb: "Ce qui a tourné, ce qui a échoué, les logs — et rejouer une "
          + "exécution à l'identique.",
     icon: <IconPlay size={20} /> },
   { key: "functions", label: "Fonctions",
@@ -67,10 +67,32 @@ export function Home({ me, env, profile, shows, go }: Props) {
         <h1>{profile?.label && profile.label !== env ? profile.label : "Que faites-vous ?"}</h1>
         <p>
           Environnement <strong>{env}</strong>
-          {role && <> · vous y êtes <strong>{role}</strong></>}
-          {profile?.config_locked && <> · configuration imposée</>}
+          {role && <> · Rôle : <strong>{role}</strong></>}
+          {profile?.config_locked && <> · Configuration imposée</>}
         </p>
         {profile?.description && <p className="home-desc">{profile.description}</p>}
+      </div>
+
+      <div className="home-kpi-grid">
+        <div className="kpi-card">
+          <span className="kpi-label">Modules ouverts</span>
+          <strong className="kpi-val">{available.length} / {MODULES.length}</strong>
+          <span className="kpi-sub">Portée du profil de « {env} »</span>
+        </div>
+        {(me?.is_superadmin || me?.setup_mode) && (
+          <>
+            <div className="kpi-card">
+              <span className="kpi-label">Moteur de calcul</span>
+              <strong className="kpi-val ok">DuckDB + Pandas</strong>
+              <span className="kpi-sub">SQL multi-source et colonnes calculées</span>
+            </div>
+            <div className="kpi-card">
+              <span className="kpi-label">Confidentialité</span>
+              <strong className="kpi-val">Chiffrement par clé + accès nominatif</strong>
+              <span className="kpi-sub">Détenteurs nommés, chaque lecture tracée, clé détruite = donnée effacée</span>
+            </div>
+          </>
+        )}
       </div>
 
       {available.length === 0 ? (
