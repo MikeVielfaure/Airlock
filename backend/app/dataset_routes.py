@@ -243,6 +243,42 @@ def archive_dataset(dataset_id: str, user=Depends(require_user),
     return {"archived": dataset_id}
 
 
+def _check_dataset_manage(s: Session, user, d) -> None:
+    scope = d.environment or repo.DEFAULT_ENV
+    perm = repo.dataset_permission(s, d, user, _auth.role_in(s, user, scope), environment=scope)
+    if not repo.can_on_dataset(perm, "manage"):
+        raise HTTPException(403, f"Aucun droit de suppression sur la table « {d.name} ».")
+
+
+@router.post("/datasets/{dataset_id}/restore")
+def restore_dataset(dataset_id: str, user=Depends(require_user),
+        s: Session = Depends(get_session)):
+    try:
+        d = repo.get_dataset(s, dataset_id)
+    except repo.NotFound as e:
+        raise HTTPException(404, str(e))
+    _check_dataset_manage(s, user, d)
+    repo.restore_dataset(s, dataset_id)
+    commit(s)
+    return {"restored": dataset_id}
+
+
+@router.delete("/datasets/{dataset_id}/permanent")
+def delete_dataset_permanently(dataset_id: str, user=Depends(require_user),
+        s: Session = Depends(get_session)):
+    try:
+        d = repo.get_dataset(s, dataset_id)
+    except repo.NotFound as e:
+        raise HTTPException(404, str(e))
+    _check_dataset_manage(s, user, d)
+    try:
+        repo.delete_dataset_permanently(s, dataset_id)
+    except repo.Conflict as e:
+        raise HTTPException(409, str(e))
+    commit(s)
+    return {"deleted": dataset_id}
+
+
 @router.get("/datasets/{dataset_id}/rows", response_model=TablePreview)
 def read_dataset(dataset_id: str, offset: int = 0, limit: int = 100,
                  s: Session = Depends(get_session)):

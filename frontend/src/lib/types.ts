@@ -135,7 +135,7 @@ export interface ProcessResponse {
   compute_errors: Record<string, string>;
   stats: ProcessStats;
   report: ReportRow[];
-  tco_uncovered?: Record<string, { value: string; count: number }[]>;
+  tco_uncovered?: Record<string, { value: string; count: number; reason?: "no_tco" }[]>;
   warnings?: string[];
   index?: number[];              // df index per preview row
 }

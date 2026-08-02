@@ -913,6 +913,16 @@ export const api = {
   archiveDataset: (id: string) =>
     fetch(`${BASE}/datasets/${id}`, { method: "DELETE", headers: authHeaders() }).then((r) => json<{ archived: string }>(r)),
 
+  restoreDataset: (id: string) =>
+    fetch(`${BASE}/datasets/${id}/restore`, { method: "POST", headers: authHeaders() })
+      .then((r) => json<{ restored: string }>(r)),
+
+  /** Gone for good — every row, no history. Only ever offered once
+   * something is already archived. */
+  deleteDatasetPermanently: (id: string) =>
+    fetch(`${BASE}/datasets/${id}/permanent`, { method: "DELETE", headers: authHeaders() })
+      .then((r) => json<{ deleted: string }>(r)),
+
   // ── sharing a table (v41) ─────────────────────────────────────
   listDatasetGrants: (id: string) =>
     fetch(`${BASE}/datasets/${id}/grants`, { headers: authHeaders() }).then((r) =>

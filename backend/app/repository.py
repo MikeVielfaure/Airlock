@@ -45,7 +45,8 @@ def create_artefact(s: Session, kind: str, name: str, body: dict,
     """Create an artefact and its first version (v1), inside one environment."""
     env = environment or DEFAULT_ENV
     existing = s.scalar(select(Artefact).where(
-        Artefact.kind == kind, Artefact.name == name, Artefact.environment == env))
+        Artefact.kind == kind, Artefact.name == name, Artefact.environment == env,
+        Artefact.archived.is_(False)))
     if existing is not None:
         raise Conflict(f"A {kind} named '{name}' already exists in '{env}' (id {existing.id}).")
     art = Artefact(kind=kind, name=name, description=description,
@@ -190,7 +191,7 @@ def delete_artefact_permanently(s: Session, artefact_id: str) -> None:
 # ── flows ─────────────────────────────────────────────────────────────
 def create_flow(s: Session, **kw) -> Flow:
     name = kw.get("name")
-    if s.scalar(select(Flow).where(Flow.name == name)) is not None:
+    if s.scalar(select(Flow).where(Flow.name == name, Flow.archived.is_(False))) is not None:
         raise Conflict(f"A flow named '{name}' already exists.")
     # Validate referenced artefacts exist and have the right kind.
     _require_kind(s, kw["config_artefact_id"], "config")
@@ -289,7 +290,8 @@ def create_dataset(s: Session, name: str, schema: dict, description: str = "",
         raise Conflict("Un nom de table est requis.")
     env = environment or DEFAULT_ENV
     if s.scalar(select(Dataset).where(Dataset.name == name,
-                                      Dataset.environment == env)) is not None:
+                                      Dataset.environment == env,
+                                      Dataset.archived.is_(False))) is not None:
         raise Conflict(f"Une table nommée '{name}' existe déjà dans '{env}'.")
     ds = Dataset(name=name, description=description, schema_json=schema, environment=env)
     s.add(ds)
@@ -337,6 +339,18 @@ def list_datasets(s: Session, include_archived: bool = False,
 
 def archive_dataset(s: Session, dataset_id: str) -> None:
     get_dataset(s, dataset_id).archived = True
+
+
+def restore_dataset(s: Session, dataset_id: str) -> None:
+    get_dataset(s, dataset_id).archived = False
+
+
+def delete_dataset_permanently(s: Session, dataset_id: str) -> None:
+    ds = get_dataset(s, dataset_id)
+    if not ds.archived:
+        raise Conflict(f"« {ds.name} » doit d'abord être archivée.")
+    s.execute(delete(DatasetGrant).where(DatasetGrant.dataset_id == dataset_id))
+    s.delete(ds)   # cascades to DatasetRow via the ORM relationship
 
 
 def count_rows(s: Session, dataset_id: str) -> int:

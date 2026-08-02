@@ -142,3 +142,76 @@ def test_flow_restore():
     r = client.post(f"/api/flows/{flow['id']}/restore")
     assert r.status_code == 200, r.text
     assert client.get(f"/api/flows/{flow['id']}").json()["archived"] is False
+
+
+# ── archiving hides a name, it does not reserve it forever ───────────
+def test_archived_artefact_name_can_be_reused():
+    tag = uuid.uuid4().hex[:8]
+    name = f"cfg-reuse-{tag}"
+    first = _cfg(name)
+    client.delete(f"/api/artefacts/config/{first['id']}")   # archive
+
+    second = _cfg(name)   # same kind, name, environment — must succeed now
+    assert second["id"] != first["id"]
+
+    live_ids = [a["id"] for a in client.get("/api/artefacts/config").json()]
+    assert second["id"] in live_ids
+    assert first["id"] not in live_ids
+
+
+def test_flow_name_can_be_reused_after_archiving():
+    tag = uuid.uuid4().hex[:8]
+    cfg = _cfg(f"cfg-flowreuse-{tag}")
+    name = f"flow-reuse-{tag}"
+    first = client.post("/api/flows", json={
+        "name": name, "config_artefact_id": cfg["id"]}).json()
+    client.delete(f"/api/flows/{first['id']}")   # archive
+
+    second = client.post("/api/flows", json={
+        "name": name, "config_artefact_id": cfg["id"]}).json()
+    assert second["id"] != first["id"]
+
+
+def test_dataset_name_can_be_reused_after_archiving():
+    from app.db import session_scope
+    from app import repository as repo
+
+    tag = uuid.uuid4().hex[:8]
+    name = f"ds-reuse-{tag}"
+    schema = {"columns": ["a"], "types": {"a": "string"}}
+    with session_scope() as s:
+        first = repo.create_dataset(s, name, schema)
+        first_id = first.id
+        repo.archive_dataset(s, first_id)
+        s.commit()
+
+    with session_scope() as s:
+        second = repo.create_dataset(s, name, schema)
+        second_id = second.id
+        s.commit()
+    assert second_id != first_id
+
+
+def test_dataset_restore_and_permanent_delete_routes():
+    from app.db import session_scope
+    from app import repository as repo
+
+    tag = uuid.uuid4().hex[:8]
+    schema = {"columns": ["a"], "types": {"a": "string"}}
+    with session_scope() as s:
+        ds = repo.create_dataset(s, f"ds-life-{tag}", schema)
+        ds_id = ds.id
+        s.commit()
+
+    ko = client.delete(f"/api/datasets/{ds_id}/permanent")
+    assert ko.status_code == 409
+
+    client.delete(f"/api/datasets/{ds_id}")   # archive
+    r = client.post(f"/api/datasets/{ds_id}/restore")
+    assert r.status_code == 200, r.text
+    assert client.get(f"/api/datasets/{ds_id}").json()["archived"] is False
+
+    client.delete(f"/api/datasets/{ds_id}")   # archive again
+    ok = client.delete(f"/api/datasets/{ds_id}/permanent")
+    assert ok.status_code == 200, ok.text
+    assert client.get(f"/api/datasets/{ds_id}").status_code == 404

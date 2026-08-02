@@ -26,7 +26,15 @@ export function TcoFixPanel({ result, fieldTypes, tcoArtefactId, editable, notif
   const [busy, setBusy] = useState(false);
 
   const uncovered = result?.tco_uncovered ?? {};
-  const count = Object.values(uncovered).reduce((n, v) => n + v.length, 0);
+  // A column can be uncovered for two very different reasons: values missing
+  // from an otherwise-loaded table (fix: complete the table), or no TCO
+  // table attached to this run at all (fix: attach one first — completing
+  // entries makes no sense without a table to add them to).
+  const noTcoCols = Object.entries(uncovered)
+    .filter(([, rows]) => rows[0]?.reason === "no_tco").map(([col]) => col);
+  const realUncovered = Object.fromEntries(
+    Object.entries(uncovered).filter(([col]) => !noTcoCols.includes(col)));
+  const count = Object.values(realUncovered).reduce((n, v) => n + v.length, 0);
 
   const info = (
     <InfoTip>
@@ -37,7 +45,7 @@ export function TcoFixPanel({ result, fieldTypes, tcoArtefactId, editable, notif
   );
 
   if (!result) return <p className="tf-hint">Lancez d'abord le contrôle. {info}</p>;
-  if (count === 0)
+  if (count === 0 && noTcoCols.length === 0)
     return (
       <p className="tf-ok"><IconCheck size={14} /> Toutes les valeurs sont couvertes
         par la table de correspondance. {info}</p>
@@ -45,21 +53,33 @@ export function TcoFixPanel({ result, fieldTypes, tcoArtefactId, editable, notif
 
   return (
     <div className="tf">
-      <p className="tf-warn">
-        <IconWarn size={14} /> {count} valeur(s) absente(s) de la table de correspondance.
-        Ce sont des erreurs de <strong>correspondance</strong>, pas des erreurs de
-        données : le fichier est probablement correct, c'est la table qui est incomplète.
-        {info}
-      </p>
+      {noTcoCols.length > 0 && (
+        <p className="tf-warn">
+          <IconWarn size={14} /> {noTcoCols.map((c) => <code key={c}>{c}</code>)
+            .reduce((a, b) => <>{a}, {b}</>)} : configuré(s) pour une correspondance TCO,
+          mais aucune table n'est chargée pour cette session — rien n'a été vérifié.
+          Chargez une table (fichier ou depuis la bibliothèque) puis relancez le contrôle.
+        </p>
+      )}
+      {count > 0 && (
+        <p className="tf-warn">
+          <IconWarn size={14} /> {count} valeur(s) absente(s) de la table de correspondance.
+          Ce sont des erreurs de <strong>correspondance</strong>, pas des erreurs de
+          données : le fichier est probablement correct, c'est la table qui est incomplète.
+          {info}
+        </p>
+      )}
 
-      <button className="btn" disabled={busy} onClick={async () => {
-        setBusy(true);
-        try {
-          const r = await api.suggestTco(uncovered as never, fieldTypes);
-          setRows(r.rows);
-        } catch (e) { notify(e instanceof Error ? e.message : String(e), "err"); }
-        finally { setBusy(false); }
-      }}><IconPlay size={14} /> Proposer les entrées manquantes</button>
+      {count > 0 && (
+        <button className="btn" disabled={busy} onClick={async () => {
+          setBusy(true);
+          try {
+            const r = await api.suggestTco(realUncovered as never, fieldTypes);
+            setRows(r.rows);
+          } catch (e) { notify(e instanceof Error ? e.message : String(e), "err"); }
+          finally { setBusy(false); }
+        }}><IconPlay size={14} /> Proposer les entrées manquantes</button>
+      )}
 
       {rows.length > 0 && (
         <>

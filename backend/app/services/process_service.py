@@ -514,14 +514,25 @@ class ProcessService:
 
         # TCO coverage: distinct source values that the TCO does NOT cover,
         # per mapped column, with counts — the actionable "add these" list.
+        #
+        # NO_TCO rows (a field configured for tco_mapping/tco_replace but no
+        # TCO table attached to this run at all) must be surfaced here too —
+        # they used to be silently dropped (only MAPPING_KO counted), so a
+        # field nobody ever wired a TCO to read as "fully covered" instead of
+        # "never checked". A false green is worse than a red.
         tco_uncovered: dict[str, list[dict]] = {}
         if len(report):
-            ko = report[report["statut"] == "MAPPING_KO"]
+            ko = report[report["statut"].isin(("MAPPING_KO", "NO_TCO"))]
             for col, grp in ko.groupby("colonne"):
-                vc = grp["valeur_finale"].astype(str).value_counts()
-                tco_uncovered[str(col)] = [
-                    {"value": str(v), "count": int(c)} for v, c in vc.items()
-                ]
+                if (grp["statut"] == "NO_TCO").any():
+                    tco_uncovered[str(col)] = [
+                        {"value": "*", "count": int(len(grp)), "reason": "no_tco"}
+                    ]
+                else:
+                    vc = grp["valeur_finale"].astype(str).value_counts()
+                    tco_uncovered[str(col)] = [
+                        {"value": str(v), "count": int(c)} for v, c in vc.items()
+                    ]
 
         return {
             "df":              df_post,

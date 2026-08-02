@@ -908,7 +908,8 @@ def _mask_uncovered(uncovered: dict, sensitivity: dict) -> dict:
     out = {}
     for col, values in (uncovered or {}).items():
         if col in sensitivity:
-            out[col] = [{"value": _crypto.MASK, "count": v.get("count", 0)}
+            out[col] = [{"value": _crypto.MASK, "count": v.get("count", 0),
+                        **({"reason": v["reason"]} if "reason" in v else {})}
                         for v in values]
         else:
             out[col] = values

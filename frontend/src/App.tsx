@@ -133,6 +133,7 @@ export default function App() {
   };
 
   const [tabs, setTabs] = useState<{ sid: string; label: string }[]>([]);
+  const [renamingSid, setRenamingSid] = useState<string | null>(null);
   const tabStash = useRef<Record<string, TabSnapshot>>({});
 
   const snapshotCurrent = useCallback((): TabSnapshot => ({
@@ -234,6 +235,15 @@ export default function App() {
     setStrictHeader(false); setMinHeader(false); setResult(null);
     setTab("schema"); setDeletedTotal(0);
   }, [sid, snapshotCurrent]);
+
+  /** A tab's label starts as the file/table name, but that name is rarely
+   * the one you'd recognise a week later across five open tabs — so it can
+   * be renamed freely, independent of what was actually loaded. */
+  const renameTab = useCallback((targetSid: string, label: string) => {
+    const trimmed = label.trim();
+    if (!trimmed) return;
+    setTabs((ts) => ts.map((t) => (t.sid === targetSid ? { ...t, label: trimmed } : t)));
+  }, []);
 
   // Survive a page reload: the tab bar itself is cheap to keep in
   // sessionStorage (sid + label only), even though each tab's in-progress
@@ -956,9 +966,20 @@ export default function App() {
         <div className="session-tabs">
           {tabs.map((t) => (
             <div key={t.sid} className={`session-tab ${t.sid === sid ? "active" : ""}`}>
-              <button className="session-tab-label" onClick={() => switchToTab(t.sid)} title={t.label}>
-                {t.label}
-              </button>
+              {renamingSid === t.sid ? (
+                <input className="session-tab-rename" autoFocus defaultValue={t.label}
+                       onBlur={(e) => { renameTab(t.sid, e.target.value); setRenamingSid(null); }}
+                       onKeyDown={(e) => {
+                         if (e.key === "Enter") e.currentTarget.blur();
+                         else if (e.key === "Escape") setRenamingSid(null);
+                       }} />
+              ) : (
+                <button className="session-tab-label" onClick={() => switchToTab(t.sid)}
+                        onDoubleClick={(e) => { e.stopPropagation(); setRenamingSid(t.sid); }}
+                        title={`${t.label} — double-clic pour renommer`}>
+                  {t.label}
+                </button>
+              )}
               <button className="session-tab-close" title="Fermer cet onglet"
                       onClick={(e) => { e.stopPropagation(); closeTab(t.sid); }}>×</button>
             </div>

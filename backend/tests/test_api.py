@@ -783,6 +783,23 @@ def test_tco_uncovered_values_listed():
     assert vals.get("X") == 2
 
 
+def test_tco_configured_field_with_no_tco_loaded_surfaces_as_uncovered():
+    # A field asks for tco_mapping but no TCO was ever attached to this
+    # session — every value must show up as NO_TCO, distinctly from a
+    # genuine "value missing from an otherwise-loaded table" (MAPPING_KO).
+    # Silently omitting it would read as "fully covered" when nothing was
+    # ever checked at all.
+    sid = _upload("CIVILITE\nM\nF\n")["session_id"]
+    r = client.post(f"/api/files/{sid}/process", json={
+        "visible_cols": ["CIVILITE"],
+        "fields": {"CIVILITE": {"name": ["CIVILITE"], "tco_mapping": "MASCULIN"}},
+    })
+    assert r.status_code == 200, r.text
+    unc = r.json()["tco_uncovered"]
+    assert "CIVILITE" in unc
+    assert unc["CIVILITE"][0]["reason"] == "no_tco"
+
+
 def test_multiple_identifier_fields_compose_report_id():
     cfg = ('type: CSV\ndelimiter: ";"\nFields:\n'
            '  - name: ["DEPT"]\n    type: string\n    identifier: true\n'

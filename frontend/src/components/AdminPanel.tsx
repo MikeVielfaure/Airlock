@@ -554,10 +554,11 @@ function Envs({ envs, notify, refreshEnvs, onIdentityChange }: {
 
       <h4><IconLayers size={13} /> Bibliothèque &amp; droits d'accès</h4>
       <p className="ad-note">
-        Les artefacts (configs, TCO, graphes, fonctions…) d'un environnement :
-        partager en lecture avec un autre, archiver — invisible partout,
-        récupérable — ou supprimer pour de bon, réservé à ce qui est déjà
-        archivé.
+        Les artefacts (configs, TCO, graphes, fonctions…) et les tables d'un
+        environnement : partager un artefact en lecture avec un autre,
+        archiver — invisible partout, récupérable — ou supprimer pour de bon,
+        réservé à ce qui est déjà archivé. Un nom archivé peut être repris
+        immédiatement par un nouvel artefact ou une nouvelle table.
       </p>
       <div className="ad-form">
         <label className="ad-note">Environnement source</label>
@@ -578,8 +579,14 @@ function Envs({ envs, notify, refreshEnvs, onIdentityChange }: {
               <code>{a.kind}</code> {a.name}{a.archived ? " · archivé" : ""}
             </button>
           ))}
-          {srcContent.artefacts.length === 0 && (
-            <em className="ad-note">« {grantSrc} » ne possède aucun artefact{showArchived ? "" : " actif"}.</em>
+          {srcContent.datasets.map((d) => (
+            <button key={d.id} className={`btn sm ${picked?.id === d.id ? "active" : ""}`}
+                    onClick={() => setPicked({ kind: "dataset", id: d.id, name: d.name, archived: d.archived })}>
+              <IconTable size={11} /> {d.name}{d.archived ? " · archivé" : ""}
+            </button>
+          ))}
+          {srcContent.artefacts.length === 0 && srcContent.datasets.length === 0 && (
+            <em className="ad-note">« {grantSrc} » ne possède rien{showArchived ? "" : " d'actif"}.</em>
           )}
         </div>
       )}
@@ -593,7 +600,8 @@ function Envs({ envs, notify, refreshEnvs, onIdentityChange }: {
               <>
                 <button className="btn sm" onClick={async () => {
                   try {
-                    await api.restoreArtefact(picked.kind, picked.id);
+                    if (picked.kind === "dataset") await api.restoreDataset(picked.id);
+                    else await api.restoreArtefact(picked.kind, picked.id);
                     notify(`« ${picked.name} » restauré.`, "ok");
                     setPicked({ ...picked, archived: false });
                     refreshSrcContent();
@@ -602,7 +610,8 @@ function Envs({ envs, notify, refreshEnvs, onIdentityChange }: {
                 <button className="btn sm danger" onClick={async () => {
                   if (!window.confirm(`Supprimer « ${picked.name} » pour de bon ? Irréversible.`)) return;
                   try {
-                    await api.deleteArtefactPermanently(picked.kind, picked.id);
+                    if (picked.kind === "dataset") await api.deleteDatasetPermanently(picked.id);
+                    else await api.deleteArtefactPermanently(picked.kind, picked.id);
                     notify(`« ${picked.name} » supprimé définitivement.`, "ok");
                     setPicked(null); setPickedGrants([]);
                     refreshSrcContent();
@@ -612,7 +621,8 @@ function Envs({ envs, notify, refreshEnvs, onIdentityChange }: {
             ) : (
               <button className="btn sm danger" onClick={async () => {
                 try {
-                  await api.archiveArtefact(picked.kind, picked.id);
+                  if (picked.kind === "dataset") await api.archiveDataset(picked.id);
+                  else await api.archiveArtefact(picked.kind, picked.id);
                   notify(`« ${picked.name} » archivé.`, "ok");
                   setPicked({ ...picked, archived: true });
                   refreshSrcContent();
@@ -620,37 +630,41 @@ function Envs({ envs, notify, refreshEnvs, onIdentityChange }: {
               }}>Archiver</button>
             )}
           </div>
-          <p className="ad-note">
-            Accès accordés pour « {picked.name} » :
-          </p>
-          <div className="ad-chips">
-            {pickedGrants.map((g) => (
-              <code key={g.environment}>
-                {g.environment}
-                <button className="btn sm" onClick={async () => {
+          {picked.kind !== "dataset" && (
+            <>
+              <p className="ad-note">
+                Accès accordés pour « {picked.name} » :
+              </p>
+              <div className="ad-chips">
+                {pickedGrants.map((g) => (
+                  <code key={g.environment}>
+                    {g.environment}
+                    <button className="btn sm" onClick={async () => {
+                      try {
+                        await api.removeArtefactGrant(picked.kind, picked.id, g.environment);
+                        await refreshPickedGrants(picked.kind, picked.id);
+                        notify(`Accès de « ${g.environment} » révoqué.`, "ok");
+                      } catch (e) { notify(e instanceof Error ? e.message : String(e), "err"); }
+                    }}>×</button>
+                  </code>
+                ))}
+                {pickedGrants.length === 0 && <em className="ad-note">aucun</em>}
+              </div>
+              <div className="ad-form">
+                <select value={grantTarget} onChange={(e) => setGrantTarget(e.target.value)}>
+                  <option value="">— accorder à —</option>
+                  {envs.filter((e) => e !== grantSrc).map((e) => <option key={e} value={e}>{e}</option>)}
+                </select>
+                <button className="btn sm" disabled={!grantTarget} onClick={async () => {
                   try {
-                    await api.removeArtefactGrant(picked.kind, picked.id, g.environment);
+                    await api.setArtefactGrant(picked.kind, picked.id, grantTarget);
                     await refreshPickedGrants(picked.kind, picked.id);
-                    notify(`Accès de « ${g.environment} » révoqué.`, "ok");
+                    notify(`« ${picked.name} » partagé en lecture avec « ${grantTarget} ».`, "ok");
                   } catch (e) { notify(e instanceof Error ? e.message : String(e), "err"); }
-                }}>×</button>
-              </code>
-            ))}
-            {pickedGrants.length === 0 && <em className="ad-note">aucun</em>}
-          </div>
-          <div className="ad-form">
-            <select value={grantTarget} onChange={(e) => setGrantTarget(e.target.value)}>
-              <option value="">— accorder à —</option>
-              {envs.filter((e) => e !== grantSrc).map((e) => <option key={e} value={e}>{e}</option>)}
-            </select>
-            <button className="btn sm" disabled={!grantTarget} onClick={async () => {
-              try {
-                await api.setArtefactGrant(picked.kind, picked.id, grantTarget);
-                await refreshPickedGrants(picked.kind, picked.id);
-                notify(`« ${picked.name} » partagé en lecture avec « ${grantTarget} ».`, "ok");
-              } catch (e) { notify(e instanceof Error ? e.message : String(e), "err"); }
-            }}><IconSave size={12} /> Accorder</button>
-          </div>
+                }}><IconSave size={12} /> Accorder</button>
+              </div>
+            </>
+          )}
         </>
       )}
     </div>

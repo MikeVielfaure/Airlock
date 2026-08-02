@@ -31,8 +31,8 @@ import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy import (
-    JSON, Boolean, DateTime, ForeignKey, Integer, LargeBinary, String, Text,
-    UniqueConstraint, func,
+    JSON, Boolean, DateTime, ForeignKey, Index, Integer, LargeBinary, String,
+    Text, UniqueConstraint, func, text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -85,9 +85,14 @@ class Artefact(Base):
     )
 
     # A name is unique *within* an environment: RH and ADV may each have their
-    # own "clients" config without knowing about each other.
-    __table_args__ = (UniqueConstraint("kind", "name", "environment",
-                                       name="uq_artefact_kind_name_env"),)
+    # own "clients" config without knowing about each other. Scoped to
+    # non-archived rows only — archiving hides a thing, it doesn't reserve its
+    # name forever, so a fresh artefact can reuse a name an archived one held.
+    __table_args__ = (
+        Index("ix_artefact_active_kind_name_env", "kind", "name", "environment",
+              unique=True, postgresql_where=text("NOT archived"),
+              sqlite_where=text("NOT archived")),
+    )
 
 
 class ArtefactVersion(Base):
@@ -115,7 +120,7 @@ class Flow(Base):
     __tablename__ = "flows"
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_uuid)
-    name: Mapped[str] = mapped_column(String(200), unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(200))
     description: Mapped[str] = mapped_column(Text, default="")
     archived: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
 
@@ -131,6 +136,12 @@ class Flow(Base):
     default_export_filename: Mapped[str] = mapped_column(String(200), default="export")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
+
+    # Unique among non-archived flows only — same reasoning as Artefact above.
+    __table_args__ = (
+        Index("ix_flow_active_name", "name", unique=True,
+              postgresql_where=text("NOT archived"), sqlite_where=text("NOT archived")),
+    )
 
 
 class Run(Base):
@@ -211,8 +222,12 @@ class Dataset(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
 
-    __table_args__ = (UniqueConstraint("name", "environment",
-                                       name="uq_dataset_name_env"),)
+    # Unique among non-archived tables only — same reasoning as Artefact above.
+    __table_args__ = (
+        Index("ix_dataset_active_name_env", "name", "environment",
+              unique=True, postgresql_where=text("NOT archived"),
+              sqlite_where=text("NOT archived")),
+    )
 
     rows: Mapped[list["DatasetRow"]] = relationship(
         back_populates="dataset", cascade="all, delete-orphan", passive_deletes=True)
