@@ -327,13 +327,18 @@ function Envs({ envs, notify, refreshEnvs, onIdentityChange }: {
   const [mode, setMode] = useState<"profile_only" | "cascade">("profile_only");
   const [confirmName, setConfirmName] = useState("");
 
-  // grants
+  // grants + library management (archive / restore / delete for good)
   const [grantSrc, setGrantSrc] = useState("default");
   const [srcContent, setSrcContent] = useState<EnvContent | null>(null);
-  const [picked, setPicked] = useState<{ kind: string; id: string; name: string } | null>(null);
+  const [showArchived, setShowArchived] = useState(false);
+  const [picked, setPicked] = useState<{ kind: string; id: string; name: string; archived: boolean } | null>(null);
   const [pickedGrants, setPickedGrants] = useState<
     { environment: string; permission: string }[]>([]);
   const [grantTarget, setGrantTarget] = useState("");
+
+  const refreshSrcContent = useCallback(() => {
+    api.environmentContent(grantSrc, showArchived).then(setSrcContent).catch(() => setSrcContent(null));
+  }, [grantSrc, showArchived]);
 
   useEffect(() => {
     api.envTemplates().then((r) => { setTemplates(r.templates); setAllModules(r.modules); })
@@ -347,9 +352,9 @@ function Envs({ envs, notify, refreshEnvs, onIdentityChange }: {
     setConfirmName(""); setMode("profile_only");
   }, [sel]);
   useEffect(() => {
-    api.environmentContent(grantSrc).then(setSrcContent).catch(() => setSrcContent(null));
+    refreshSrcContent();
     setPicked(null); setPickedGrants([]);
-  }, [grantSrc]);
+  }, [refreshSrcContent]);
 
   const toggleIn = (set: Set<string>, setSet: (s: Set<string>) => void, id: string) => {
     const next = new Set(set);
@@ -547,33 +552,74 @@ function Envs({ envs, notify, refreshEnvs, onIdentityChange }: {
         </>
       )}
 
-      <h4><IconLayers size={13} /> Droits d'accès accordés</h4>
+      <h4><IconLayers size={13} /> Bibliothèque &amp; droits d'accès</h4>
       <p className="ad-note">
-        Partager un artefact d'un environnement avec un autre, en lecture, sans
-        en changer le propriétaire. Seul un administrateur de l'environnement
-        propriétaire peut le faire.
+        Les artefacts (configs, TCO, graphes, fonctions…) d'un environnement :
+        partager en lecture avec un autre, archiver — invisible partout,
+        récupérable — ou supprimer pour de bon, réservé à ce qui est déjà
+        archivé.
       </p>
       <div className="ad-form">
         <label className="ad-note">Environnement source</label>
         <input value={grantSrc} onChange={(e) => setGrantSrc(e.target.value)}
                placeholder="default" style={{ width: 120 }} />
+        <label className="ad-check">
+          <input type="checkbox" checked={showArchived}
+                 onChange={(e) => setShowArchived(e.target.checked)} />
+          afficher les archivés
+        </label>
       </div>
       {srcContent && (
         <div className="ad-chips">
           {srcContent.artefacts.map((a) => (
             <button key={a.id} className={`btn sm ${picked?.id === a.id ? "active" : ""}`}
-                    onClick={() => { setPicked({ kind: a.kind, id: a.id, name: a.name });
+                    onClick={() => { setPicked({ kind: a.kind, id: a.id, name: a.name, archived: a.archived });
                                      refreshPickedGrants(a.kind, a.id); }}>
-              <code>{a.kind}</code> {a.name}
+              <code>{a.kind}</code> {a.name}{a.archived ? " · archivé" : ""}
             </button>
           ))}
           {srcContent.artefacts.length === 0 && (
-            <em className="ad-note">« {grantSrc} » ne possède aucun artefact.</em>
+            <em className="ad-note">« {grantSrc} » ne possède aucun artefact{showArchived ? "" : " actif"}.</em>
           )}
         </div>
       )}
       {picked && (
         <>
+          <div className="ad-form">
+            <span className="ad-note">
+              « {picked.name} »{picked.archived ? " (archivé)" : ""}
+            </span>
+            {picked.archived ? (
+              <>
+                <button className="btn sm" onClick={async () => {
+                  try {
+                    await api.restoreArtefact(picked.kind, picked.id);
+                    notify(`« ${picked.name} » restauré.`, "ok");
+                    setPicked({ ...picked, archived: false });
+                    refreshSrcContent();
+                  } catch (e) { notify(e instanceof Error ? e.message : String(e), "err"); }
+                }}><IconReset size={12} /> Restaurer</button>
+                <button className="btn sm danger" onClick={async () => {
+                  if (!window.confirm(`Supprimer « ${picked.name} » pour de bon ? Irréversible.`)) return;
+                  try {
+                    await api.deleteArtefactPermanently(picked.kind, picked.id);
+                    notify(`« ${picked.name} » supprimé définitivement.`, "ok");
+                    setPicked(null); setPickedGrants([]);
+                    refreshSrcContent();
+                  } catch (e) { notify(e instanceof Error ? e.message : String(e), "err"); }
+                }}><IconWarn size={12} /> Supprimer définitivement</button>
+              </>
+            ) : (
+              <button className="btn sm danger" onClick={async () => {
+                try {
+                  await api.archiveArtefact(picked.kind, picked.id);
+                  notify(`« ${picked.name} » archivé.`, "ok");
+                  setPicked({ ...picked, archived: true });
+                  refreshSrcContent();
+                } catch (e) { notify(e instanceof Error ? e.message : String(e), "err"); }
+              }}>Archiver</button>
+            )}
+          </div>
           <p className="ad-note">
             Accès accordés pour « {picked.name} » :
           </p>

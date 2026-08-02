@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import type { Presets, TcoResponse } from "../lib/types";
+import type { ArtefactInfo, Presets, TcoResponse } from "../lib/types";
+import { api } from "../lib/api";
 import { IconUpload, IconLayers, IconReset } from "../lib/icons";
 
 interface Props {
@@ -12,7 +13,9 @@ interface Props {
   delimiterKey: string; setDelimiterKey: (d: string) => void;
   onUpload: (f: File) => void;
   loadedName: string | null;
+  sid: string | null;
   onTco: (f: File) => void;
+  onTcoFromArtefact: (artefactId: string) => void;
   tco: TcoResponse | null;
   onImportYaml: (text: string) => void;
   sheets: string[];
@@ -37,6 +40,10 @@ export function Sidebar(p: Props) {
   const fileRef = useRef<HTMLInputElement>(null);
   const tcoRef = useRef<HTMLInputElement>(null);
   const yamlRef = useRef<HTMLInputElement>(null);
+
+  const [tcoLib, setTcoLib] = useState<ArtefactInfo[]>([]);
+  const [tcoLibPick, setTcoLibPick] = useState("");
+  useEffect(() => { api.listArtefacts("tco").then(setTcoLib).catch(() => {}); }, []);
 
   const accept = p.fileType === "CSV" ? ".csv" : ".xlsx,.xls";
 
@@ -166,6 +173,18 @@ export function Sidebar(p: Props) {
         </button>
         <input ref={tcoRef} type="file" accept=".csv" hidden
           onChange={(e) => { const f = e.target.files?.[0]; if (f) p.onTco(f); e.target.value = ""; }} />
+        {tcoLib.length > 0 && (
+          <div className="frow" style={{ marginTop: 6 }}>
+            <select value={tcoLibPick} onChange={(e) => setTcoLibPick(e.target.value)}>
+              <option value="">— depuis la bibliothèque —</option>
+              {tcoLib.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+            </select>
+            <button className="btn sm" disabled={!tcoLibPick}
+                    onClick={() => { p.onTcoFromArtefact(tcoLibPick); }}>
+              Charger
+            </button>
+          </div>
+        )}
         {p.tco && (
           <div className="banner ok" style={{ marginTop: 10 }}>
             <span><strong>{p.tco.rows}</strong> lignes · <strong>{p.tco.labels.length}</strong> libellés</span>

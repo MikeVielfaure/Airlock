@@ -371,9 +371,8 @@ export function DataTable(props: Props) {
       const active = Object.fromEntries(Object.entries(filters).filter(([, v]) => v.trim() !== ""));
       if (Object.keys(active).length) qs.append("filters", JSON.stringify(active));
     }
-    const a = document.createElement("a");
-    a.href = `/api/files/${sid}/export?${qs.toString()}`;
-    a.click();
+    api.downloadExport(sid, qs.toString(), `${name || "export"}.${fmt}`)
+      .catch((e) => notify(e instanceof Error ? e.message : String(e), "err"));
   };
 
   return (

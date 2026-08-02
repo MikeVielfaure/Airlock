@@ -40,6 +40,11 @@ class FieldConfig(BaseModel):
     rename_output: bool = True              # apply `mapping` as the visible/export name
     tco_mapping: Optional[str] = None       # expected TARGET_LABEL in the TCO (validate)
     tco_replace: bool = False                # replace each value by its TARGET_LABEL (transform)
+    # Restricts the TCO rows this field's lookup/replace sees to TYPE == tco_type.
+    # Absent = the whole table, as before: one shared TCO commonly covers several
+    # fields (poste -> code, structure juridique -> code, ...) whose codes can
+    # collide by coincidence, so a field that cares must say which slice is its own.
+    tco_type: Optional[str] = None
     identifiant: bool = False               # use as row id in the report
     # Name of the key protecting this column. Set = the column is confidential:
     # never stored in the clear, never displayed to a non-holder, and everything
@@ -353,6 +358,9 @@ class ExpressionResult(BaseModel):
 class TcoResponse(BaseModel):
     rows: int
     labels: List[str]
+    # Set only when loaded by reference from the library — lets the UI target
+    # the same artefact when completing missing correspondences later.
+    artefact_id: Optional[str] = None
 
 
 class ExportResponse(BaseModel):

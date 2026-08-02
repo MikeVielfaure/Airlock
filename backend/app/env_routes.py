@@ -28,6 +28,29 @@ from app.services.tco_service import TcoService
 
 router = APIRouter(prefix="/api/environments", tags=["environments"])
 
+
+def _check_env_capability(s: Session, user, environment: str, capability: str = "env.profile") -> None:
+    """
+    Check the caller's role in `environment` itself — never in a separately
+    supplied `env` query param. `require_capability`'s own `env` parameter
+    defaults to "default" when absent, so a route reached by a path segment
+    like `/{name}/profile` must check the role against `name`, not against
+    whatever (or nothing) a caller happened to pass as `?env=` — otherwise an
+    admin of "default" could edit or read another environment's profile
+    just by naming it in the path.
+    """
+    from app.services import auth_service as _auth
+    from app.services import permissions as _perms
+    if not getattr(user, "id", ""):
+        return                                  # setup mode
+    role = _auth.role_in(s, user, environment)
+    if not _perms.can(role, capability):
+        spec = _perms.CAPABILITIES.get(capability, {})
+        raise HTTPException(403, f"« {spec.get('label', capability)} » demande le rôle "
+                                 f"'{spec.get('min', '?')}' dans '{environment}' "
+                                 f"(vous êtes '{role or 'non-membre'}').")
+
+
 # Every module the application can show. A profile names a subset.
 ALL_MODULES = ["schema", "computed", "data", "report", "yaml", "flows", "edi",
                "datasets", "mapping", "canvas", "functions", "ops", "tco"]
@@ -119,7 +142,8 @@ def get_profile(name: str, s: Session = Depends(get_session)):
 
 @router.post("/{name}/profile")
 def set_profile(name: str, req: ProfileIn, s: Session = Depends(get_session),
-        _cap=Depends(require_capability("env.profile"))):
+        user=Depends(require_user)):
+    _check_env_capability(s, user, name)
     p = s.get(EnvironmentProfile, name)
     if p is None:
         p = EnvironmentProfile(name=name, modules_json=[], actions_json=[])
@@ -184,9 +208,11 @@ def create_environment(req: CreateEnvIn, s: Session = Depends(get_session),
 
 
 @router.delete("/{name}/profile")
-def reset_profile(name: str, s: Session = Depends(get_session)):
+def reset_profile(name: str, s: Session = Depends(get_session),
+        user=Depends(require_user)):
     """Drop the profile: the environment reverts to showing everything. The
     artefacts it owns are untouched — a profile describes exposure, not data."""
+    _check_env_capability(s, user, name)
     p = s.get(EnvironmentProfile, name)
     if p is not None:
         s.delete(p)
@@ -195,14 +221,30 @@ def reset_profile(name: str, s: Session = Depends(get_session)):
 
 
 @router.get("/{name}/content")
-def environment_content(name: str, s: Session = Depends(get_session),
-        _cap=Depends(require_capability("env.profile"))):
-    """What this environment owns, by name — the inventory an admin needs
-    before choosing what to migrate ahead of a deletion."""
+def environment_content(name: str, include_archived: bool = False,
+        s: Session = Depends(get_session), user=Depends(require_user)):
+    """
+    What this environment owns, by name.
+
+    Two callers, two needs: the "delete this environment" migration
+    checklist wants only what's actually live (archived material isn't
+    worth migrating), while a "manage the library" screen wants everything,
+    archived included, since that's precisely what it lets an admin act on.
+    `include_archived` tells them apart — omitting it used to mean archived
+    configs and graphs sat in these lists looking exactly as live as
+    everything else, with no badge and no way to tell.
+    """
+    _check_env_capability(s, user, name)
+    art_q = select(Artefact).where(Artefact.environment == name)
+    if not include_archived:
+        art_q = art_q.where(Artefact.archived == False)  # noqa: E712
     artefacts = [{"id": a.id, "kind": a.kind, "name": a.name, "archived": a.archived}
-                for a in s.scalars(select(Artefact).where(Artefact.environment == name))]
+                for a in s.scalars(art_q)]
+    ds_q = select(Dataset).where(Dataset.environment == name)
+    if not include_archived:
+        ds_q = ds_q.where(Dataset.archived == False)  # noqa: E712
     datasets = [{"id": d.id, "name": d.name, "archived": d.archived}
-               for d in s.scalars(select(Dataset).where(Dataset.environment == name))]
+               for d in s.scalars(ds_q)]
     keys = [{"id": k.id, "name": k.name, "active": k.active}
            for k in s.scalars(select(CryptoKey).where(CryptoKey.environment == name))]
     return {"artefacts": artefacts, "datasets": datasets, "keys": keys}
@@ -304,7 +346,7 @@ class TcoAppendIn(BaseModel):
 
 @router.post("/tco/append")
 def append_tco(req: TcoAppendIn, s: Session = Depends(get_session),
-        _cap=Depends(require_capability("tco.append"))):
+        user=Depends(require_user)):
     """
     Add rows to a correspondence table — as a new version, never in place.
 
@@ -329,6 +371,12 @@ def append_tco(req: TcoAppendIn, s: Session = Depends(get_session),
             raise HTTPException(404, str(e))
         if art.kind != "tco":
             raise HTTPException(409, f"Artefact '{art.name}' is a {art.kind}, not a tco.")
+        # The environment that actually owns this artefact — never a
+        # separately-supplied query-string `env` — so appending to another
+        # environment's TCO can't be done just by knowing its id.
+        _check_env_capability(s, user, art.environment, "tco.append")
+    else:
+        _check_env_capability(s, user, req.environment or repo.DEFAULT_ENV, "tco.append")
 
     # The stored CSV's delimiter is whatever it was written with — a comma
     # from the table builder, a semicolon from an older upload — so it is

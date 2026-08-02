@@ -559,6 +559,19 @@ export default function App() {
     } catch (e) { toast(String((e as Error).message), "err"); }
   }, [sid, toast]);
 
+  /** Attach a TCO from the library by reference (an artefact this
+   * environment owns or was granted read access to) — always its latest
+   * version, so an admin's later edit reaches the next session that loads
+   * it without anyone re-uploading a file. */
+  const onTcoFromArtefact = useCallback(async (artefactId: string) => {
+    if (!sid) { toast("Charge d'abord un fichier.", "err"); return; }
+    try {
+      const res = await api.attachTcoFromArtefact(sid, artefactId);
+      setTco(res);
+      toast(`TCO chargé depuis la bibliothèque : ${res.labels.length} libellé(s).`, "ok");
+    } catch (e) { toast(e instanceof Error ? e.message : String(e), "err"); }
+  }, [sid, toast]);
+
   // ── run validation ───────────────────────────────────────
   const onRun = useCallback(async () => {
     if (!sid) return;
@@ -966,7 +979,7 @@ export default function App() {
           encoding={encoding} setEncoding={setEncoding}
           delimiterKey={delimiterKey} setDelimiterKey={setDelimiterKey}
           onUpload={onUpload} loadedName={loadedName}
-          onTco={onTco} tco={tco}
+          sid={sid} onTco={onTco} onTcoFromArtefact={onTcoFromArtefact} tco={tco}
           onImportYaml={onImportYaml}
           sheets={sheets} sheet={sheet} onSheetChange={changeSheet}
           tableMarker={tableMarker} tableIndex={tableIndex} tableHeaderMode={tableHeaderMode}
@@ -1117,8 +1130,8 @@ export default function App() {
                   <TcoFixPanel
                     result={result}
                     fieldTypes={Object.fromEntries(visible.map((c) =>
-                      [c, fields[c]?.mapping || c]))}
-                    tcoArtefactId={profile?.tco_artefact_id ?? ""}
+                      [c, fields[c]?.tco_type || fields[c]?.mapping || c]))}
+                    tcoArtefactId={tco?.artefact_id || profile?.tco_artefact_id || ""}
                     editable={profile?.tco_editable !== false}
                     notify={toast} />
                 )}

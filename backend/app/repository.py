@@ -146,6 +146,47 @@ def archive_artefact(s: Session, artefact_id: str) -> None:
     get_artefact(s, artefact_id).archived = True
 
 
+def restore_artefact(s: Session, artefact_id: str) -> None:
+    """Undo an archive — the artefact reappears everywhere it was hidden
+    from. Only ever a visibility flip: nothing about its versions changes."""
+    get_artefact(s, artefact_id).archived = False
+
+
+def delete_artefact_permanently(s: Session, artefact_id: str) -> None:
+    """
+    Hard delete: the artefact and every version it ever had, gone for good —
+    unlike archiving, which only hides it. Reserved for something already
+    archived (a deliberate two-step, so this is never one accidental click
+    away) and refused while a live flow or an environment's profile still
+    points at it, exactly like an environment cascade delete already refuses
+    for the same reason.
+    """
+    art = get_artefact(s, artefact_id)
+    if not art.archived:
+        raise Conflict(f"« {art.name} » doit d'abord être archivé.")
+    # Any flow — archived or not — still holds a real foreign key to this
+    # artefact; archiving a flow never clears `config_artefact_id`, it just
+    # hides the flow. Postgres enforces that key regardless of the flag, so
+    # the check must too, or the delete below would surface as a raw
+    # IntegrityError instead of this message (and would silently "work" on
+    # SQLite, which never enforces the constraint at all).
+    blockers = list(s.scalars(select(Flow).where(
+        (Flow.config_artefact_id == artefact_id) | (Flow.tco_artefact_id == artefact_id)
+        | (Flow.computed_artefact_id == artefact_id))))
+    if blockers:
+        raise Conflict(f"« {art.name} » est encore utilisé par le flux "
+                       f"« {blockers[0].name} » : supprimez-le d'abord.")
+    from app.db_models import EnvironmentProfile
+    pinning = list(s.scalars(select(EnvironmentProfile).where(
+        (EnvironmentProfile.config_artefact_id == artefact_id)
+        | (EnvironmentProfile.tco_artefact_id == artefact_id))))
+    if pinning:
+        raise Conflict(f"« {art.name} » est imposé par le profil de "
+                       f"« {pinning[0].name} » : détachez-le d'abord.")
+    s.execute(delete(ArtefactGrant).where(ArtefactGrant.artefact_id == artefact_id))
+    s.delete(art)   # cascades to ArtefactVersion via the ORM relationship
+
+
 # ── flows ─────────────────────────────────────────────────────────────
 def create_flow(s: Session, **kw) -> Flow:
     name = kw.get("name")
@@ -196,6 +237,24 @@ def update_flow(s: Session, flow_id: str, **kw) -> Flow:
 
 def archive_flow(s: Session, flow_id: str) -> None:
     get_flow(s, flow_id).archived = True
+
+
+def restore_flow(s: Session, flow_id: str) -> None:
+    get_flow(s, flow_id).archived = False
+
+
+def delete_flow_permanently(s: Session, flow_id: str) -> None:
+    """Hard delete — reserved for an already-archived flow, same two-step
+    rule as an artefact. Runs are an audit trail, never purged just because
+    their flow disappeared — so a flow with any run against its name is left
+    alone rather than orphaning that history."""
+    flow = get_flow(s, flow_id)
+    if not flow.archived:
+        raise Conflict(f"« {flow.name} » doit d'abord être archivé.")
+    if s.scalar(select(Run).where(Run.flow_id == flow_id).limit(1)) is not None:
+        raise Conflict(f"« {flow.name} » a des exécutions enregistrées : "
+                       f"elles seraient orphelines, suppression refusée.")
+    s.delete(flow)
 
 
 # ── runs ──────────────────────────────────────────────────────────────

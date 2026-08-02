@@ -212,7 +212,8 @@ class ProcessService:
             # Remplacement TCO → la valeur source est remplacée par son label
             if getattr(field, "tco_replace", False):
                 if tco_df is not None:
-                    new_series, val_series = self._tco.replace_series(tco_df, df[col])
+                    new_series, val_series = self._tco.replace_series(
+                        tco_df, df[col], getattr(field, "tco_type", None))
                     df[col] = new_series
                     validation[col] = val_series
                 else:
@@ -223,7 +224,7 @@ class ProcessService:
             if field.tco_mapping:
                 if tco_df is not None:
                     validation[col] = self._tco.lookup_series(
-                        tco_df, df[col], field.tco_mapping
+                        tco_df, df[col], field.tco_mapping, getattr(field, "tco_type", None)
                     )
                 else:
                     validation[col] = pd.Series(

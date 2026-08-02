@@ -141,6 +141,27 @@ async function json<T>(res: Response): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+/** A file download that needs the bearer token, so it can't be a plain
+ * `<a href>` navigation (no way to attach a header to that) — fetch it as
+ * this user, then hand the browser a blob to save. */
+async function downloadBlob(url: string, fallbackName: string): Promise<void> {
+  const res = await fetch(url, { headers: authHeaders() });
+  if (!res.ok) {
+    let detail = res.statusText;
+    try { detail = (await res.json()).detail ?? detail; } catch { /* keep statusText */ }
+    throw new Error(detail);
+  }
+  const disposition = res.headers.get("Content-Disposition") || "";
+  const match = /filename="?([^"]+)"?/.exec(disposition);
+  const filename = match ? match[1] : fallbackName;
+  const blob = await res.blob();
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
 export const api = {
   presets: () => fetch(`${BASE}/presets`, { headers: authHeaders() }).then((r) => json<Presets>(r)),
 
@@ -154,7 +175,11 @@ export const api = {
     if (opts.tableMarker) fd.append("table_marker", opts.tableMarker);
     if (opts.tableMarker) fd.append("table_index", String(opts.tableIndex ?? 0));
     if (opts.tableMarker) fd.append("table_header_mode", opts.tableHeaderMode ?? "local");
-    return fetch(`${BASE}/files`, { method: "POST", body: fd, headers: authHeaders() }).then((r) =>
+    // `env` only *proposes* — membership decides — but omitting it defaults
+    // the server to "default", silently refusing anyone whose only
+    // environment is something else.
+    return fetch(`${BASE}/files?env=${encodeURIComponent(CURRENT_ENV)}`,
+      { method: "POST", body: fd, headers: authHeaders() }).then((r) =>
       json<FileResponse>(r),
     );
   },
@@ -175,6 +200,23 @@ export const api = {
     );
   },
 
+  /** Attach a TCO artefact from the library, by reference — the shared,
+   * admin-maintained table an environment was granted read access to,
+   * rather than a raw file the operator has to have handy. */
+  attachTcoFromArtefact: (sid: string, artefactId: string, versionNo?: number) =>
+    fetch(`${BASE}/files/${sid}/tco/from-artefact`, {
+      method: "POST", headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ artefact_id: artefactId, version_no: versionNo ?? null }),
+    }).then((r) => json<TcoResponse>(r)),
+
+  /** Report and export are downloads, not JSON — token goes via `fetch`,
+   * never a bare `<a href>` (a plain navigation can't carry a header). */
+  downloadReport: (sid: string, qs: string, fallbackName = "report") =>
+    downloadBlob(`${BASE}/files/${sid}/report?${qs}&env=${encodeURIComponent(CURRENT_ENV)}`, fallbackName),
+
+  downloadExport: (sid: string, qs: string, fallbackName = "export") =>
+    downloadBlob(`${BASE}/files/${sid}/export?${qs}&env=${encodeURIComponent(CURRENT_ENV)}`, fallbackName),
+
   process: (
     sid: string,
     body: {
@@ -188,7 +230,7 @@ export const api = {
       ref_variables?: string[];
     },
   ) =>
-    fetch(`${BASE}/files/${sid}/process`, {
+    fetch(`${BASE}/files/${sid}/process?env=${encodeURIComponent(CURRENT_ENV)}`, {
       method: "POST",
       headers: authHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify(body),
@@ -228,7 +270,7 @@ export const api = {
 
   attachExternalDbSource: (sid: string, name: string, connection: string, query: string,
                           params: Record<string, string>, schemaName?: string) =>
-    fetch(`${BASE}/files/${sid}/sources/external_db`, {
+    fetch(`${BASE}/files/${sid}/sources/external_db?env=${encodeURIComponent(CURRENT_ENV)}`, {
       method: "POST", headers: authHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({ name, connection, query, params, schema_name: schemaName ?? null }),
     }).then((r) => json<SourceInfo>(r)),
@@ -236,7 +278,7 @@ export const api = {
   attachApiSource: (sid: string, name: string, connection: string, path: string, method: string,
                    responseKind: string, dataPath: string, body?: Record<string, unknown>,
                    schemaName?: string) =>
-    fetch(`${BASE}/files/${sid}/sources/api`, {
+    fetch(`${BASE}/files/${sid}/sources/api?env=${encodeURIComponent(CURRENT_ENV)}`, {
       method: "POST", headers: authHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({ name, connection, path, method, response_kind: responseKind,
                             data_path: dataPath, body: body ?? null, schema_name: schemaName ?? null }),
@@ -248,12 +290,12 @@ export const api = {
 
   /** Référentiel variables pickable outside the référentiel itself. */
   listAvailableVariables: (kind = "") =>
-    fetch(`${BASE}/variables/available${kind ? `?kind=${encodeURIComponent(kind)}` : ""}`,
+    fetch(`${BASE}/variables/available?env=${encodeURIComponent(CURRENT_ENV)}${kind ? `&kind=${encodeURIComponent(kind)}` : ""}`,
          { headers: authHeaders() }).then((r) => json<AvailableVariable[]>(r)),
 
   /** Known tables (BDD externe) / endpoints (API) declared on a connection. */
   listConnectionSchemas: (variableId: string) =>
-    fetch(`${BASE}/variables/${variableId}/schemas`, { headers: authHeaders() })
+    fetch(`${BASE}/variables/${variableId}/schemas?env=${encodeURIComponent(CURRENT_ENV)}`, { headers: authHeaders() })
       .then((r) => json<VariableSchema[]>(r)),
 
   saveConnectionSchema: (variableId: string, body: VariableSchema) =>
@@ -271,7 +313,7 @@ export const api = {
   detectConnectionSchema: (variableId: string, body: { query?: string; params?: Record<string, string>;
                            path?: string; method?: string; response_kind?: string;
                            data_path?: string; body?: Record<string, unknown> }) =>
-    fetch(`${BASE}/variables/${variableId}/detect-schema`, {
+    fetch(`${BASE}/variables/${variableId}/detect-schema?env=${encodeURIComponent(CURRENT_ENV)}`, {
       method: "POST", headers: authHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify(body),
     }).then((r) => json<{ columns: { name: string; type: string }[] }>(r)),
@@ -280,14 +322,14 @@ export const api = {
    * the same doorway an upload is, alongside it. */
   createSessionFromExternalDb: (connection: string, query: string, params: Record<string, string>,
                                schemaName?: string) =>
-    fetch(`${BASE}/files/from-external-db`, {
+    fetch(`${BASE}/files/from-external-db?env=${encodeURIComponent(CURRENT_ENV)}`, {
       method: "POST", headers: authHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({ connection, query, params, schema_name: schemaName ?? null }),
     }).then((r) => json<FileResponse>(r)),
 
   createSessionFromApi: (connection: string, path: string, method: string, responseKind: string,
                         dataPath: string, schemaName?: string, body?: Record<string, unknown>) =>
-    fetch(`${BASE}/files/from-api`, {
+    fetch(`${BASE}/files/from-api?env=${encodeURIComponent(CURRENT_ENV)}`, {
       method: "POST", headers: authHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({ connection, path, method, response_kind: responseKind,
                             data_path: dataPath, schema_name: schemaName ?? null, body: body ?? null }),
@@ -318,7 +360,7 @@ export const api = {
     }).then((r) => json<{ yaml: string }>(r)),
 
   editCells: (sid: string, edits: { index: number; column: string; value: string }[]) =>
-    fetch(`${BASE}/files/${sid}/cells`, {
+    fetch(`${BASE}/files/${sid}/cells?env=${encodeURIComponent(CURRENT_ENV)}`, {
       method: "POST",
       headers: authHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({ edits }),
@@ -333,8 +375,11 @@ export const api = {
   listEnvironments: () => fetch(`${BASE}/environments`, { headers: authHeaders() })
     .then((r) => json<{ environments: string[]; default: string }>(r)),
 
-  listArtefacts: (kind: "config" | "computed" | "tco" | "edi_model" | "mapping" | "graph" | "function") =>
-    fetch(`${BASE}/artefacts/${kind}?env=${encodeURIComponent(CURRENT_ENV)}`, { headers: authHeaders() }).then((r) => json<ArtefactInfo[]>(r)),
+  listArtefacts: (kind: "config" | "computed" | "tco" | "edi_model" | "mapping" | "graph" | "function",
+                  opts?: { env?: string; includeArchived?: boolean }) =>
+    fetch(`${BASE}/artefacts/${kind}?env=${encodeURIComponent(opts?.env ?? CURRENT_ENV)}`
+         + (opts?.includeArchived ? "&include_archived=true" : ""),
+         { headers: authHeaders() }).then((r) => json<ArtefactInfo[]>(r)),
 
   createArtefact: (kind: "config" | "computed" | "tco" | "edi_model" | "mapping" | "graph" | "function",
                    body: { name: string; description?: string; note?: string;
@@ -372,10 +417,22 @@ export const api = {
   archiveArtefact: (kind: string, id: string) =>
     fetch(`${BASE}/artefacts/${kind}/${id}`, { method: "DELETE", headers: authHeaders() }).then((r) => json<{ archived: string }>(r)),
 
+  restoreArtefact: (kind: string, id: string) =>
+    fetch(`${BASE}/artefacts/${kind}/${id}/restore`, { method: "POST", headers: authHeaders() })
+      .then((r) => json<{ restored: string }>(r)),
+
+  /** Gone for good — every version, no history. Only ever offered once
+   * something is already archived. */
+  deleteArtefactPermanently: (kind: string, id: string) =>
+    fetch(`${BASE}/artefacts/${kind}/${id}/permanent`, { method: "DELETE", headers: authHeaders() })
+      .then((r) => json<{ deleted: string }>(r)),
+
   getArtefact: (kind: string, id: string) =>
     fetch(`${BASE}/artefacts/${kind}/${id}`, { headers: authHeaders() }).then((r) => json<{ body: unknown }>(r)),
 
-  listFlows: () => fetch(`${BASE}/flows`, { headers: authHeaders() }).then((r) => json<FlowInfo[]>(r)),
+  listFlows: (includeArchived = false) =>
+    fetch(`${BASE}/flows${includeArchived ? "?include_archived=true" : ""}`, { headers: authHeaders() })
+      .then((r) => json<FlowInfo[]>(r)),
 
   createFlow: (body: {
     name: string; description?: string;
@@ -390,6 +447,14 @@ export const api = {
 
   archiveFlow: (id: string) =>
     fetch(`${BASE}/flows/${id}`, { method: "DELETE", headers: authHeaders() }).then((r) => json<{ archived: string }>(r)),
+
+  restoreFlow: (id: string) =>
+    fetch(`${BASE}/flows/${id}/restore`, { method: "POST", headers: authHeaders() })
+      .then((r) => json<{ restored: string }>(r)),
+
+  deleteFlowPermanently: (id: string) =>
+    fetch(`${BASE}/flows/${id}/permanent`, { method: "DELETE", headers: authHeaders() })
+      .then((r) => json<{ deleted: string }>(r)),
 
   runFlow: (id: string, file: File, exportFilename?: string) => {
     const fd = new FormData();
@@ -480,7 +545,7 @@ export const api = {
   /** Start a session from a schema instead of a file (v15). */
   createBlankSession: (body: { columns?: string[]; artefact_id?: string;
                                artefact_version?: number | null; rows?: number }) =>
-    fetch(`${BASE}/files/blank`, {
+    fetch(`${BASE}/files/blank?env=${encodeURIComponent(CURRENT_ENV)}`, {
       method: "POST", headers: authHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify(body),
     }).then((r) => json<FileResponse>(r)),
@@ -604,13 +669,14 @@ export const api = {
 
   createEnvironment: (body: { name: string; template: string; label?: string;
                               config_artefact_id?: string; tco_artefact_id?: string }) =>
-    fetch(`${BASE}/environments`, {
+    fetch(`${BASE}/environments?env=${encodeURIComponent(CURRENT_ENV)}`, {
       method: "POST", headers: authHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify(body),
     }).then((r) => json<EnvProfile>(r)),
 
-  environmentContent: (name: string) =>
-    fetch(`${BASE}/environments/${name}/content`, { headers: authHeaders() })
+  environmentContent: (name: string, includeArchived = false) =>
+    fetch(`${BASE}/environments/${name}/content${includeArchived ? "?include_archived=true" : ""}`,
+         { headers: authHeaders() })
       .then((r) => json<{
         artefacts: { id: string; kind: string; name: string; archived: boolean }[];
         datasets: { id: string; name: string; archived: boolean }[];
@@ -678,7 +744,7 @@ export const api = {
 
   /** Try a draft connection before it is even saved. */
   testConnection: (kind: string, value: string) =>
-    fetch(`${BASE}/variables/test`, {
+    fetch(`${BASE}/variables/test?env=${encodeURIComponent(CURRENT_ENV)}`, {
       method: "POST", headers: authHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({ kind, value }),
     }).then((r) => json<{ ok: boolean; message: string }>(r)),
@@ -709,7 +775,7 @@ export const api = {
   getOpsRun: (id: string) => fetch(`${BASE}/ops/runs/${id}`, { headers: authHeaders() }).then((r) => json<RunRow>(r)),
 
   replayRun: (id: string, mode: "same_data" | "refetch") =>
-    fetch(`${BASE}/ops/runs/${id}/replay`, {
+    fetch(`${BASE}/ops/runs/${id}/replay?env=${encodeURIComponent(CURRENT_ENV)}`, {
       method: "POST", headers: authHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({ mode }),
     }).then((r) => json<{ ok: boolean; run: RunRow }>(r)),
@@ -717,7 +783,7 @@ export const api = {
   // ── v21: a hand-made session, made repeatable ─────────────────
   sessionToFlow: (sid: string, body: { name: string; save?: boolean;
                                        source?: string; dataset_name?: string }) =>
-    fetch(`${BASE}/files/${sid}/to-flow`, {
+    fetch(`${BASE}/files/${sid}/to-flow?env=${encodeURIComponent(CURRENT_ENV)}`, {
       method: "POST", headers: authHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({ ...body, environment: CURRENT_ENV }),
     }).then((r) => json<{ graph: unknown; artefact_id: string | null;
@@ -727,7 +793,7 @@ export const api = {
   saveSessionAsTco: (sid: string, body: { source_column: string; target_column: string;
                      type_column?: string; type_value?: string;
                      artefact_id?: string; name?: string; description?: string }) =>
-    fetch(`${BASE}/files/${sid}/to-tco`, {
+    fetch(`${BASE}/files/${sid}/to-tco?env=${encodeURIComponent(CURRENT_ENV)}`, {
       method: "POST", headers: authHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({ ...body, environment: CURRENT_ENV }),
     }).then((r) => json<{ artefact_id: string; version_no: number; rows: number }>(r)),
@@ -746,7 +812,7 @@ export const api = {
   runGraph: (body: { yaml?: string; graph_id?: string; params?: Record<string, string> }) =>
     fetch(`${BASE}/graphs/run`, {
       method: "POST", headers: authHeaders({ "Content-Type": "application/json" }),
-      body: JSON.stringify(body),
+      body: JSON.stringify({ ...body, environment: CURRENT_ENV }),
     }).then((r) => json<{ ok: boolean; output: string; meta: Record<string, unknown>;
                           trace: { node: string; type: string; ms: number;
                                    records: number; rows: number;
@@ -760,7 +826,7 @@ export const api = {
   adoptGraph: (body: { yaml?: string; graph_id?: string; params?: Record<string, string> }) =>
     fetch(`${BASE}/graphs/adopt`, {
       method: "POST", headers: authHeaders({ "Content-Type": "application/json" }),
-      body: JSON.stringify(body),
+      body: JSON.stringify({ ...body, environment: CURRENT_ENV }),
     }).then((r) => json<FileResponse>(r)),
 
   /** The stored graph document, to reopen on the canvas. */
@@ -797,19 +863,19 @@ export const api = {
     fetch(`${BASE}/files/${sid}/preview?limit=${limit}`, { headers: authHeaders() }).then((r) => json<TablePreview>(r)),
 
   addRows: (sid: string, count = 1, copyFrom?: number) =>
-    fetch(`${BASE}/files/${sid}/rows/add`, {
+    fetch(`${BASE}/files/${sid}/rows/add?env=${encodeURIComponent(CURRENT_ENV)}`, {
       method: "POST", headers: authHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({ count, copy_from: copyFrom ?? null }),
     }).then((r) => json<RowsMutationResponse>(r)),
 
   deleteRows: (sid: string, indices: number[]) =>
-    fetch(`${BASE}/files/${sid}/rows/delete`, {
+    fetch(`${BASE}/files/${sid}/rows/delete?env=${encodeURIComponent(CURRENT_ENV)}`, {
       method: "POST", headers: authHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({ indices }),
     }).then((r) => json<RowsMutationResponse>(r)),
 
   deleteFilteredRows: (sid: string, filters: Record<string, string>, statuses: string[]) =>
-    fetch(`${BASE}/files/${sid}/rows/delete`, {
+    fetch(`${BASE}/files/${sid}/rows/delete?env=${encodeURIComponent(CURRENT_ENV)}`, {
       method: "POST", headers: authHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({ indices: [], all_filtered: true, filters, statuses }),
     }).then((r) => json<RowsMutationResponse>(r)),
@@ -873,7 +939,7 @@ export const api = {
     }).then((r) => json<WriteResponse>(r)),
 
   writeDataset: (sid: string, body: DatasetWriteBody) =>
-    fetch(`${BASE}/files/${sid}/datasets/write`, {
+    fetch(`${BASE}/files/${sid}/datasets/write?env=${encodeURIComponent(CURRENT_ENV)}`, {
       method: "POST", headers: authHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify(body),
     }).then((r) => json<WriteResponse>(r)),

@@ -224,12 +224,21 @@ def get_dataset(dataset_id: str, s: Session = Depends(get_session)):
 
 
 @router.delete("/datasets/{dataset_id}")
-def archive_dataset(dataset_id: str, s: Session = Depends(get_session),
-        _cap=Depends(require_capability("dataset.delete"))):
+def archive_dataset(dataset_id: str, user=Depends(require_user),
+        s: Session = Depends(get_session)):
     try:
-        repo.archive_dataset(s, dataset_id)
+        d = repo.get_dataset(s, dataset_id)
     except repo.NotFound as e:
         raise HTTPException(404, str(e))
+    # The table's own owning environment and its grants decide this — never a
+    # separately-supplied `env` query param, which would let anyone with
+    # `dataset.delete` in "default" archive a table they were never granted
+    # access to, just by knowing its id.
+    scope = d.environment or repo.DEFAULT_ENV
+    perm = repo.dataset_permission(s, d, user, _auth.role_in(s, user, scope), environment=scope)
+    if not repo.can_on_dataset(perm, "manage"):
+        raise HTTPException(403, f"Aucun droit de suppression sur la table « {d.name} ».")
+    repo.archive_dataset(s, dataset_id)
     commit(s)
     return {"archived": dataset_id}
 

@@ -117,3 +117,61 @@ def test_seeding_from_a_tco_artefact_is_refused_with_a_clear_message():
 
 def test_seeding_from_an_unknown_artefact_is_404():
     assert client.post("/api/files/blank", json={"artefact_id": "nope"}).status_code == 404
+
+
+# ── the route is not an open door once accounts exist ────────────────
+def _h(t):
+    return {"Authorization": f"Bearer {t}"}
+
+
+def test_a_viewer_cannot_start_a_blank_session():
+    client.post("/api/auth/signup", json={"email": "chef-blank@x.fr", "password": "motdepasse1"})
+    chef = client.post("/api/auth/login",
+                       json={"email": "chef-blank@x.fr", "password": "motdepasse1"}).json()["token"]
+    client.post("/api/auth/signup", json={"email": "voir-blank@x.fr", "password": "motdepasse1"},
+               headers=_h(chef))
+    client.post("/api/admin/environments/default/members",
+               json={"email": "voir-blank@x.fr", "role": "viewer"}, headers=_h(chef))
+    viewer = client.post("/api/auth/login",
+                         json={"email": "voir-blank@x.fr", "password": "motdepasse1"}).json()["token"]
+
+    r = client.post("/api/files/blank", json={"columns": ["a"]}, headers=_h(viewer))
+    assert r.status_code == 403
+
+    from app.db import session_scope
+    from app.db_models import AuthSession, Membership, User, UserIdentity
+    with session_scope() as s:
+        for m in (AuthSession, UserIdentity, Membership, User):
+            for row in s.query(m).all():
+                s.delete(row)
+        s.commit()
+
+
+def test_seeding_from_an_artefact_outside_ones_environments_is_404():
+    client.post("/api/auth/signup", json={"email": "chef-blank2@x.fr", "password": "motdepasse1"})
+    chef = client.post("/api/auth/login",
+                       json={"email": "chef-blank2@x.fr", "password": "motdepasse1"}).json()["token"]
+    client.post("/api/admin/environments/prive-blank/members",
+               json={"email": "chef-blank2@x.fr", "role": "admin"}, headers=_h(chef))
+    aid = client.post("/api/artefacts/config",
+                      json={"name": "cfg-prive-blank", "environment": "prive-blank",
+                            "yaml": "type: CSV\ndelimiter: \";\"\nFields:\n  - name: [A]\n    type: string\n"},
+                      headers=_h(chef)).json()["id"]
+
+    client.post("/api/auth/signup", json={"email": "dehors-blank@x.fr", "password": "motdepasse1"},
+               headers=_h(chef))
+    client.post("/api/admin/environments/default/members",
+               json={"email": "dehors-blank@x.fr", "role": "editor"}, headers=_h(chef))
+    outsider = client.post("/api/auth/login",
+                           json={"email": "dehors-blank@x.fr", "password": "motdepasse1"}).json()["token"]
+
+    r = client.post("/api/files/blank", json={"artefact_id": aid}, headers=_h(outsider))
+    assert r.status_code == 404
+
+    from app.db import session_scope
+    from app.db_models import AuthSession, Membership, User, UserIdentity
+    with session_scope() as s:
+        for m in (AuthSession, UserIdentity, Membership, User):
+            for row in s.query(m).all():
+                s.delete(row)
+        s.commit()

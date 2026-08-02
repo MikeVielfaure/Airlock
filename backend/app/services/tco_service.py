@@ -100,14 +100,30 @@ class TcoService:
             )
         return df
 
-    def get_available_labels(self, tco_df: pd.DataFrame) -> list[str]:
-        """Retourne les valeurs distinctes de TARGET_LABEL disponibles dans le TCO."""
-        return sorted(tco_df[_COL_TARGET].dropna().unique().tolist())
+    def _scoped(self, tco_df: pd.DataFrame, type_: str | None) -> pd.DataFrame:
+        """
+        Restrict to rows whose TYPE matches, when the caller names one and the
+        table actually carries a TYPE column. One TCO commonly serves several
+        fields — a job title and a legal-structure label can resolve to the
+        same code by coincidence — so a field that names its type must only
+        ever see its own slice, never risk a silent cross-type collision.
 
-    def as_lookup_map(self, tco_df: pd.DataFrame) -> dict[str, str]:
+        No type named, or no TYPE column at all: the whole table applies, same
+        as before this existed — existing single-purpose TCOs are unaffected.
+        """
+        if not type_ or _COL_TYPE not in tco_df.columns:
+            return tco_df
+        return tco_df[tco_df[_COL_TYPE].str.strip().str.upper() == type_.strip().upper()]
+
+    def get_available_labels(self, tco_df: pd.DataFrame, type_: str | None = None) -> list[str]:
+        """Retourne les valeurs distinctes de TARGET_LABEL disponibles dans le TCO."""
+        return sorted(self._scoped(tco_df, type_)[_COL_TARGET].dropna().unique().tolist())
+
+    def as_lookup_map(self, tco_df: pd.DataFrame, type_: str | None = None) -> dict[str, str]:
         """{SOURCE_VALUE: TARGET_LABEL} — backs the LOOKUP() computed function."""
+        scoped = self._scoped(tco_df, type_)
         out: dict[str, str] = {}
-        for src, tgt in zip(tco_df[_COL_SOURCE].tolist(), tco_df[_COL_TARGET].tolist()):
+        for src, tgt in zip(scoped[_COL_SOURCE].tolist(), scoped[_COL_TARGET].tolist()):
             if src is not None and str(src) != "nan":
                 out[str(src)] = "" if tgt is None else str(tgt)
         return out
@@ -121,6 +137,7 @@ class TcoService:
         tco_df: pd.DataFrame,
         source_value: str,
         target_label: str,
+        type_: str | None = None,
     ) -> tuple[bool, str]:
         """
         Vérifie qu'une valeur source mappe vers le label cible attendu.
@@ -128,11 +145,13 @@ class TcoService:
         :param tco_df:       DataFrame TCO chargé
         :param source_value: valeur du champ dans le fichier traité
         :param target_label: label attendu (= FieldConfig.mapping)
+        :param type_:        restreint aux lignes de ce TYPE (FieldConfig.tco_type)
         :return: (ok: bool, message: str)
         """
         if not source_value or source_value.strip() == "":
             return False, f"MAPPING KO — valeur source vide"
 
+        tco_df = self._scoped(tco_df, type_)
         matches = tco_df[
             (tco_df[_COL_SOURCE].str.strip() == source_value.strip()) &
             (tco_df[_COL_TARGET].str.strip().str.upper() == target_label.strip().upper())
@@ -162,13 +181,14 @@ class TcoService:
         tco_df: pd.DataFrame,
         series: pd.Series,
         target_label: str,
+        type_: str | None = None,
     ) -> pd.Series:
         """
         Applique lookup() sur toute une colonne.
         Retourne une Series de messages ('MAPPING OK' ou message d'erreur).
         """
         def _check(val):
-            _, msg = self.lookup(tco_df, "" if pd.isna(val) else str(val), target_label)
+            _, msg = self.lookup(tco_df, "" if pd.isna(val) else str(val), target_label, type_)
             return msg
         return series.apply(_check)
 
@@ -176,6 +196,7 @@ class TcoService:
         self,
         tco_df: pd.DataFrame,
         series: pd.Series,
+        type_: str | None = None,
     ) -> tuple[pd.Series, pd.Series]:
         """
         Mode REMPLACEMENT : remplace chaque valeur source par son TARGET_LABEL.
@@ -185,7 +206,7 @@ class TcoService:
           • absente   -> valeur conservée,       message "MAPPING KO — … introuvable"
             (la valeur non couverte ressort donc dans la couverture TCO)
         """
-        lm = {str(k).strip(): v for k, v in self.as_lookup_map(tco_df).items()}
+        lm = {str(k).strip(): v for k, v in self.as_lookup_map(tco_df, type_).items()}
         new_vals, msgs = [], []
         for val in series.tolist():
             s = "" if pd.isna(val) else str(val).strip()

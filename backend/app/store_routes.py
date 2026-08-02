@@ -74,16 +74,22 @@ KIND_CAPABILITY = {
 
 
 def _check_kind_capability(s: Session, user, kind: str, environment: str) -> None:
+    _check_capability_in(s, user, environment, KIND_CAPABILITY.get(kind, "config.write"))
+
+
+def _check_capability_in(s: Session, user, environment: str, capability: str) -> None:
+    """Check the caller's role in `environment` for an explicit capability —
+    used where the capability isn't the kind's write one (e.g. archiving is
+    `config.delete`, a stricter, admin-only bar, not `config.write`)."""
     from app.services import auth_service as _auth
     from app.services import permissions as _perms
     if not getattr(user, "id", ""):
         return                                  # setup mode
     scope = environment or repo.DEFAULT_ENV
     role = _auth.role_in(s, user, scope)
-    cap = KIND_CAPABILITY.get(kind, "config.write")
-    if not _perms.can(role, cap):
-        spec = _perms.CAPABILITIES.get(cap, {})
-        raise HTTPException(403, f"« {spec.get('label', cap)} » demande le rôle "
+    if not _perms.can(role, capability):
+        spec = _perms.CAPABILITIES.get(capability, {})
+        raise HTTPException(403, f"« {spec.get('label', capability)} » demande le rôle "
                                  f"'{spec.get('min','?')}' dans '{scope}' "
                                  f"(vous êtes '{role or 'non-membre'}').")
 
@@ -354,14 +360,59 @@ def get_config_version_yaml(artefact_id: str, version_no: int,
 
 @router.delete("/artefacts/{kind}/{artefact_id}")
 def archive_artefact(kind: str, artefact_id: str, s: Session = Depends(get_session),
-        _cap=Depends(require_capability("config.delete"))):
+        user=Depends(require_user)):
     _kind_or_404(kind)
+    try:
+        art = repo.get_artefact(s, artefact_id)
+    except repo.NotFound as e:
+        raise HTTPException(404, str(e))
+    # Archiving reaches into whatever environment actually *owns* this
+    # artefact — never the caller's query-string `env`, which a "default"
+    # admin could otherwise use to delete another environment's artefacts
+    # just by knowing their id (same reasoning as add_version above).
+    # `config.delete` specifically, not the kind's write capability — an
+    # editor may design a configuration but archiving shared material is a
+    # stricter, admin-only act.
+    _check_capability_in(s, user, art.environment, "config.delete")
     try:
         repo.archive_artefact(s, artefact_id)
     except repo.NotFound as e:
         raise HTTPException(404, str(e))
     commit(s)
     return {"archived": artefact_id}
+
+
+@router.post("/artefacts/{kind}/{artefact_id}/restore")
+def restore_artefact(kind: str, artefact_id: str, s: Session = Depends(get_session),
+        user=Depends(require_user)):
+    _kind_or_404(kind)
+    try:
+        art = repo.get_artefact(s, artefact_id)
+    except repo.NotFound as e:
+        raise HTTPException(404, str(e))
+    _check_capability_in(s, user, art.environment, "config.delete")
+    repo.restore_artefact(s, artefact_id)
+    commit(s)
+    return {"restored": artefact_id}
+
+
+@router.delete("/artefacts/{kind}/{artefact_id}/permanent")
+def delete_artefact_permanently(kind: str, artefact_id: str, s: Session = Depends(get_session),
+        user=Depends(require_user)):
+    """Gone for good — every version, no history. Reserved for something
+    already archived; refused while a live flow or a profile still needs it."""
+    _kind_or_404(kind)
+    try:
+        art = repo.get_artefact(s, artefact_id)
+    except repo.NotFound as e:
+        raise HTTPException(404, str(e))
+    _check_capability_in(s, user, art.environment, "config.delete")
+    try:
+        repo.delete_artefact_permanently(s, artefact_id)
+    except repo.Conflict as e:
+        raise HTTPException(409, str(e))
+    commit(s)
+    return {"deleted": artefact_id}
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -419,6 +470,28 @@ def archive_flow(flow_id: str, s: Session = Depends(get_session)):
         raise HTTPException(404, str(e))
     commit(s)
     return {"archived": flow_id}
+
+
+@router.post("/flows/{flow_id}/restore")
+def restore_flow(flow_id: str, s: Session = Depends(get_session)):
+    try:
+        repo.restore_flow(s, flow_id)
+    except repo.NotFound as e:
+        raise HTTPException(404, str(e))
+    commit(s)
+    return {"restored": flow_id}
+
+
+@router.delete("/flows/{flow_id}/permanent")
+def delete_flow_permanently(flow_id: str, s: Session = Depends(get_session)):
+    try:
+        repo.delete_flow_permanently(s, flow_id)
+    except repo.NotFound as e:
+        raise HTTPException(404, str(e))
+    except repo.Conflict as e:
+        raise HTTPException(409, str(e))
+    commit(s)
+    return {"deleted": flow_id}
 
 
 @router.post("/flows/{flow_id}/run", response_model=PipelineResponse)

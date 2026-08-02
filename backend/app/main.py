@@ -712,7 +712,9 @@ def _columns_from_edi_model(model) -> list[str]:
 
 
 @app.post("/api/files/blank", response_model=FileResponse)
-def create_blank_session(req: BlankSessionRequest, s: DbSession = Depends(get_session)):
+def create_blank_session(req: BlankSessionRequest,
+        user=Depends(require_capability("file.upload")),
+        s: DbSession = Depends(get_session)):
     """
     Start a session from a schema instead of a file: the schema is the source of
     truth, the data comes later (or never). Columns are given explicitly, or
@@ -721,11 +723,14 @@ def create_blank_session(req: BlankSessionRequest, s: DbSession = Depends(get_se
     """
     seeded_fields: dict | None = None
     if req.artefact_id:
+        from app.store_routes import _user_can_view_artefact
         with session_scope() as s2:
             try:
                 ver = repo.resolve_ref(s2, req.artefact_id, req.artefact_version)
             except repo.NotFound as e:
                 raise HTTPException(404, str(e))
+            if not _user_can_view_artefact(s2, user, ver.artefact):
+                raise HTTPException(404, f"Artefact {req.artefact_id} introuvable.")
             kind = ver.artefact.kind
             body = ver.body                 # already a deserialized dict, not YAML text
         if kind == "config":
@@ -1225,7 +1230,51 @@ async def upload_tco(
         except Exception as e:  # noqa: BLE001
             raise HTTPException(422, str(e))
         sess.tco_df = tco_df
+        sess.tco_artefact_id = None       # a raw file, not backed by any artefact
         return TcoResponse(rows=int(len(tco_df)), labels=_tco.get_available_labels(tco_df))
+
+
+class TcoFromArtefactRequest(BaseModel):
+    artefact_id: str
+    version_no: Optional[int] = None
+
+
+@app.post("/api/files/{sid}/tco/from-artefact", response_model=TcoResponse)
+def tco_from_artefact(sid: str, req: TcoFromArtefactRequest,
+        user=Depends(require_user), s: DbSession = Depends(get_session)):
+    """
+    Attach a TCO artefact from the library, by reference — not a copy of a
+    file the operator happens to have lying around, but the shared,
+    admin-maintained table an environment was granted read access to.
+    Defaults to the artefact's latest version, so an admin's edit reaches
+    every session started afterward without anyone re-uploading anything.
+    """
+    from app.store_routes import _user_can_view_artefact
+    try:
+        art = repo.get_artefact(s, req.artefact_id)
+    except repo.NotFound as e:
+        raise HTTPException(404, str(e))
+    if art.kind != "tco":
+        raise HTTPException(409, f"« {art.name} » est un {art.kind}, pas un tco.")
+    if not _user_can_view_artefact(s, user, art):
+        raise HTTPException(404, f"Artefact {req.artefact_id} introuvable.")
+    try:
+        ver = repo.resolve_ref(s, req.artefact_id, req.version_no)
+    except repo.NotFound as e:
+        raise HTTPException(404, str(e))
+    csv_text = (ver.body or {}).get("csv", "")
+    if not csv_text.strip():
+        raise HTTPException(422, "Cette table de correspondance est vide.")
+
+    with _session(sid, s) as sess:
+        try:
+            tco_df = _tco.load_tco(csv_text.encode("utf-8"), encoding="utf-8")
+        except Exception as e:  # noqa: BLE001
+            raise HTTPException(422, str(e))
+        sess.tco_df = tco_df
+        sess.tco_artefact_id = req.artefact_id
+        return TcoResponse(rows=int(len(tco_df)), labels=_tco.get_available_labels(tco_df),
+                           artefact_id=req.artefact_id)
 
 
 @app.post("/api/files/{sid}/process", response_model=ProcessResponse)

@@ -141,6 +141,7 @@ class ConfigService:
                 "check_type":       True if f.check_type else None,
                 "tco_mapping":      f.tco_mapping,
                 "tco_replace":      True if getattr(f, "tco_replace", False) else None,
+                "tco_type":         getattr(f, "tco_type", None),
             }.items() if v is not None}
             for f in config.Fields
         ]

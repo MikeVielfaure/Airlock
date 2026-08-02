@@ -280,6 +280,17 @@ export function FieldEditor({ col, field, presets, tcoLabels, configFields, onCh
             </select>
           </div>
 
+          {(field.tco_replace || field.tco_mapping) && (
+            <div className="frow full">
+              <label>Type (colonne TYPE de la table)
+                <span style={{ color: "var(--ink-faint)" }}> — restreint la recherche aux lignes de ce type ; laisser vide pour chercher dans toute la table</span>
+              </label>
+              <input type="text" className="mono-input" placeholder="ex. generic_job"
+                value={field.tco_type ?? ""}
+                onChange={(e) => onChange({ tco_type: e.target.value || null })} />
+            </div>
+          )}
+
           {field.tco_replace ? (
             <div className="csub" style={{ marginTop: 2 }}>
               Chaque valeur est recherchée dans la table de référence et remplacée par son <code>TARGET_LABEL</code>

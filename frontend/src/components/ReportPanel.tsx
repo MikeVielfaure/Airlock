@@ -1,5 +1,6 @@
 import { useMemo, useRef, useState } from "react";
 import type { CellStatus, ProcessResponse, ReportRow } from "../lib/types";
+import { api } from "../lib/api";
 import { IconDownload, IconUpload } from "../lib/icons";
 import { InfoTip } from "./InfoTip";
 
@@ -113,9 +114,8 @@ export function ReportPanel({ result, sid, notify, onLoadReport }: Props) {
   const download = () => {
     if (!sid) return;
     const qs = new URLSearchParams({ shape, statuses: statusesFor(), fmt, value: pivotValue, download: "1" });
-    const a = document.createElement("a");
-    a.href = `/api/files/${sid}/report?${qs.toString()}`;
-    a.click();
+    api.downloadReport(sid, qs.toString(), `report.${fmt}`)
+      .catch((e) => notify(e instanceof Error ? e.message : String(e), "err"));
   };
 
   const uncovered = result.tco_uncovered ?? {};

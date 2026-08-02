@@ -53,6 +53,12 @@ class Session:
     encoding: str = "utf-8"
     delimiter: str = ";"
     tco_df: Optional[pd.DataFrame] = None
+    # Set only when tco_df was loaded *by reference* from the library (never
+    # for a raw file upload) — lets "Correspondances" extend the artefact the
+    # session actually uses instead of falling back to whatever the
+    # environment's profile happens to have pinned, which may be a different
+    # table entirely (or none).
+    tco_artefact_id: Optional[str] = None
     # Extra sources joined against this session's own data for cross-source
     # SQL (name -> frame) — attached explicitly, never a second session.
     attached: dict = field(default_factory=dict)

@@ -847,17 +847,20 @@ def test_tco_settings_roundtrip_in_config():
         "type": "CSV", "delimiter": ";", "header": {}, "visible_cols": ["A", "B"],
         "fields": {
             "A": {"name": ["A"], "tco_mapping": "MASCULIN"},
-            "B": {"name": ["B"], "tco_replace": True, "check_type": True, "type": "integer"},
+            "B": {"name": ["B"], "tco_replace": True, "check_type": True, "type": "integer",
+                  "tco_type": "generic_job"},
         },
     }).json()
     assert "tco_mapping: MASCULIN" in exp["yaml"]
     assert "tco_replace: true" in exp["yaml"]
     assert "check_type: true" in exp["yaml"]
+    assert "tco_type: generic_job" in exp["yaml"]
     imp = client.post("/api/config/import", json={"yaml": exp["yaml"]}).json()
     fa = next(f for f in imp["file_config"]["Fields"] if f["name"] == ["A"])
     fb = next(f for f in imp["file_config"]["Fields"] if f["name"] == ["B"])
     assert fa["tco_mapping"] == "MASCULIN"
     assert fb["tco_replace"] is True and fb["check_type"] is True
+    assert fb["tco_type"] == "generic_job"
 
 
 def test_filter_notnull_keywords():

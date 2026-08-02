@@ -69,6 +69,7 @@ export interface FieldConfig {
   rename_output: boolean;
   tco_mapping?: string | null;
   tco_replace?: boolean;
+  tco_type?: string | null;
   identifiant: boolean;
   check_type: boolean;
 }
@@ -160,6 +161,7 @@ export interface StyleRule {
 export interface TcoResponse {
   rows: number;
   labels: string[];
+  artefact_id?: string | null;
 }
 
 export interface Presets {
@@ -217,6 +219,7 @@ export function defaultField(colName: string): FieldConfig {
     rename_output: true,
     tco_mapping: null,
     tco_replace: false,
+    tco_type: null,
     identifiant: false,
     check_type: false,
   };

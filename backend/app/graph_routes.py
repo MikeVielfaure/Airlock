@@ -18,12 +18,30 @@ from sqlalchemy.orm import Session
 
 from app import repository as repo
 from app.db import commit, get_session
-from app.auth_routes import require_capability
+from app.auth_routes import require_user
 from app.flow_graph import FlowGraph, graph_from_yaml, graph_to_yaml
 from app.services import pivot_service
 from app.services.flow_runner import FlowError, RunContext, run_graph
 
 router = APIRouter(prefix="/api/graphs", tags=["graphs"])
+
+
+def _check_run_capability(s: Session, user, environment: str) -> None:
+    """Check the caller's role in the environment the run actually executes
+    as (`req.environment`) — never a separately-supplied `env` query param,
+    which would let anyone with `flow.run` in "default" execute a flow (and
+    its variable resolution) as if they belonged to any other environment."""
+    from app.services import auth_service as _auth
+    from app.services import permissions as _perms
+    if not getattr(user, "id", ""):
+        return                                  # setup mode
+    scope = environment or repo.DEFAULT_ENV
+    role = _auth.role_in(s, user, scope)
+    if not _perms.can(role, "flow.run"):
+        spec = _perms.CAPABILITIES.get("flow.run", {})
+        raise HTTPException(403, f"« {spec.get('label', 'flow.run')} » demande le rôle "
+                                 f"'{spec.get('min', '?')}' dans '{scope}' "
+                                 f"(vous êtes '{role or 'non-membre'}').")
 
 
 class RunRequest(BaseModel):
@@ -110,10 +128,11 @@ def validate_graph(req: RunRequest, s: Session = Depends(get_session)):
 
 @router.post("/run")
 def run(req: RunRequest, s: Session = Depends(get_session),
-        _cap=Depends(require_capability("flow.run"))):
+        user=Depends(require_user)):
     """Run a flow and return a preview plus the per-node trace — how long each
     brick took and how much it produced, which is what makes a ten-node flow
     debuggable."""
+    _check_run_capability(s, user, req.environment)
     graph = _resolve_graph(s, req)
     params = _bind_params(graph, req.params)
     # Every execution goes through the journal — including this one, launched
@@ -130,7 +149,7 @@ def run(req: RunRequest, s: Session = Depends(get_session),
 
 @router.post("/adopt")
 def adopt(req: RunRequest, s: Session = Depends(get_session),
-          _cap=Depends(require_capability("flow.run"))):
+          user=Depends(require_user)):
     """
     Run a flow and open its output as an ordinary working session — the same
     bridge `POST /api/datasets/{id}/open` gives a stored table. A flow that
@@ -139,6 +158,7 @@ def adopt(req: RunRequest, s: Session = Depends(get_session),
     Rapport and Correspondances apply exactly as they would to an uploaded
     file, because none of them know or care where a session came from.
     """
+    _check_run_capability(s, user, req.environment)
     from app.dataset_routes import _table_preview
     from app.models import FileResponse
     from app.session import store

@@ -87,6 +87,7 @@ export function FlowsPanel({ notify, onOpenReport, sid, columns = [] }: Props) {
   const [flows, setFlows] = useState<FlowInfo[]>([]);
   const [runs, setRuns] = useState<RunInfo[]>([]);
   const [loading, setLoading] = useState(true);
+  const [showArchivedFlows, setShowArchivedFlows] = useState(false);
 
   // flow composer
   const [fName, setFName] = useState("");
@@ -116,7 +117,7 @@ export function FlowsPanel({ notify, onOpenReport, sid, columns = [] }: Props) {
     try {
       const [c, p, t, f, r] = await Promise.all([
         api.listArtefacts("config"), api.listArtefacts("computed"),
-        api.listArtefacts("tco"), api.listFlows(), api.listRuns(),
+        api.listArtefacts("tco"), api.listFlows(showArchivedFlows), api.listRuns(),
       ]);
       setConfigs(c); setComputeds(p); setTcos(t); setFlows(f); setRuns(r);
     } catch (e) {
@@ -124,7 +125,7 @@ export function FlowsPanel({ notify, onOpenReport, sid, columns = [] }: Props) {
     } finally {
       setLoading(false);
     }
-  }, [notify]);
+  }, [notify, showArchivedFlows]);
 
   useEffect(() => { refresh(); }, [refresh]);
 
@@ -256,6 +257,17 @@ export function FlowsPanel({ notify, onOpenReport, sid, columns = [] }: Props) {
     } catch (e) { notify(e instanceof Error ? e.message : "Échec de l'archivage.", "err"); }
   };
 
+  const restoreFlowRow = async (id: string, name: string) => {
+    try { await api.restoreFlow(id); notify(`Flux « ${name} » restauré.`, "ok"); refresh(); }
+    catch (e) { notify(e instanceof Error ? e.message : String(e), "err"); }
+  };
+
+  const deleteFlowForGood = async (id: string, name: string) => {
+    if (!window.confirm(`Supprimer le flux « ${name} » pour de bon ? Irréversible.`)) return;
+    try { await api.deleteFlowPermanently(id); notify(`Flux « ${name} » supprimé définitivement.`, "ok"); refresh(); }
+    catch (e) { notify(e instanceof Error ? e.message : String(e), "err"); }
+  };
+
   const fmtDate = (iso: string) => new Date(iso).toLocaleString();
 
   const toggleRun = async (runId: string) => {
@@ -310,6 +322,11 @@ export function FlowsPanel({ notify, onOpenReport, sid, columns = [] }: Props) {
           </div>
 
           {/* ── flows list ── */}
+          <label className="csub" style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
+            <input type="checkbox" checked={showArchivedFlows}
+                   onChange={(e) => setShowArchivedFlows(e.target.checked)} />
+            afficher les flux archivés
+          </label>
           {flows.length === 0 ? (
             <div className="banner"><span>Aucun flux pour l'instant. Enregistrez une config dans l'onglet Yaml, puis composez-en un ci-dessus.</span></div>
           ) : (
@@ -318,16 +335,28 @@ export function FlowsPanel({ notify, onOpenReport, sid, columns = [] }: Props) {
               <tbody>
                 {flows.map((f) => (
                   <tr key={f.id}>
-                    <td><strong>{f.name}</strong><div className="csub mono">{f.id}</div></td>
+                    <td><strong>{f.name}</strong>{f.archived ? " · archivé" : ""}<div className="csub mono">{f.id}</div></td>
                     <td>{nameOf(configs, f.config_artefact_id)}</td>
                     <td>{nameOf(tcos, f.tco_artefact_id)}</td>
                     <td>{nameOf(computeds, f.computed_artefact_id)}</td>
                     <td>{f.config_version_no === null ? "dernière" : `épinglée v${f.config_version_no}`}</td>
                     <td className="libactions">
-                      <button className="btn sm primary" disabled={runningFlow === f.id} onClick={() => askRun(f)}>
-                        <IconPlay size={13} /> {runningFlow === f.id ? "En cours…" : "Lancer sur un fichier"}
-                      </button>
-                      <button className="btn sm" title="Archiver" onClick={() => del("flow", f.id)}><IconReset size={13} /></button>
+                      {f.archived ? (
+                        <>
+                          <button className="btn sm" title="Restaurer" onClick={() => restoreFlowRow(f.id, f.name)}>
+                            <IconReset size={13} /> Restaurer
+                          </button>
+                          <button className="btn sm danger" title="Supprimer définitivement"
+                                  onClick={() => deleteFlowForGood(f.id, f.name)}>Supprimer</button>
+                        </>
+                      ) : (
+                        <>
+                          <button className="btn sm primary" disabled={runningFlow === f.id} onClick={() => askRun(f)}>
+                            <IconPlay size={13} /> {runningFlow === f.id ? "En cours…" : "Lancer sur un fichier"}
+                          </button>
+                          <button className="btn sm" title="Archiver" onClick={() => del("flow", f.id)}><IconReset size={13} /></button>
+                        </>
+                      )}
                     </td>
                   </tr>
                 ))}
