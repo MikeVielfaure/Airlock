@@ -1509,3 +1509,19 @@ pre.yaml .k { color: #8db4ff; }
 .blank-input-row { display: flex; gap: 10px; }
 .blank-input-row .input-text { flex: 1; }
 
+/* ── Home Dashboard KPIs ────────────────────────────────────────── */
+.home-kpi-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px;
+  margin-bottom: 8px;
+}
+.kpi-card {
+  display: flex; flex-direction: column; gap: 4px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--r);
+  padding: 14px 16px; box-shadow: var(--shadow);
+}
+.kpi-label { font-size: 11.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--ink-faint); }
+.kpi-val { font-size: 18px; font-weight: 700; color: var(--ink); }
+.kpi-val.ok { color: var(--ok); }
+.kpi-sub { font-size: 11.5px; color: var(--ink-soft); }
+
+
