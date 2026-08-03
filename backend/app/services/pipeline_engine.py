@@ -54,6 +54,8 @@ class EngineResult:
     # extras used by the persistence layer (not serialised to the client)
     report_df: Optional[pd.DataFrame] = None              # full flat report, for storage
     export_bytes: Optional[bytes] = None                  # decoded export payload, for storage
+    df: Optional[pd.DataFrame] = None                     # final cleaned+computed frame — a flow
+                                                           # used as another flow's source reads this
 
 
 def _grouped_error_report(report_df: pd.DataFrame) -> list[dict]:
@@ -124,6 +126,8 @@ class PipelineEngine:
         fc: FileConfig,
         tco_bytes: bytes | None = None,
         computed: list[tuple[str, str]] | None = None,
+        sql_computed: list[tuple[str, str, str]] | None = None,
+        attached: dict[str, pd.DataFrame] | None = None,
         export_filename: str = "export",
         apply_filters=None,
         source_df: pd.DataFrame | None = None,
@@ -233,11 +237,17 @@ class PipelineEngine:
                 structure=structure, matched_columns=visible)
 
         # ── 4. VALIDATION ─────────────────────────────────────────
+        # Known before the SQL step runs: a cross-source query must never see
+        # a declared-confidential column's real value, only its mask — same
+        # rule as the interactive /process route (main.py).
+        sensitive_cols = frozenset(c for c, f in fields.items() if getattr(f, "sensitive", None))
         try:
             result = self._process.run_pipeline(
                 df_edited=work, visible_cols=visible, field_configs=fields,
                 tco_df=tco_df, identifier_fields=id_fields,
-                computed=computed or [], report_flagged_only=True, variables=fc.variables,
+                computed=computed or [], sql_computed=sql_computed or [],
+                attached=attached or {}, sensitive_cols=sensitive_cols,
+                report_flagged_only=True, variables=fc.variables,
             )
         except Exception as e:  # noqa: BLE001
             return EngineResult(ok=False, stage="validation", error=f"Validation : {e}",
@@ -289,4 +299,4 @@ class PipelineEngine:
                           delimiter=delim_out, rows_exported=int(len(out_df)),
                           content_base64=base64.b64encode(data).decode("ascii"))
 
-        return EngineResult(ok=True, stage="done", export=export, export_bytes=data, **common)
+        return EngineResult(ok=True, stage="done", export=export, export_bytes=data, df=out_df, **common)

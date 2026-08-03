@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { AvailableVariable, ComputedColumn, DatasetInfo, SourceInfo, StyleRule, VariableSchema } from "../lib/types";
+import type { AvailableVariable, ComputedColumn, DatasetInfo, FlowInfo, SourceInfo, StyleRule, VariableSchema } from "../lib/types";
 import { api } from "../lib/api";
 import type { ArtefactInfo } from "../lib/types";
-import { IconCode, IconReset, IconUpload, IconDownload } from "../lib/icons";
+import { IconCode, IconReset, IconUpload, IconDownload, IconSave } from "../lib/icons";
 import { InfoTip } from "./InfoTip";
 import { SearchInput, matchesSearch } from "./SearchInput";
 
@@ -294,6 +294,30 @@ export function ComputedPanel({ sid, tabs, columns, computed, setComputed, sqlCo
   useEffect(() => { refreshSources(); }, [refreshSources]);
   useEffect(() => { api.listDatasets().then(setDatasets).catch(() => {}); }, []);
 
+  // ── attach a flow as a source — a flow is already the same lazily-
+  // resolved object a table/BDD externe/API source is: re-run fresh each
+  // time, never a kept-open session ──
+  const [flows, setFlows] = useState<FlowInfo[]>([]);
+  const [flowSrcName, setFlowSrcName] = useState("");
+  const [flowSrcId, setFlowSrcId] = useState("");
+  useEffect(() => { api.listFlows().then(setFlows).catch(() => {}); }, []);
+  const attachFlow = async () => {
+    if (!sid || !flowSrcName.trim() || !flowSrcId) return;
+    try {
+      await api.attachFlowSource(sid, flowSrcName.trim(), flowSrcId);
+      setFlowSrcName(""); setFlowSrcId("");
+      refreshSources();
+      notify(`Source « ${flowSrcName.trim()} » attachée.`, "ok");
+    } catch (e) { notify(e instanceof Error ? e.message : "Échec de l'attachement.", "err"); }
+  };
+
+  // ── source library — dataset/external_db/api recipes, saved once,
+  // reloaded into any session (fichier/onglet stay ephemeral, see plan) ──
+  const [sourceLib, setSourceLib] = useState<ArtefactInfo[]>([]);
+  const [sourceLibSearch, setSourceLibSearch] = useState("");
+  const refreshSourceLib = useCallback(() => { api.listArtefacts("source").then(setSourceLib).catch(() => {}); }, []);
+  useEffect(() => { refreshSourceLib(); }, [refreshSourceLib]);
+
   // ── attach a BDD externe source ───────────────────────────────
   const [dbConn, setDbConn] = useState("");
   const [dbName, setDbName] = useState("");
@@ -404,6 +428,54 @@ export function ComputedPanel({ sid, tabs, columns, computed, setComputed, sqlCo
     if (!sid) return;
     try { await api.detachSource(sid, name); refreshSources(); }
     catch (e) { notify(e instanceof Error ? e.message : "Échec du détachement.", "err"); }
+  };
+
+  const SOURCE_KIND_LABEL: Record<string, string> = {
+    dataset: "Table interne", external_db: "BDD externe", api: "API", flow: "Flux",
+  };
+
+  const saveSourceToLibrary = async (sourceKind: "dataset" | "external_db" | "api" | "flow",
+                                     name: string, recipe: Record<string, unknown>) => {
+    if (!name.trim()) { notify("La source a besoin d'un nom.", "err"); return; }
+    try {
+      await api.createArtefact("source", {
+        name: name.trim(), description: SOURCE_KIND_LABEL[sourceKind],
+        body: { source_kind: sourceKind, name: name.trim(), ...recipe },
+      });
+      notify(`Source « ${name.trim()} » enregistrée dans la bibliothèque.`, "ok");
+      refreshSourceLib();
+    } catch (e) { notify(e instanceof Error ? e.message : "Échec de l'enregistrement.", "err"); }
+  };
+
+  const loadSourceFromLibrary = async (a: ArtefactInfo) => {
+    if (!sid) return;
+    try {
+      const v = await api.getArtefactVersion("source", a.id, a.latest_version_no);
+      const body = v.body as Record<string, unknown>;
+      const name = String(body.name ?? a.name);
+      if (body.source_kind === "dataset") {
+        await api.attachDatasetSource(sid, name, String(body.dataset_id));
+      } else if (body.source_kind === "external_db") {
+        await api.attachExternalDbSource(sid, name, String(body.connection), String(body.query),
+          (body.params as Record<string, string>) ?? {}, body.schema_name ? String(body.schema_name) : undefined);
+      } else if (body.source_kind === "api") {
+        await api.attachApiSource(sid, name, String(body.connection), String(body.path ?? ""),
+          String(body.method ?? "GET"), String(body.response_kind ?? "json"), String(body.data_path ?? ""),
+          body.body as Record<string, unknown> | undefined,
+          body.schema_name ? String(body.schema_name) : undefined);
+      } else if (body.source_kind === "flow") {
+        await api.attachFlowSource(sid, name, String(body.flow_id));
+      } else {
+        notify("Type de source inconnu.", "err"); return;
+      }
+      refreshSources();
+      notify(`Source « ${name} » (v${a.latest_version_no}) chargée depuis la bibliothèque.`, "ok");
+    } catch (e) { notify(e instanceof Error ? e.message : "Échec du chargement.", "err"); }
+  };
+
+  const archiveSourceFromLibrary = async (a: ArtefactInfo) => {
+    try { await api.archiveArtefact("source", a.id); refreshSourceLib(); }
+    catch (e) { notify(e instanceof Error ? e.message : "Échec de l'archivage.", "err"); }
   };
 
   const valid = computed.filter((c) => c.name.trim() && c.expression.trim());
@@ -715,6 +787,11 @@ export function ComputedPanel({ sid, tabs, columns, computed, setComputed, sqlCo
                   <button className="btn sm" disabled={!attachName.trim() || !attachDatasetId} onClick={attachDataset}>
                     Attacher la table
                   </button>
+                  <button className="btn sm" disabled={!attachName.trim() || !attachDatasetId}
+                    title="Enregistrer cette recette dans la bibliothèque des sources"
+                    onClick={() => saveSourceToLibrary("dataset", attachName, { dataset_id: attachDatasetId })}>
+                    <IconSave size={13} /> Enregistrer
+                  </button>
                   <span style={{ marginLeft: 8 }}>ou</span>
                   <button className="btn sm" onClick={() => uploadRef.current?.click()}>
                     <IconUpload size={13} /> Importer un fichier
@@ -795,6 +872,15 @@ export function ComputedPanel({ sid, tabs, columns, computed, setComputed, sqlCo
                   <button className="btn sm" onClick={() => setDbParams([...dbParams, { key: "", value: "" }])}>+ paramètre</button>
                   <button className="btn primary sm" disabled={!dbConn || !dbName.trim() || !dbQuery.trim()}
                     onClick={attachExternalDb}>Attacher la source</button>
+                  <button className="btn sm" disabled={!dbConn || !dbName.trim() || !dbQuery.trim()}
+                    title="Enregistrer cette recette dans la bibliothèque des sources"
+                    onClick={() => saveSourceToLibrary("external_db", dbName, {
+                      connection: dbConn, query: dbQuery,
+                      params: Object.fromEntries(dbParams.filter((p) => p.key.trim()).map((p) => [p.key.trim(), p.value])),
+                      ...(dbSchemaName ? { schema_name: dbSchemaName } : {}),
+                    })}>
+                    <IconSave size={13} /> Enregistrer
+                  </button>
                 </div>
 
                 <div className="sec-h gap-lg">
@@ -845,7 +931,75 @@ export function ComputedPanel({ sid, tabs, columns, computed, setComputed, sqlCo
                   <button className="btn primary sm" disabled={!apiConn || !apiName.trim()} onClick={attachApi}>
                     Attacher la source
                   </button>
+                  <button className="btn sm" disabled={!apiConn || !apiName.trim()}
+                    title="Enregistrer cette recette dans la bibliothèque des sources"
+                    onClick={() => {
+                      let parsedBody: Record<string, unknown> | undefined;
+                      if (apiMethod !== "GET" && apiBody.trim()) {
+                        try { parsedBody = JSON.parse(apiBody); }
+                        catch { notify("Le corps doit être du JSON valide.", "err"); return; }
+                      }
+                      saveSourceToLibrary("api", apiName, {
+                        connection: apiConn, path: apiPath, method: apiMethod,
+                        response_kind: apiResponseKind, data_path: apiDataPath,
+                        ...(parsedBody !== undefined ? { body: parsedBody } : {}),
+                        ...(apiSchemaName ? { schema_name: apiSchemaName } : {}),
+                      });
+                    }}>
+                    <IconSave size={13} /> Enregistrer
+                  </button>
                 </div>
+
+                <div className="sec-h gap-lg">
+                  <h3 style={{ fontSize: 14 }}>Source Flux</h3>
+                  <span className="sub">Relance un flux enregistré maintenant et attache son résultat — le flux doit avoir sa propre source fixe (table interne), rien ici ne peut lui fournir un fichier.</span>
+                </div>
+                <div className="flowform">
+                  <div className="frow"><label>Flux</label>
+                    <select value={flowSrcId} onChange={(e) => setFlowSrcId(e.target.value)}>
+                      <option value="">— choisir —</option>
+                      {flows.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+                    </select></div>
+                  <div className="frow"><label>Nom de la source</label>
+                    <input className="mono-input" value={flowSrcName} placeholder="ex. flux_enrichi"
+                      onChange={(e) => setFlowSrcName(e.target.value.replace(/\s+/g, "_"))} /></div>
+                </div>
+                <div className="filterbar" style={{ marginTop: 6 }}>
+                  <button className="btn primary sm" disabled={!flowSrcId || !flowSrcName.trim()} onClick={attachFlow}>
+                    Attacher la source
+                  </button>
+                  <button className="btn sm" disabled={!flowSrcId || !flowSrcName.trim()}
+                    title="Enregistrer cette recette dans la bibliothèque des sources"
+                    onClick={() => saveSourceToLibrary("flow", flowSrcName, { flow_id: flowSrcId })}>
+                    <IconSave size={13} /> Enregistrer
+                  </button>
+                </div>
+
+                <div className="sec-h gap-lg">
+                  <h3 style={{ fontSize: 14 }}>Bibliothèque des sources</h3>
+                  <span className="sub">Recettes enregistrées (table interne, BDD externe, API) — rechargeables ici ou référençables depuis un flux.</span>
+                </div>
+                <div className="frow" style={{ maxWidth: 260 }}>
+                  <SearchInput value={sourceLibSearch} onChange={setSourceLibSearch} placeholder="Rechercher une source..." />
+                </div>
+                {sourceLib.length === 0 ? (
+                  <p className="hint">Aucune source enregistrée pour l'instant.</p>
+                ) : (
+                  <div className="libcol">
+                    <div className="libcol-list">
+                      {sourceLib.filter((a) => matchesSearch(a.name, sourceLibSearch)).map((a) => (
+                        <div key={a.id} className="libitem">
+                          <span className="libitem-name">{a.name} <span className="csub">{a.description} · v{a.latest_version_no}</span></span>
+                          <span className="libitem-date" title={`Modifié le ${new Date(a.updated_at).toLocaleString()}`}>
+                            {fmtShortDate(a.updated_at)}
+                          </span>
+                          <button className="btn sm" onClick={() => loadSourceFromLibrary(a)}>Charger</button>
+                          <button className="btn sm" title="Archiver" onClick={() => archiveSourceFromLibrary(a)}>×</button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </>
             )}
           </div>

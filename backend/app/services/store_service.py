@@ -199,6 +199,61 @@ def normalise_body(kind: str, *, body: Optional[dict], yaml: Optional[str],
                 out["target_sources"] = clean_sources
         return out
 
+    if kind == "source":
+        # Structural validation only — a BDD externe/API recipe has no reason
+        # to succeed outside the context it will actually run in (unlike a
+        # TCO's CSV, there's nothing safe to execute at save time). `name` is
+        # the SQL identifier a flow's sql_computed blocks join against
+        # (`FROM self LEFT JOIN name`) — distinct from the artefact's own
+        # library name.
+        data = body or {}
+        source_kind = data.get("source_kind")
+        name = str(data.get("name", "")).strip()
+        if not name:
+            raise BadBody("A source needs a `name` (used in SQL joins).")
+        if source_kind == "dataset":
+            dataset_id = str(data.get("dataset_id", "")).strip()
+            if not dataset_id:
+                raise BadBody("A dataset source needs `dataset_id`.")
+            return {"source_kind": "dataset", "name": name, "dataset_id": dataset_id}
+        if source_kind == "external_db":
+            connection = str(data.get("connection", "")).strip()
+            query = str(data.get("query", "")).strip()
+            if not connection or not query:
+                raise BadBody("An external_db source needs `connection` and `query`.")
+            params = data.get("params") or {}
+            if not isinstance(params, dict):
+                raise BadBody("`params` must be a {name: value} object.")
+            out = {"source_kind": "external_db", "name": name, "connection": connection,
+                   "query": query, "params": {str(k): str(v) for k, v in params.items()}}
+            if data.get("schema_name"):
+                out["schema_name"] = str(data["schema_name"])
+            return out
+        if source_kind == "api":
+            connection = str(data.get("connection", "")).strip()
+            if not connection:
+                raise BadBody("An api source needs `connection`.")
+            out = {"source_kind": "api", "name": name, "connection": connection,
+                   "path": str(data.get("path", "")), "method": str(data.get("method", "GET")),
+                   "response_kind": str(data.get("response_kind", "json")),
+                   "data_path": str(data.get("data_path", ""))}
+            if data.get("body") is not None:
+                out["body"] = data["body"]
+            if data.get("schema_name"):
+                out["schema_name"] = str(data["schema_name"])
+            return out
+        if source_kind == "flow":
+            # A flow used as a source is just another object whose value is
+            # resolved lazily, exactly like the other three recipes — never a
+            # live session kept open, always re-run fresh from its own fixed
+            # input (checked at resolution time, since that fixed input can
+            # change independently of this recipe).
+            flow_id = str(data.get("flow_id", "")).strip()
+            if not flow_id:
+                raise BadBody("A flow source needs `flow_id`.")
+            return {"source_kind": "flow", "name": name, "flow_id": flow_id}
+        raise BadBody("A source needs `source_kind` to be one of dataset, external_db, api, flow.")
+
     raise BadBody(f"Unknown artefact kind '{kind}'.")
 
 
@@ -206,17 +261,32 @@ def normalise_body(kind: str, *, body: Optional[dict], yaml: Optional[str],
 class ResolvedFlow:
     def __init__(self, fc: FileConfig, config_version_id: str,
                  tco_bytes: Optional[bytes], tco_version_id: Optional[str],
-                 computed: list[tuple[str, str]], computed_version_id: Optional[str]):
+                 computed: list[tuple[str, str]], computed_version_id: Optional[str],
+                 sql_computed: Optional[list[tuple[str, str, str]]] = None,
+                 attached: Optional[dict] = None):
         self.fc = fc
         self.config_version_id = config_version_id
         self.tco_bytes = tco_bytes
         self.tco_version_id = tco_version_id
         self.computed = computed
         self.computed_version_id = computed_version_id
+        self.sql_computed = sql_computed or []
+        self.attached = attached or {}
 
 
-def resolve_flow(s: Session, flow: Flow) -> ResolvedFlow:
-    """Turn a flow's refs into concrete engine inputs, recording version ids."""
+def resolve_flow(s: Session, flow: Flow, _chain: frozenset = frozenset()) -> ResolvedFlow:
+    """Turn a flow's refs into concrete engine inputs, recording version ids.
+
+    `_chain` is the set of flow ids already being resolved on the current
+    call stack — a flow used as another flow's source is re-run fresh every
+    time (never a cached/kept-open session), so a cycle (A's source is B,
+    B's source is A) would otherwise recurse until the stack blows up. The
+    check happens here, at resolution time, rather than when a flow or a
+    source artefact is saved — a cycle can be introduced later by a new
+    version of a *shared* source artefact without either flow being touched,
+    so only a check at the moment of use is actually reliable."""
+    if len(_chain) > 25:
+        raise ValueError("chaîne de flux imbriqués trop profonde — vérifiez une éventuelle référence circulaire.")
     cver = repo.resolve_ref(s, flow.config_artefact_id, flow.config_version_no)
     fc = FileConfig(**cver.body)
 
@@ -227,28 +297,44 @@ def resolve_flow(s: Session, flow: Flow) -> ResolvedFlow:
         tco_vid = tver.id
 
     computed: list[tuple[str, str]] = []
+    sql_computed: list[tuple[str, str, str]] = []
     comp_vid = None
     if flow.computed_artefact_id:
         pver = repo.resolve_ref(s, flow.computed_artefact_id, flow.computed_version_no)
         computed = [(c["name"], c["expression"]) for c in pver.body.get("computed", [])
                     if c.get("name") and c.get("expression")]
+        sql_computed = [(c["name"], c["expression"], c.get("mode", "replace"))
+                        for c in pver.body.get("sql_computed", [])
+                        if c.get("name") and c.get("expression")]
         comp_vid = pver.id
 
-    return ResolvedFlow(fc, cver.id, tco_bytes, tco_vid, computed, comp_vid)
+    attached: dict = {}
+    if flow.source_artefact_id:
+        from app.services import source_recipe
+        sver = repo.resolve_ref(s, flow.source_artefact_id, flow.source_version_no)
+        source_art = repo.get_artefact(s, flow.source_artefact_id)
+        scope = source_art.environment or repo.DEFAULT_ENV
+        if sver.body.get("source_kind") == "flow" and sver.body.get("flow_id") in (_chain | {flow.id}):
+            raise ValueError(f"référence circulaire de flux détectée sur la source « {sver.body['name']} ».")
+        frame = source_recipe.build_source_frame(s, sver.body, scope, _chain=_chain | {flow.id})
+        attached[sver.body["name"]] = frame
+
+    return ResolvedFlow(fc, cver.id, tco_bytes, tco_vid, computed, comp_vid, sql_computed, attached)
 
 
 def run_flow(s: Session, flow: Flow, raw: Optional[bytes], source_name: str,
              apply_filters, engine: Optional[PipelineEngine] = None,
              export_filename: Optional[str] = None,
-             source_df=None) -> tuple[Run, EngineResult]:
+             source_df=None, _chain: frozenset = frozenset()) -> tuple[Run, EngineResult]:
     """Execute a flow on a file, or on a pre-loaded table (`source_df`), and
     persist the run (frozen version ids + report). Exactly one of
     `raw`/`source_df` is given — the caller decides which, `raw` stays first
     for the existing (and only) call site."""
     engine = engine or PipelineEngine()
-    rf = resolve_flow(s, flow)
+    rf = resolve_flow(s, flow, _chain=_chain)
     res = engine.run(
         raw=raw, fc=rf.fc, tco_bytes=rf.tco_bytes, computed=rf.computed,
+        sql_computed=rf.sql_computed, attached=rf.attached,
         export_filename=export_filename or flow.default_export_filename or "export",
         apply_filters=apply_filters, source_df=source_df,
     )

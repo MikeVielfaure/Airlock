@@ -199,6 +199,8 @@ def create_flow(s: Session, **kw) -> Flow:
         _require_kind(s, kw["tco_artefact_id"], "tco")
     if kw.get("computed_artefact_id"):
         _require_kind(s, kw["computed_artefact_id"], "computed")
+    if kw.get("source_artefact_id"):
+        _require_kind(s, kw["source_artefact_id"], "source")
     if kw.get("source_dataset_id"):
         get_dataset(s, kw["source_dataset_id"])   # NotFound if it doesn't exist
     flow = Flow(**kw)

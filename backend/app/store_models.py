@@ -98,6 +98,11 @@ class FlowCreate(BaseModel):
     tco_version_no: Optional[int] = None
     computed_artefact_id: Optional[str] = None
     computed_version_no: Optional[int] = None
+    # An extra named frame, resolved fresh on every run, for the computed
+    # artefact's own sql_computed blocks to join against — never the flow's
+    # input, just another source available to `FROM self LEFT JOIN name`.
+    source_artefact_id: Optional[str] = None
+    source_version_no: Optional[int] = None
     default_export_filename: str = "export"
     # A fixed source, resolved fresh on every run — like tco/computed, not
     # pinned data: unlike a file, the table's *content* is expected to change
@@ -115,6 +120,8 @@ class FlowUpdate(BaseModel):
     tco_version_no: Optional[int] = None
     computed_artefact_id: Optional[str] = None
     computed_version_no: Optional[int] = None
+    source_artefact_id: Optional[str] = None
+    source_version_no: Optional[int] = None
     default_export_filename: Optional[str] = None
     source_dataset_id: Optional[str] = None
 
@@ -130,6 +137,8 @@ class FlowInfo(BaseModel):
     tco_version_no: Optional[int] = None
     computed_artefact_id: Optional[str] = None
     computed_version_no: Optional[int] = None
+    source_artefact_id: Optional[str] = None
+    source_version_no: Optional[int] = None
     default_export_filename: str = "export"
     source_dataset_id: Optional[str] = None
 

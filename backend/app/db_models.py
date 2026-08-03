@@ -52,7 +52,7 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-KINDS = ("config", "computed", "tco", "edi_model", "mapping", "graph", "function")
+KINDS = ("config", "computed", "tco", "edi_model", "mapping", "graph", "function", "source")
 
 
 class Artefact(Base):
@@ -132,6 +132,12 @@ class Flow(Base):
 
     computed_artefact_id: Mapped[str | None] = mapped_column(ForeignKey("artefacts.id"), nullable=True)
     computed_version_no: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    # An extra named frame, attached at run time for the computed artefact's
+    # own sql_computed blocks to join against (`FROM self LEFT JOIN name`) —
+    # never the flow's primary input, just like tco/computed above.
+    source_artefact_id: Mapped[str | None] = mapped_column(ForeignKey("artefacts.id"), nullable=True)
+    source_version_no: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     # A fixed source, resolved fresh on every run — unlike an uploaded file,
     # a table's *content* is expected to change between runs even though the

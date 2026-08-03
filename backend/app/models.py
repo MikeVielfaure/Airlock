@@ -273,6 +273,14 @@ class AttachSessionSource(BaseModel):
     source_sid: str
 
 
+class AttachFlowSource(BaseModel):
+    """Run another stored flow now and attach its output — a flow needs a
+    fixed source of its own (source_dataset_id) since nothing here can
+    upload a file on its behalf."""
+    name: str
+    flow_id: str
+
+
 class RowsResponse(BaseModel):
     columns: List[str]
     data: List[List[str]]

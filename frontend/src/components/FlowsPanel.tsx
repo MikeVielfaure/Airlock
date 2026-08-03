@@ -43,6 +43,7 @@ export function FlowsPanel({ notify, onOpenReport }: Props) {
   const [configs, setConfigs] = useState<ArtefactInfo[]>([]);
   const [computeds, setComputeds] = useState<ArtefactInfo[]>([]);
   const [tcos, setTcos] = useState<ArtefactInfo[]>([]);
+  const [sourceArts, setSourceArts] = useState<ArtefactInfo[]>([]);
   const [flows, setFlows] = useState<FlowInfo[]>([]);
   const [runs, setRuns] = useState<RunInfo[]>([]);
   const [datasets, setDatasets] = useState<DatasetInfo[]>([]);
@@ -58,6 +59,7 @@ export function FlowsPanel({ notify, onOpenReport }: Props) {
   const [fPinned, setFPinned] = useState(false);       // false = track latest
   const [fTco, setFTco] = useState("");
   const [fComp, setFComp] = useState("");
+  const [fSourceArt, setFSourceArt] = useState("");    // attached source recipe, optional — a join, not the input
   const [fSource, setFSource] = useState("");          // fixed source table, optional
   const [fExport, setFExport] = useState("export");
 
@@ -68,12 +70,13 @@ export function FlowsPanel({ notify, onOpenReport }: Props) {
 
   const refresh = useCallback(async () => {
     try {
-      const [c, p, t, f, r, d] = await Promise.all([
+      const [c, p, t, srcs, f, r, d] = await Promise.all([
         api.listArtefacts("config"), api.listArtefacts("computed"),
-        api.listArtefacts("tco"), api.listFlows(showArchivedFlows), api.listRuns(),
+        api.listArtefacts("tco"), api.listArtefacts("source"),
+        api.listFlows(showArchivedFlows), api.listRuns(),
         api.listDatasets(),
       ]);
-      setConfigs(c); setComputeds(p); setTcos(t); setFlows(f); setRuns(r); setDatasets(d);
+      setConfigs(c); setComputeds(p); setTcos(t); setSourceArts(srcs); setFlows(f); setRuns(r); setDatasets(d);
     } catch (e) {
       notify(e instanceof Error ? e.message : "Impossible de charger la bibliothèque.", "err");
     } finally {
@@ -93,10 +96,11 @@ export function FlowsPanel({ notify, onOpenReport }: Props) {
         name: fName.trim(), config_artefact_id: fConfig,
         config_version_no: fPinned ? (configs.find((c) => c.id === fConfig)?.latest_version_no ?? null) : null,
         tco_artefact_id: fTco || null, computed_artefact_id: fComp || null,
+        source_artefact_id: fSourceArt || null,
         source_dataset_id: fSource || null,
         default_export_filename: fExport.trim() || "export",
       });
-      setFName(""); setFConfig(""); setFTco(""); setFComp(""); setFSource(""); setFPinned(false);
+      setFName(""); setFConfig(""); setFTco(""); setFComp(""); setFSourceArt(""); setFSource(""); setFPinned(false);
       notify("Flux créé.", "ok");
       refresh();
     } catch (e) { notify(e instanceof Error ? e.message : "Échec de la création du flux.", "err"); }
@@ -222,6 +226,12 @@ export function FlowsPanel({ notify, onOpenReport }: Props) {
                 <option value="">aucun</option>
                 {computeds.map((p) => <option key={p.id} value={p.id}>{p.name} (v{p.latest_version_no})</option>)}
               </select></div>
+            <div className="frow"><label>Source attachée
+              <span style={{ fontWeight: 400, color: "var(--ink-faint)" }}> (optionnel — jointure pour le SQL avancé)</span></label>
+              <select value={fSourceArt} onChange={(e) => setFSourceArt(e.target.value)}>
+                <option value="">aucune</option>
+                {sourceArts.map((a) => <option key={a.id} value={a.id}>{a.name} (v{a.latest_version_no})</option>)}
+              </select></div>
             <div className="frow"><label>Source
               <span style={{ fontWeight: 400, color: "var(--ink-faint)" }}> (optionnel)</span></label>
               <select value={fSource} onChange={(e) => setFSource(e.target.value)}>
@@ -251,7 +261,7 @@ export function FlowsPanel({ notify, onOpenReport }: Props) {
           ) : (
             <div className="tablescroll">
             <table className="libtable">
-              <thead><tr><th>Flux</th><th>Config</th><th>TCO</th><th>Computed</th><th>Source</th><th>Versions</th><th></th></tr></thead>
+              <thead><tr><th>Flux</th><th>Config</th><th>TCO</th><th>Computed</th><th>Source jointe</th><th>Source</th><th>Versions</th><th></th></tr></thead>
               <tbody>
                 {flows.filter((f) => matchesSearch(f.name, flowSearch)).map((f) => (
                   <tr key={f.id}>
@@ -259,6 +269,7 @@ export function FlowsPanel({ notify, onOpenReport }: Props) {
                     <td>{nameOf(configs, f.config_artefact_id)}</td>
                     <td>{nameOf(tcos, f.tco_artefact_id)}</td>
                     <td>{nameOf(computeds, f.computed_artefact_id)}</td>
+                    <td>{nameOf(sourceArts, f.source_artefact_id)}</td>
                     <td>{f.source_dataset_id
                       ? (datasets.find((d) => d.id === f.source_dataset_id)?.name ?? "(archivée)")
                       : "—"}</td>

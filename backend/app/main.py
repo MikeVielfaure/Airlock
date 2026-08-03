@@ -30,7 +30,7 @@ from app.models import (
     FieldConfig, FileResponse, HeaderRequest, ImportRequest, ImportResponse,
     MatchInfo, Presets, ProcessRequest, ProcessResponse, ProcessStats, RowsResponse, TablePreview, TcoResponse,
     PipelineResponse, SourceInfo, AttachDatasetSource, AttachSessionSource, ReorderRowRequest,
-    AttachExternalDbSource, AttachApiSource, ExternalDbSessionRequest, ApiSessionRequest,
+    AttachExternalDbSource, AttachApiSource, AttachFlowSource, ExternalDbSessionRequest, ApiSessionRequest,
 )
 from app.services.config_service import ConfigService
 from app.services.file_service import FileService
@@ -631,6 +631,38 @@ def attach_api_source(sid: str, req: AttachApiSource, env: str = "",
             raise HTTPException(413, f"La réponse contient plus de {MAX_SOURCE_ROWS} lignes.")
 
         _check_declared_schema(s, req.connection, scope, req.schema_name, df)
+        sess.attached[name] = df
+        return SourceInfo(name=name, columns=list(df.columns), row_count=int(len(df)))
+
+
+@app.post("/api/files/{sid}/sources/flow", response_model=SourceInfo)
+def attach_flow_source(sid: str, req: AttachFlowSource, env: str = "",
+        s: DbSession = Depends(get_session)):
+    """
+    Run another stored flow right now and attach its output — a flow is
+    already the same lazily-resolved object a table/BDD externe/API source
+    is, so this reuses the exact same resolver a flow-run goes through
+    (`source_recipe.build_source_frame`) rather than a second way of
+    executing a flow. That flow needs a fixed source of its own
+    (source_dataset_id): nothing here can upload a file on its behalf.
+    """
+    from app.services import source_recipe
+
+    with _session(sid, s) as sess:
+        name = req.name.strip()
+        if not name:
+            raise HTTPException(422, "La source a besoin d'un nom.")
+        scope = env or repo.DEFAULT_ENV
+        try:
+            df = source_recipe.build_source_frame(
+                s, {"source_kind": "flow", "name": name, "flow_id": req.flow_id}, scope)
+        except repo.NotFound as e:
+            raise HTTPException(404, str(e))
+        except ValueError as e:
+            raise HTTPException(422, str(e))
+        commit(s)   # the nested flow's Run must be persisted, same as any other run
+        if len(df) > MAX_SOURCE_ROWS:
+            raise HTTPException(413, f"Le résultat du flux contient plus de {MAX_SOURCE_ROWS} lignes.")
         sess.attached[name] = df
         return SourceInfo(name=name, columns=list(df.columns), row_count=int(len(df)))
 

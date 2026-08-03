@@ -246,7 +246,7 @@ export interface EditCellsResponse {
 export interface ArtefactInfo {
   id: string;
   environment?: string;
-  kind: "config" | "computed" | "tco" | "edi_model" | "mapping";
+  kind: "config" | "computed" | "tco" | "edi_model" | "mapping" | "source";
   name: string;
   description: string;
   latest_version_no: number;
@@ -266,6 +266,11 @@ export interface FlowInfo {
   tco_version_no: number | null;
   computed_artefact_id: string | null;
   computed_version_no: number | null;
+  // An extra named frame, resolved fresh on every run, for the computed
+  // artefact's own sql_computed blocks to join against — never the flow's
+  // input, just another source available to a join.
+  source_artefact_id: string | null;
+  source_version_no: number | null;
   default_export_filename: string;
   // A fixed source table, read fresh on every run — set means "Lancer"
   // needs no uploaded file; unset means the file stays required, as before.

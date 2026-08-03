@@ -284,6 +284,15 @@ export const api = {
                             data_path: dataPath, body: body ?? null, schema_name: schemaName ?? null }),
     }).then((r) => json<SourceInfo>(r)),
 
+  /** Run another stored flow right now and attach its output — the flow
+   * needs its own fixed source (source_dataset_id), nothing here uploads a
+   * file on its behalf. */
+  attachFlowSource: (sid: string, name: string, flowId: string) =>
+    fetch(`${BASE}/files/${sid}/sources/flow?env=${encodeURIComponent(CURRENT_ENV)}`, {
+      method: "POST", headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ name, flow_id: flowId }),
+    }).then((r) => json<SourceInfo>(r)),
+
   detachSource: (sid: string, name: string) =>
     fetch(`${BASE}/files/${sid}/sources/${encodeURIComponent(name)}`,
          { method: "DELETE", headers: authHeaders() }).then((r) => json<{ ok: boolean }>(r)),
@@ -375,13 +384,13 @@ export const api = {
   listEnvironments: () => fetch(`${BASE}/environments`, { headers: authHeaders() })
     .then((r) => json<{ environments: string[]; default: string }>(r)),
 
-  listArtefacts: (kind: "config" | "computed" | "tco" | "edi_model" | "mapping" | "graph" | "function",
+  listArtefacts: (kind: "config" | "computed" | "tco" | "edi_model" | "mapping" | "graph" | "function" | "source",
                   opts?: { env?: string; includeArchived?: boolean }) =>
     fetch(`${BASE}/artefacts/${kind}?env=${encodeURIComponent(opts?.env ?? CURRENT_ENV)}`
          + (opts?.includeArchived ? "&include_archived=true" : ""),
          { headers: authHeaders() }).then((r) => json<ArtefactInfo[]>(r)),
 
-  createArtefact: (kind: "config" | "computed" | "tco" | "edi_model" | "mapping" | "graph" | "function",
+  createArtefact: (kind: "config" | "computed" | "tco" | "edi_model" | "mapping" | "graph" | "function" | "source",
                    body: { name: string; description?: string; note?: string;
                            yaml?: string; computed?: { name: string; expression: string }[];
                            sql_computed?: { name: string; expression: string }[];
@@ -448,6 +457,7 @@ export const api = {
     name: string; description?: string;
     config_artefact_id: string; config_version_no?: number | null;
     tco_artefact_id?: string | null; computed_artefact_id?: string | null;
+    source_artefact_id?: string | null;
     default_export_filename?: string;
     source_dataset_id?: string | null;
   }) =>

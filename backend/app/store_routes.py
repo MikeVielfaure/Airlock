@@ -70,6 +70,7 @@ KIND_CAPABILITY = {
     "mapping": "mapping.write",
     "graph": "flow.write",
     "function": "function.write",
+    "source": "config.write",
 }
 
 
@@ -433,6 +434,7 @@ def _flow_info(f) -> FlowInfo:
         config_artefact_id=f.config_artefact_id, config_version_no=f.config_version_no,
         tco_artefact_id=f.tco_artefact_id, tco_version_no=f.tco_version_no,
         computed_artefact_id=f.computed_artefact_id, computed_version_no=f.computed_version_no,
+        source_artefact_id=f.source_artefact_id, source_version_no=f.source_version_no,
         default_export_filename=f.default_export_filename,
         source_dataset_id=f.source_dataset_id)
 
@@ -547,6 +549,11 @@ async def run_flow(flow_id: str, file: UploadFile | None = File(None),
                                   source_df=source_df)
     except repo.NotFound as e:
         raise HTTPException(422, f"Flow inputs unresolved: {e}")
+    except ValueError as e:
+        # A referenced "flow" source that can't run (no fixed input of its
+        # own, or a circular reference) — same translation the interactive
+        # attach routes already give this exact family of errors.
+        raise HTTPException(422, str(e))
 
     resp = _engine_to_response(res)
     commit(s)                          # the Run must exist before the client hears about it
