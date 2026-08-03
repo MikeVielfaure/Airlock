@@ -641,7 +641,7 @@ function Vars({ notify }: Props) {
         </div>
       </div>
 
-      <h4><IconCheck size={13} /> What a brick would see here</h4>
+      <h4><IconCheck size={13} /> Ce qu'une brique verrait ici</h4>
       <div className="ops-resolved">
         {Object.keys(resolved).length === 0 && <span className="ops-hint">Rien de défini.</span>}
         {Object.entries(resolved).map(([k, v]) => (

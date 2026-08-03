@@ -88,7 +88,15 @@ et les PR. **Les sessions de travail sont persistées** (`app/session.py`,
 n'est plus un `dict` de process, donc `uvicorn --workers 2` ou plusieurs
 réplicas ne perdent plus le travail en cours — ce chantier, longtemps le
 numéro un, est fait. Healthcheck (`/api/health`) et logs structurés
-(`logging_setup.py`, un JSON par ligne) existent aussi déjà.
+(`logging_setup.py`, un JSON par ligne) existent aussi déjà. L'ancienne
+affirmation « l'interface mélange français et anglais (barre latérale et
+panneaux anciens) » était elle aussi périmée — vérifié en profondeur, c'est
+faux : la barre latérale et les panneaux principaux sont entièrement en
+français. Les deux vraies fuites trouvées (un titre dans `OpsPanel.tsx`, des
+clés de modules brutes dans `AdminPanel.tsx`) sont corrigées ;
+`MODULE_LABEL`/`roleLabel` dans `AdminPanel.tsx` est le patron à suivre si
+d'autres clés internes (rôles, modules, kinds…) fuitent un jour dans
+l'interface.
 
 **Ce qui bloque une mise en production** :
 
@@ -100,8 +108,6 @@ numéro un, est fait. Healthcheck (`/api/health`) et logs structurés
 3. **La signature des `id_token` OIDC n'est pas vérifiée** — signalé dans le
    code à l'endroit exact. Acceptable seulement parce que le jeton vient du
    *token endpoint* en TLS.
-4. L'interface **mélange français et anglais** (barre latérale et panneaux
-   anciens en anglais).
 
 ## Regarder le frontend
 

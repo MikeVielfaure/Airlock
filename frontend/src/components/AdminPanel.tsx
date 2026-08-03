@@ -19,6 +19,16 @@ type Tab = "overview" | "sandbox" | "users" | "envs" | "sso";
 
 const ROLES = ["viewer", "operator", "editor", "admin"];
 
+// Display-only translation of a module key — mirrors roleLabel()'s split
+// between the policy identifier (never renamed, used by gate()/shows() and
+// the API) and its French label (purely presentational).
+const MODULE_LABEL: Record<string, string> = {
+  schema: "Schéma & Règles", computed: "Calculs", data: "Données", report: "Rapport",
+  yaml: "Configuration", tco: "Correspondances", datasets: "Tables BDD", mapping: "Mapping",
+  flows: "Flux", edi: "EDIFACT", canvas: "Studio Flux", functions: "Fonctions", ops: "Exploitation",
+};
+const moduleLabel = (m: string): string => MODULE_LABEL[m] ?? m;
+
 interface Member { user_id: string; email: string; display_name: string;
                    role: string; from_sso: boolean }
 interface UserRow { id: string; email: string; display_name: string;
@@ -398,7 +408,7 @@ function Envs({ envs, notify, refreshEnvs, onIdentityChange }: {
       </div>
       {templates.filter((t) => t.key === tpl).map((t) => (
         <p key={t.key} className="ad-note">
-          {t.description} — modules : {t.modules.join(", ")}
+          {t.description} — modules : {t.modules.map(moduleLabel).join(", ")}
           {t.config_locked && " · configuration imposée (il faut en désigner une)"}
         </p>
       ))}
@@ -422,7 +432,7 @@ function Envs({ envs, notify, refreshEnvs, onIdentityChange }: {
               <label key={m} className={`ad-mod ${profile.modules.includes(m) ? "on" : ""}`}>
                 <input type="checkbox" checked={profile.modules.includes(m)}
                        onChange={() => toggle(m)} />
-                {m}
+                {moduleLabel(m)}
               </label>
             ))}
           </div>
@@ -702,7 +712,8 @@ function Sso({ envs, notify }: { envs: string[]; notify: Props["notify"] }) {
         <input value={secret} onChange={(e) => setSecret(e.target.value)} type="password"
                placeholder="client secret (vide = inchangé)" />
         <input value={discovery} onChange={(e) => setDiscovery(e.target.value)}
-               placeholder="URL de découverte (.well-known/openid-configuration)" />
+               placeholder="URL de découverte (.well-known/openid-configuration)"
+               style={{ flex: "2 1 320px" }} />
       </div>
 
       <h4>Correspondances groupe → rôle</h4>
