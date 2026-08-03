@@ -285,7 +285,7 @@ export function FlowsPanel({ notify, onOpenReport }: Props) {
           )}
 
           {/* ── runs ── */}
-          <div className="sec-h" style={{ marginTop: 26 }}>
+          <div className="sec-h gap-lg">
             <h3>Exécutions enregistrées</h3>
             <span className="sub">Chaque exécution de flux est conservée avec les versions figées des artefacts utilisés.</span>
           </div>
@@ -364,7 +364,7 @@ export function FlowsPanel({ notify, onOpenReport }: Props) {
           )}
 
           {/* ── library inventory + tco upload ── */}
-          <div className="sec-h" style={{ marginTop: 26 }}>
+          <div className="sec-h gap-lg">
             <h3>Bibliothèque</h3>
             <span className="sub">Les configs sont enregistrées depuis l'onglet Yaml, les ensembles calculés depuis l'onglet Computed, les TCO depuis l'onglet Correspondances.</span>
           </div>

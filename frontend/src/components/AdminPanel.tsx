@@ -5,6 +5,7 @@ import {
   IconCheck, IconCode, IconLayers, IconPlay, IconReset, IconSave, IconTable, IconWarn,
 } from "../lib/icons";
 import { InfoTip } from "./InfoTip";
+import { roleLabel } from "../lib/roles";
 
 interface Props {
   me: AuthUser | null;
@@ -88,7 +89,7 @@ function Sandbox({ envs, notify, onIdentityChange }: {
       const r = await api.quickUser(email, { [env]: role });
       setMade((m) => [{ email: r.email, environments: r.environments },
                       ...m.filter((x) => x.email !== r.email)]);
-      notify(`« ${r.email} » prêt — ${env} : ${role}. Mot de passe : motdepasse1`, "ok");
+      notify(`« ${r.email} » prêt — ${env} : ${roleLabel(role)}. Mot de passe : motdepasse1`, "ok");
     } catch (e) { notify(e instanceof Error ? e.message : String(e), "err"); }
     finally { setBusy(false); }
   };
@@ -123,7 +124,7 @@ function Sandbox({ envs, notify, onIdentityChange }: {
                placeholder="environnement" list="ad-envs" />
         <datalist id="ad-envs">{envs.map((e) => <option key={e} value={e} />)}</datalist>
         <select value={role} onChange={(e) => setRole(e.target.value)}>
-          {ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
+          {ROLES.map((r) => <option key={r} value={r}>{roleLabel(r)}</option>)}
         </select>
         <button className="btn" disabled={busy || !email.includes("@")} onClick={create}>
           <IconPlay size={14} /> Créer / mettre à jour
@@ -266,13 +267,13 @@ function Users({ envs, notify }: { envs: string[]; notify: Props["notify"] }) {
                placeholder="email" list="ad-users" />
         <datalist id="ad-users">{rows.map((u) => <option key={u.id} value={u.email} />)}</datalist>
         <select value={role} onChange={(e) => setRole(e.target.value)}>
-          {ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
+          {ROLES.map((r) => <option key={r} value={r}>{roleLabel(r)}</option>)}
         </select>
         <button className="btn sm" disabled={!email} onClick={async () => {
           try {
             await api.setMember(env, email, role);
             await refreshMembers(); await refresh();
-            notify(`${email} : ${role} dans ${env}.`, "ok");
+            notify(`${email} : ${roleLabel(role)} dans ${env}.`, "ok");
           } catch (e) { notify(e instanceof Error ? e.message : String(e), "err"); }
         }}><IconSave size={12} /> Appliquer</button>
       </div>
@@ -283,7 +284,7 @@ function Users({ envs, notify }: { envs: string[]; notify: Props["notify"] }) {
           {members.map((m) => (
             <tr key={m.user_id}>
               <td>{m.email}</td>
-              <td><span className="ad-badge">{m.role}</span></td>
+              <td><span className="ad-badge">{roleLabel(m.role)}</span></td>
               <td>{m.from_sso
                 ? <span className="ad-note">annuaire — à changer dans l'IdP</span>
                 : "manuel"}</td>
@@ -715,7 +716,7 @@ function Sso({ envs, notify }: { envs: string[]; notify: Props["notify"] }) {
           <datalist id="ad-envs2">{envs.map((e) => <option key={e} value={e} />)}</datalist>
           <select value={m.role} onChange={(e) => setMaps((ms) => ms.map((x, j) =>
             j === i ? { ...x, role: e.target.value } : x))}>
-            {ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
+            {ROLES.map((r) => <option key={r} value={r}>{roleLabel(r)}</option>)}
           </select>
         </div>
       ))}
@@ -874,7 +875,7 @@ function Overview({ notify }: { notify: Props["notify"] }) {
                         {e.members.map((m) => (
                           <tr key={m.email}>
                             <td>{m.email}</td>
-                            <td><span className="ad-badge">{m.role}</span></td>
+                            <td><span className="ad-badge">{roleLabel(m.role)}</span></td>
                             <td className="ad-note">{m.from_sso ? "annuaire" : "manuel"}</td>
                             <td className="ad-note">
                               {m.last_login_at
@@ -904,11 +905,11 @@ function Overview({ notify }: { notify: Props["notify"] }) {
         interprété.
       </p>
       <table className="ad-table">
-        <thead><tr><th>Droit</th>{data.roles.map((r) => <th key={r}>{r}</th>)}</tr></thead>
+        <thead><tr><th>Droit</th>{data.roles.map((r) => <th key={r}>{roleLabel(r)}</th>)}</tr></thead>
         <tbody>
           {data.capabilities.map((c) => (
             <tr key={c.capability}>
-              <td>{c.label} <code className="ad-cap">{c.capability}</code></td>
+              <td title={c.capability}>{c.label}</td>
               {data.roles.map((r) => (
                 <td key={r} className="ad-cell">
                   {(data.policy[r] || []).includes(c.capability)

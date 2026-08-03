@@ -382,7 +382,7 @@ export default function App() {
       setFields(Object.fromEntries(cols.map((c) => [c, defaultField(c)])));
       setResult(null);
       setTab("schema");
-      toast(`Loaded ${cols.length} columns, ${res.preview.total_rows} rows${res.sheet ? ` (sheet “${res.sheet}”)` : ""}${res.table_count ? `, ${res.table_count} tables` : ""}.`, "ok");
+      toast(`Chargé — ${cols.length} colonne(s), ${res.preview.total_rows} ligne(s)${res.sheet ? ` (feuille « ${res.sheet} »)` : ""}${res.table_count ? `, ${res.table_count} table(s)` : ""}.`, "ok");
       if (configYaml) {                        // an active config — re-apply to the new file
         const r = await matchConfig(configYaml, cols, true);
         const sheetDiff = r.sheet && r.sheet !== res.sheet && (res.sheets ?? []).includes(r.sheet);
@@ -533,7 +533,7 @@ export default function App() {
   const addColumn = useCallback((name: string) => {
     setFields((prev) => (prev[name] ? prev : { ...prev, [name]: defaultField(name) }));
     setVisible((prev) => (prev.includes(name) ? prev : [...prev, name]));
-    toast(`Declared column “${name}”.`, "ok");
+    toast(`Colonne « ${name} » déclarée.`, "ok");
   }, [toast]);
 
   const removeColumn = useCallback((name: string) => {
@@ -561,11 +561,11 @@ export default function App() {
 
   // ── tco ──────────────────────────────────────────────────
   const onTco = useCallback(async (file: File) => {
-    if (!sid) { toast("Load a data file first.", "err"); return; }
+    if (!sid) { toast("Charge d'abord un fichier.", "err"); return; }
     try {
       const res = await api.uploadTco(sid, file, ";");
       setTco(res);
-      toast(`TCO loaded: ${res.labels.length} labels.`, "ok");
+      toast(`TCO chargé : ${res.labels.length} libellé(s).`, "ok");
     } catch (e) { toast(String((e as Error).message), "err"); }
   }, [sid, toast]);
 
@@ -597,8 +597,8 @@ export default function App() {
       setTab("data");
       (res.warnings ?? []).forEach((w) => toast(w, "info"));
       const ce = Object.keys(res.compute_errors ?? {});
-      if (ce.length) toast(`Computed column issue: ${ce.join(", ")}.`, "err");
-      else toast(`Validated — ${res.stats.rows_err} rows with errors, ${res.stats.rows_clean} cleaned.`, res.stats.rows_err ? "info" : "ok");
+      if (ce.length) toast(`Colonne(s) calculée(s) en erreur : ${ce.join(", ")}.`, "err");
+      else toast(`Validé — ${res.stats.rows_err} ligne(s) en erreur, ${res.stats.rows_clean} nettoyée(s).`, res.stats.rows_err ? "info" : "ok");
     } catch (e) { toast(String((e as Error).message), "err"); }
     finally { setRunning(false); }
   }, [sid, visible, fields, computed, sqlComputed, styleRules, configVariables, refVariables, toast]);
@@ -642,7 +642,7 @@ export default function App() {
     setConfigVariables({}); setRefVariables([]); setStrictHeader(false); setMinHeader(false);
     setTableMarker(""); setTableIndex(0); setTableHeaderMode("local"); setTableCount(0);
     setDeletedTotal(0);
-    toast("Reset — everything cleared.", "ok");
+    toast("Session réinitialisée — tout a été effacé.", "ok");
   }, [toast, tabs, sid]);
 
   const closeTab = useCallback((targetSid: string) => {
@@ -684,7 +684,7 @@ export default function App() {
   }, [tab, fileType, encoding, delimiterKey, header, fields, visible, presets, sheet, tableFilters, strictHeader, minHeader, configVariables, refVariables, tableMarker, tableIndex, tableHeaderMode, toast]);
 
   const copyYaml = useCallback(() => {
-    navigator.clipboard.writeText(yaml).then(() => toast("YAML copied.", "ok"));
+    navigator.clipboard.writeText(yaml).then(() => toast("YAML copié.", "ok"));
   }, [yaml, toast]);
 
   const errCount = result?.stats.rows_err ?? 0;

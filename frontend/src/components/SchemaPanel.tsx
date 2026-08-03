@@ -158,7 +158,7 @@ export function SchemaPanel(p: Props) {
         </div>
 
         {p.unmapped.length > 0 && (
-          <div className="banner" style={{ marginTop: 4 }}>
+          <div className="banner warn" style={{ marginTop: 4 }}>
             <span>
               Config importée. <strong>{p.visible.length}</strong> colonne{p.visible.length > 1 ? "s" : ""} trouvée(s)
               et activée(s) ; <strong>{p.unmapped.length}</strong> laissée(s) inactive(s) (grisée(s)). Cliquez sur l'une d'elles pour l'inclure.

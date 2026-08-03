@@ -76,7 +76,7 @@ export function YamlPanel({ yaml, generating, onCopy, onImportYaml, notify }: Pr
         <pre className="yaml" dangerouslySetInnerHTML={{ __html: highlighted }} />
       )}
 
-      <div className="sec-h" style={{ marginTop: 22 }}>
+      <div className="sec-h gap-lg">
         <h3>Bibliothèque</h3>
         <span className="sub">Enregistre cette config côté serveur, versionnée — les flux peuvent ensuite l'exécuter par son id.</span>
       </div>

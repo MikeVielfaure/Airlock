@@ -413,11 +413,11 @@ export function ComputedPanel({ sid, tabs, columns, computed, setComputed, sqlCo
     try {
       if (saveTarget) {
         const a = await api.addArtefactVersion("computed", saveTarget, body);
-        notify(`Saved as version ${a.latest_version_no} of « ${a.name} ».`, "ok");
+        notify(`Enregistré comme version ${a.latest_version_no} de « ${a.name} ».`, "ok");
       } else {
         if (!saveName.trim()) { notify("Donnez un nom à cet ensemble.", "err"); return; }
         await api.createArtefact("computed", { name: saveName.trim(), ...body });
-        notify(`Computed set « ${saveName.trim()} » saved.`, "ok");
+        notify(`Ensemble calculé « ${saveName.trim()} » enregistré.`, "ok");
         setSaveName("");
       }
       refreshLib();
@@ -435,7 +435,7 @@ export function ComputedPanel({ sid, tabs, columns, computed, setComputed, sqlCo
       setComputed(items);
       setSqlComputed(sqlItems);
       setStyleRules(styleItems);
-      notify(`Computed set « ${a.name} » (v${a.latest_version_no}) loaded — ${items.length} column(s)`
+      notify(`Ensemble calculé « ${a.name} » (v${a.latest_version_no}) chargé — ${items.length} colonne(s)`
             + (sqlItems.length ? `, ${sqlItems.length} bloc(s) SQL` : "")
             + (styleItems.length ? `, ${styleItems.length} règle(s) de style.` : "."), "ok");
     } catch (e) { notify(e instanceof Error ? e.message : "Échec du chargement.", "err"); }
@@ -742,7 +742,7 @@ export function ComputedPanel({ sid, tabs, columns, computed, setComputed, sqlCo
                   </div>
                 )}
 
-                <div className="sec-h" style={{ marginTop: 18 }}>
+                <div className="sec-h gap-lg">
                   <h3 style={{ fontSize: 14 }}>Source BDD externe</h3>
                   <span className="sub">Requête en lecture seule sur un point de connexion enregistré — paramètres liés, jamais de substitution textuelle.</span>
                 </div>
@@ -792,7 +792,7 @@ export function ComputedPanel({ sid, tabs, columns, computed, setComputed, sqlCo
                     onClick={attachExternalDb}>Attacher la source</button>
                 </div>
 
-                <div className="sec-h" style={{ marginTop: 18 }}>
+                <div className="sec-h gap-lg">
                   <h3 style={{ fontSize: 14 }}>Source API</h3>
                   <span className="sub">La réponse peut être des données JSON ou un fichier (CSV/Excel) — à choisir explicitement, jamais deviné.</span>
                 </div>

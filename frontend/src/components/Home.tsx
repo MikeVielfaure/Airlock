@@ -2,6 +2,7 @@ import type { AuthUser, EnvProfile } from "../lib/types";
 import {
   IconCheck, IconCode, IconGrid, IconLayers, IconList, IconPlay, IconTable,
 } from "../lib/icons";
+import { roleLabel } from "../lib/roles";
 
 interface Props {
   me: AuthUser | null;
@@ -67,7 +68,7 @@ export function Home({ me, env, profile, shows, go }: Props) {
         <h1>{profile?.label && profile.label !== env ? profile.label : "Que faites-vous ?"}</h1>
         <p>
           Environnement <strong>{env}</strong>
-          {role && <> · Rôle : <strong>{role}</strong></>}
+          {role && <> · Rôle : <strong>{roleLabel(role)}</strong></>}
           {profile?.config_locked && <> · Configuration imposée</>}
         </p>
         {profile?.description && <p className="home-desc">{profile.description}</p>}

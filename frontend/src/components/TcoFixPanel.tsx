@@ -168,17 +168,23 @@ export function TcoFixPanel({ result, fieldTypes, tcoArtefactId, editable, notif
     if (!valid.length) { notify("Ajoutez au moins une ligne avec une valeur source et un label cible.", "err"); return; }
     const csv = tcoRowsToCsv(tcoRows);
     try {
+      let id = tcoTarget;
       if (tcoTarget) {
         const a = await api.addArtefactVersion("tco", tcoTarget, { csv });
         notify(`TCO mis à jour — nouvelle version v${a.latest_version_no}.`, "ok");
       } else {
         if (!tcoName.trim()) { notify("Donnez un nom à ce TCO.", "err"); return; }
-        await api.createArtefact("tco", { name: tcoName.trim(), csv });
+        const a = await api.createArtefact("tco", { name: tcoName.trim(), csv });
+        id = a.id;
         notify(`TCO « ${tcoName.trim()} » enregistré dans la bibliothèque.`, "ok");
         setTcoName("");
       }
       setTcoRows([{ type: "", source: "", target: "" }]);
       setTcoTarget("");
+      // A TCO just built or updated here is the one you meant to use — attach
+      // it to the active session right away instead of leaving it parked in
+      // the library for a separate, easy-to-forget "Charger" step.
+      if (sid && onTcoFromArtefact) onTcoFromArtefact(id);
       refresh();
     } catch (e) { notify(e instanceof Error ? e.message : "Échec de l'enregistrement du TCO.", "err"); }
   };
@@ -188,9 +194,10 @@ export function TcoFixPanel({ result, fieldTypes, tcoArtefactId, editable, notif
     if (!tcoName.trim() || !file) { notify("Choisissez un nom et un fichier CSV de TCO.", "err"); return; }
     try {
       const csv = await file.text();
-      await api.createArtefact("tco", { name: tcoName.trim(), csv });
+      const a = await api.createArtefact("tco", { name: tcoName.trim(), csv });
       setTcoName(""); if (tcoFileRef.current) tcoFileRef.current.value = "";
       notify("TCO enregistré dans la bibliothèque.", "ok");
+      if (sid && onTcoFromArtefact) onTcoFromArtefact(a.id);
       refresh();
     } catch (e) { notify(e instanceof Error ? e.message : "Échec de l'enregistrement du TCO.", "err"); }
   };
@@ -207,6 +214,7 @@ export function TcoFixPanel({ result, fieldTypes, tcoArtefactId, editable, notif
       notify(`TCO enregistré — v${r.version_no}, ${r.rows} ligne(s).`, "ok");
       setTcoSourceCol(""); setTcoTargetCol(""); setTcoTypeCol(""); setTcoTypeValue("");
       setTcoName(""); setTcoTarget("");
+      if (onTcoFromArtefact) onTcoFromArtefact(r.artefact_id);
       refresh();
     } catch (e) { notify(e instanceof Error ? e.message : "Échec de l'enregistrement du TCO.", "err"); }
   };
@@ -384,7 +392,7 @@ export function TcoFixPanel({ result, fieldTypes, tcoArtefactId, editable, notif
       )}
 
       {/* ── constrain a type's target labels to a reference list ───── */}
-      <div className="sec-h" style={{ marginTop: 18 }}>
+      <div className="sec-h gap-lg">
         <h3 style={{ fontSize: 14 }}>Contraindre les valeurs cible</h3>
         <span className="sub">Au lieu d'un libellé cible tapé librement, imposer qu'il vienne d'une liste — par
           exemple tout code de « list_tco_value » où type = job.
@@ -427,7 +435,7 @@ export function TcoFixPanel({ result, fieldTypes, tcoArtefactId, editable, notif
       )}
 
       {/* ── fix values a run flagged as uncovered ──────────────────── */}
-      <div className="sec-h" style={{ marginTop: 18 }}>
+      <div className="sec-h gap-lg">
         <h3 style={{ fontSize: 14 }}>Corriger les valeurs non couvertes</h3>
       </div>
       {!result ? (

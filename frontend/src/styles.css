@@ -45,6 +45,18 @@
   --shadow: 0 1px 2px rgba(20, 30, 50, 0.04), 0 2px 8px rgba(20, 30, 50, 0.05);
   --shadow-pop: 0 8px 28px rgba(20, 30, 50, 0.14);
 
+  /* spacing scale — one rhythm instead of each panel picking its own
+     margin-top by eye (18px here, 22 there, 26 elsewhere, for the exact
+     same "new section starts here" gap). Rarely-used odd values (1, 3, 5,
+     9px) for fine per-element nudges stay as-is; this scale is for the
+     spacing that repeats across panels. */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 24px;
+  --sp-6: 32px;
+
   /* type */
   --sans: "Inter", system-ui, sans-serif;
   --display: "Space Grotesk", "Inter", sans-serif;
@@ -247,6 +259,10 @@ textarea { resize: vertical; min-height: 64px; }
 .sec-h { display: flex; align-items: baseline; gap: 10px; margin: 0 0 4px; }
 .sec-h h3 { font-family: var(--display); font-weight: 600; font-size: 15px; margin: 0; }
 .sec-h .sub { color: var(--ink-faint); font-size: 12.5px; }
+/* The gap before a new major section, below content that's already there —
+   every panel needs exactly this once or twice; one value, not one guess
+   per file. */
+.sec-h.gap-lg { margin-top: var(--sp-5); }
 
 /* ---------- info tooltip ---------- */
 .infotip { position: relative; display: inline-flex; vertical-align: middle; margin-left: 2px; }
@@ -424,12 +440,16 @@ pre.yaml .k { color: #8db4ff; }
 .toast.ok { background: var(--ok); }
 @keyframes slide { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 
-/* match banner */
+/* match banner — neutral by default: most uses are "nothing here yet" or
+   "loading…", not a problem, so they shouldn't read as one. `.warn`/`.ok`/
+   `.err` are explicit opt-ins for when the color should actually mean
+   something. */
 .banner {
   display: flex; align-items: flex-start; gap: 11px; padding: 12px 14px; border-radius: var(--r);
-  background: var(--warn-bg); border: 1px solid var(--warn-line); color: var(--warn);
+  background: var(--panel-2); border: 1px solid var(--line); color: var(--ink-soft);
   font-size: 13px; margin-bottom: 14px;
 }
+.banner.warn { background: var(--warn-bg); border-color: var(--warn-line); color: var(--warn); }
 .banner.ok { background: var(--ok-bg); border-color: var(--ok-line); color: var(--ok); }
 
 /* ---------- field chips (schema) ---------- */
@@ -1360,7 +1380,12 @@ pre.yaml .k { color: #8db4ff; }
 .ad { display: flex; flex-direction: column; gap: 12px; }
 .ad-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
 .ad-body { display: flex; flex-direction: column; gap: 10px; }
-.ad-body h4 { margin: 6px 0 0; font-size: 13px; display: flex; align-items: center; gap: 7px; }
+/* `gap` already spaces every child evenly — a new section heading needs
+   more than that to actually read as "a new section", not just the next
+   line, so it gets extra room on top of the base gap. First one in a tab
+   needs none: it already sits right below the tab strip. */
+.ad-body h4 { margin: 0; font-size: 13px; display: flex; align-items: center; gap: 7px; }
+.ad-body h4:not(:first-child) { margin-top: var(--sp-4); }
 .ad-hint { font-size: 12.5px; line-height: 1.6; color: var(--ink-soft); margin: 0; max-width: 78ch; }
 .ad-note { font-size: 12px; line-height: 1.5; color: var(--ink-faint); margin: 0; }
 .ad-form { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
@@ -1412,8 +1437,6 @@ pre.yaml .k { color: #8db4ff; }
 .ad-detail .ad-modules { margin-bottom: 10px; }
 .ad-detail .ad-mod { cursor: default; }
 .ad-detail .ad-mod:not(.on) { opacity: .45; text-decoration: line-through; }
-.ad-cap { font-family: var(--mono); font-size: 10.5px; color: var(--ink-faint);
-  margin-left: 6px; }
 .ad-cell { text-align: center; }
 .ad-yes { color: var(--ok); font-weight: 600; font-size: 11.5px; }
 .ad-no { color: var(--ink-faint); }
@@ -1423,7 +1446,14 @@ pre.yaml .k { color: #8db4ff; }
 .body.wide { grid-template-columns: 1fr; }
 
 /* ── page d'accueil : choisir son module (v37) ────────────────────── */
-.home { display: flex; flex-direction: column; gap: 20px; padding: 24px 8px; max-width: 900px; }
+/* No sidebar on this page, so `.view` hands it the full window width —
+   capped at 900px with no centering, the cards sat pinned to the left
+   edge with a dead half-screen of blank space beside them on anything
+   wider than a laptop. A generous cap plus auto-centering lets the card
+   grid actually use the width it's given (more columns, not more margin)
+   while staying centered instead of lopsided past that point. */
+.home { display: flex; flex-direction: column; gap: 20px; padding: 24px 8px;
+  max-width: 1400px; width: 100%; margin: 0 auto; }
 .home-head h1 { margin: 0 0 6px; font-size: 22px; letter-spacing: -.01em; }
 .home-head p { margin: 0; font-size: 13px; color: var(--ink-soft); }
 .home-desc { margin-top: 6px !important; max-width: 70ch; line-height: 1.6; }
