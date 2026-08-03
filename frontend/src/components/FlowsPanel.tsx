@@ -1,59 +1,13 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../lib/api";
-import type { ArtefactInfo, FlowInfo, ReportRow, RunInfo } from "../lib/types";
+import type { ArtefactInfo, DatasetInfo, FlowInfo, ReportRow, RunInfo } from "../lib/types";
 import { IconLayers, IconPlay, IconReset } from "../lib/icons";
-import { InfoTip } from "./InfoTip";
-
-/** Split one CSV line into cells, honouring double-quoted values (with ""
- * as an escaped quote) — enough for the short, single-line cells a TCO
- * table holds; embedded newlines inside a quoted cell are not supported. */
-function parseCsvLine(line: string): string[] {
-  const out: string[] = [];
-  let cur = "", inQuotes = false;
-  for (let i = 0; i < line.length; i++) {
-    const c = line[i];
-    if (inQuotes) {
-      if (c === '"') {
-        if (line[i + 1] === '"') { cur += '"'; i++; } else { inQuotes = false; }
-      } else cur += c;
-    } else if (c === '"') inQuotes = true;
-    else if (c === ",") { out.push(cur); cur = ""; }
-    else cur += c;
-  }
-  out.push(cur);
-  return out;
-}
-
-function csvEscape(v: string): string {
-  return /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
-}
-
-type TcoRow = { type: string; source: string; target: string };
-
-/** TYPE is only emitted when at least one row uses it, so a plain
- * two-column TCO stays exactly as simple as before. */
-function tcoRowsToCsv(rows: TcoRow[]): string {
-  const useType = rows.some((r) => r.type.trim());
-  const header = useType ? ["TYPE", "SOURCE_VALUE", "TARGET_LABEL"] : ["SOURCE_VALUE", "TARGET_LABEL"];
-  const lines = [header.join(",")];
-  for (const r of rows) {
-    if (!r.source.trim() && !r.target.trim()) continue;
-    const cells = useType ? [r.type, r.source, r.target] : [r.source, r.target];
-    lines.push(cells.map(csvEscape).join(","));
-  }
-  return lines.join("\n");
-}
 
 interface Props {
   notify: (msg: string, kind?: "ok" | "err" | "info") => void;
   /** Feed a run's report straight into the workbench's Report tab, in the
    * same shape a JSON import would produce — one mechanism, two doors in. */
   onOpenReport: (report: ReportRow[], tcoUncovered?: Record<string, { value: string; count: number }[]>) => void;
-  /** The active workbench session, if any — lets a TCO be built from
-   * whatever data already loaded there (file, blank, SQL, API...) instead
-   * of a second, TCO-specific loading path. */
-  sid?: string | null;
-  columns?: string[];
 }
 
 /** A stored run's report is grouped by id (one entry per row, each holding
@@ -77,7 +31,7 @@ function flattenRunReport(rows: { id: string | number;
  * fed from the Yaml / Computed tabs ("save to library") and from the TCO
  * mini-form below.
  */
-export function FlowsPanel({ notify, onOpenReport, sid, columns = [] }: Props) {
+export function FlowsPanel({ notify, onOpenReport }: Props) {
   const [openRun, setOpenRun] = useState<string>("");
   const [openReport, setOpenReport] = useState<ReportRow[]>([]);
   const [openBusy, setOpenBusy] = useState(false);
@@ -86,6 +40,7 @@ export function FlowsPanel({ notify, onOpenReport, sid, columns = [] }: Props) {
   const [tcos, setTcos] = useState<ArtefactInfo[]>([]);
   const [flows, setFlows] = useState<FlowInfo[]>([]);
   const [runs, setRuns] = useState<RunInfo[]>([]);
+  const [datasets, setDatasets] = useState<DatasetInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [showArchivedFlows, setShowArchivedFlows] = useState(false);
 
@@ -95,18 +50,8 @@ export function FlowsPanel({ notify, onOpenReport, sid, columns = [] }: Props) {
   const [fPinned, setFPinned] = useState(false);       // false = track latest
   const [fTco, setFTco] = useState("");
   const [fComp, setFComp] = useState("");
+  const [fSource, setFSource] = useState("");          // fixed source table, optional
   const [fExport, setFExport] = useState("export");
-
-  // tco mini-form
-  const [tcoName, setTcoName] = useState("");
-  const tcoFileRef = useRef<HTMLInputElement>(null);
-  const [tcoMode, setTcoMode] = useState<"build" | "upload" | "session">("build");
-  const [tcoTarget, setTcoTarget] = useState("");
-  const [tcoRows, setTcoRows] = useState<TcoRow[]>([{ type: "", source: "", target: "" }]);
-  const [tcoSourceCol, setTcoSourceCol] = useState("");
-  const [tcoTargetCol, setTcoTargetCol] = useState("");
-  const [tcoTypeCol, setTcoTypeCol] = useState("");
-  const [tcoTypeValue, setTcoTypeValue] = useState("");
 
   // run state
   const [runningFlow, setRunningFlow] = useState<string | null>(null);
@@ -115,11 +60,12 @@ export function FlowsPanel({ notify, onOpenReport, sid, columns = [] }: Props) {
 
   const refresh = useCallback(async () => {
     try {
-      const [c, p, t, f, r] = await Promise.all([
+      const [c, p, t, f, r, d] = await Promise.all([
         api.listArtefacts("config"), api.listArtefacts("computed"),
         api.listArtefacts("tco"), api.listFlows(showArchivedFlows), api.listRuns(),
+        api.listDatasets(),
       ]);
-      setConfigs(c); setComputeds(p); setTcos(t); setFlows(f); setRuns(r);
+      setConfigs(c); setComputeds(p); setTcos(t); setFlows(f); setRuns(r); setDatasets(d);
     } catch (e) {
       notify(e instanceof Error ? e.message : "Impossible de charger la bibliothèque.", "err");
     } finally {
@@ -139,96 +85,25 @@ export function FlowsPanel({ notify, onOpenReport, sid, columns = [] }: Props) {
         name: fName.trim(), config_artefact_id: fConfig,
         config_version_no: fPinned ? (configs.find((c) => c.id === fConfig)?.latest_version_no ?? null) : null,
         tco_artefact_id: fTco || null, computed_artefact_id: fComp || null,
+        source_dataset_id: fSource || null,
         default_export_filename: fExport.trim() || "export",
       });
-      setFName(""); setFConfig(""); setFTco(""); setFComp(""); setFPinned(false);
+      setFName(""); setFConfig(""); setFTco(""); setFComp(""); setFSource(""); setFPinned(false);
       notify("Flux créé.", "ok");
       refresh();
     } catch (e) { notify(e instanceof Error ? e.message : "Échec de la création du flux.", "err"); }
   };
 
-  const saveTco = async () => {
-    const file = tcoFileRef.current?.files?.[0];
-    if (!tcoName.trim() || !file) { notify("Choisissez un nom et un fichier CSV de TCO.", "err"); return; }
-    try {
-      const csv = await file.text();
-      await api.createArtefact("tco", { name: tcoName.trim(), csv });
-      setTcoName(""); if (tcoFileRef.current) tcoFileRef.current.value = "";
-      notify("TCO enregistré dans la bibliothèque.", "ok");
-      refresh();
-    } catch (e) { notify(e instanceof Error ? e.message : "Échec de l'enregistrement du TCO.", "err"); }
-  };
-
-  const addTcoRow = () => setTcoRows([...tcoRows, { type: "", source: "", target: "" }]);
-  const removeTcoRow = (i: number) => setTcoRows(tcoRows.filter((_, j) => j !== i));
-  const setTcoRow = (i: number, patch: Partial<TcoRow>) =>
-    setTcoRows(tcoRows.map((r, j) => (j === i ? { ...r, ...patch } : r)));
-
-  /** Picking an existing TCO loads its latest CSV back into rows — editing
-   * it and saving adds a version, it never overwrites the one being edited. */
-  const loadTcoForEdit = async (id: string) => {
-    setTcoTarget(id);
-    if (!id) { setTcoRows([{ type: "", source: "", target: "" }]); return; }
-    const a = tcos.find((t) => t.id === id);
-    if (!a) return;
-    try {
-      const v = await api.getArtefactVersion("tco", id, a.latest_version_no);
-      const csv = String((v.body as { csv?: string }).csv ?? "");
-      const lines = csv.split(/\r?\n/).filter((l) => l.trim());
-      if (lines.length < 2) { setTcoRows([{ type: "", source: "", target: "" }]); return; }
-      const header = parseCsvLine(lines[0]).map((h) => h.trim().toUpperCase());
-      const iType = header.indexOf("TYPE");
-      const iSrc = header.findIndex((h) => ["SOURCE_VALUE", "SOURCE"].includes(h));
-      const iTgt = header.findIndex((h) => ["TARGET_LABEL", "TARGET", "LABEL"].includes(h));
-      const rows = lines.slice(1).map((l) => {
-        const cells = parseCsvLine(l);
-        return {
-          type: iType >= 0 ? (cells[iType] ?? "") : "",
-          source: iSrc >= 0 ? (cells[iSrc] ?? "") : "",
-          target: iTgt >= 0 ? (cells[iTgt] ?? "") : "",
-        };
-      });
-      setTcoRows(rows.length ? rows : [{ type: "", source: "", target: "" }]);
-    } catch (e) { notify(e instanceof Error ? e.message : "Échec du chargement du TCO.", "err"); }
-  };
-
-  const saveTcoTable = async () => {
-    const valid = tcoRows.filter((r) => r.source.trim() && r.target.trim());
-    if (!valid.length) { notify("Ajoutez au moins une ligne avec une valeur source et un label cible.", "err"); return; }
-    const csv = tcoRowsToCsv(tcoRows);
-    try {
-      if (tcoTarget) {
-        const a = await api.addArtefactVersion("tco", tcoTarget, { csv });
-        notify(`TCO mis à jour — nouvelle version v${a.latest_version_no}.`, "ok");
-      } else {
-        if (!tcoName.trim()) { notify("Donnez un nom à ce TCO.", "err"); return; }
-        await api.createArtefact("tco", { name: tcoName.trim(), csv });
-        notify(`TCO « ${tcoName.trim()} » enregistré dans la bibliothèque.`, "ok");
-        setTcoName("");
-      }
-      setTcoRows([{ type: "", source: "", target: "" }]);
-      setTcoTarget("");
-      refresh();
-    } catch (e) { notify(e instanceof Error ? e.message : "Échec de l'enregistrement du TCO.", "err"); }
-  };
-
-  const saveTcoFromSession = async () => {
-    if (!sid || !tcoSourceCol.trim() || !tcoTargetCol.trim()) return;
-    if (!tcoTarget && !tcoName.trim()) { notify("Donnez un nom à ce TCO.", "err"); return; }
-    try {
-      const r = await api.saveSessionAsTco(sid, {
-        source_column: tcoSourceCol, target_column: tcoTargetCol,
-        type_column: tcoTypeCol || undefined, type_value: tcoTypeCol ? undefined : tcoTypeValue,
-        artefact_id: tcoTarget || undefined, name: tcoTarget ? undefined : tcoName.trim(),
-      });
-      notify(`TCO enregistré — v${r.version_no}, ${r.rows} ligne(s).`, "ok");
-      setTcoSourceCol(""); setTcoTargetCol(""); setTcoTypeCol(""); setTcoTypeValue("");
-      setTcoName(""); setTcoTarget("");
-      refresh();
-    } catch (e) { notify(e instanceof Error ? e.message : "Échec de l'enregistrement du TCO.", "err"); }
-  };
-
   const askRun = (flow: FlowInfo) => { runTarget.current = flow; runFileRef.current?.click(); };
+
+  const reportRun = (flow: FlowInfo, res: { ok: boolean; stage: string;
+      stats: { total_rows: number; rows_err: number } | null }) => {
+    if (res.ok) {
+      notify(`Flux « ${flow.name} » : OK — ${res.stats?.total_rows ?? 0} ligne(s), export prêt.`, "ok");
+    } else {
+      notify(`Flux « ${flow.name} » : bloqué à ${res.stage}${res.stats ? ` — ${res.stats.rows_err} ligne(s) en erreur` : ""}.`, "err");
+    }
+  };
 
   const doRun = async (file: File | undefined) => {
     const flow = runTarget.current;
@@ -236,17 +111,25 @@ export function FlowsPanel({ notify, onOpenReport, sid, columns = [] }: Props) {
     setRunningFlow(flow.id);
     try {
       const res = await api.runFlow(flow.id, file);
-      if (res.ok) {
-        notify(`Flux « ${flow.name} » : OK — ${res.stats?.total_rows ?? 0} ligne(s), export prêt.`, "ok");
-      } else {
-        notify(`Flux « ${flow.name} » : bloqué à ${res.stage}${res.stats ? ` — ${res.stats.rows_err} ligne(s) en erreur` : ""}.`, "err");
-      }
+      reportRun(flow, res);
       refresh();
     } catch (e) { notify(e instanceof Error ? e.message : "Échec de l'exécution.", "err"); }
     finally {
       setRunningFlow(null);
       if (runFileRef.current) runFileRef.current.value = "";
     }
+  };
+
+  /** A flow with a fixed source table runs directly — no file dialog, no
+   * upload: the table is read fresh, server-side, at the moment of the run. */
+  const runFixedSource = async (flow: FlowInfo) => {
+    setRunningFlow(flow.id);
+    try {
+      const res = await api.runFlow(flow.id, null);
+      reportRun(flow, res);
+      refresh();
+    } catch (e) { notify(e instanceof Error ? e.message : "Échec de l'exécution.", "err"); }
+    finally { setRunningFlow(null); }
   };
 
   const del = async (kind: "flow" | "config" | "computed" | "tco", id: string) => {
@@ -266,6 +149,25 @@ export function FlowsPanel({ notify, onOpenReport, sid, columns = [] }: Props) {
     if (!window.confirm(`Supprimer le flux « ${name} » pour de bon ? Irréversible.`)) return;
     try { await api.deleteFlowPermanently(id); notify(`Flux « ${name} » supprimé définitivement.`, "ok"); refresh(); }
     catch (e) { notify(e instanceof Error ? e.message : String(e), "err"); }
+  };
+
+  const purgeRuns = async (id: string, name: string) => {
+    if (!window.confirm(`Purger tout l'historique d'exécution de « ${name} » ? Irréversible — rapports et exports inclus.`)) return;
+    try {
+      const res = await api.purgeFlowRuns(id);
+      notify(`${res.purged} exécution(s) supprimée(s).`, "ok");
+      refresh();
+    } catch (e) { notify(e instanceof Error ? e.message : String(e), "err"); }
+  };
+
+  const deleteRunRow = async (id: string) => {
+    if (!window.confirm("Supprimer cette exécution ? Irréversible.")) return;
+    try {
+      await api.deleteRun(id);
+      if (openRun === id) setOpenRun("");
+      notify("Exécution supprimée.", "ok");
+      refresh();
+    } catch (e) { notify(e instanceof Error ? e.message : String(e), "err"); }
   };
 
   const fmtDate = (iso: string) => new Date(iso).toLocaleString();
@@ -312,6 +214,12 @@ export function FlowsPanel({ notify, onOpenReport, sid, columns = [] }: Props) {
                 <option value="">aucun</option>
                 {computeds.map((p) => <option key={p.id} value={p.id}>{p.name} (v{p.latest_version_no})</option>)}
               </select></div>
+            <div className="frow"><label>Source
+              <span style={{ fontWeight: 400, color: "var(--ink-faint)" }}> (optionnel)</span></label>
+              <select value={fSource} onChange={(e) => setFSource(e.target.value)}>
+                <option value="">aucune — fournir un fichier à chaque lancement</option>
+                {datasets.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+              </select></div>
             <div className="frow"><label>Nom d'export</label>
               <input value={fExport} onChange={(e) => setFExport(e.target.value)} /></div>
             <label className="csub" style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -331,7 +239,7 @@ export function FlowsPanel({ notify, onOpenReport, sid, columns = [] }: Props) {
             <div className="banner"><span>Aucun flux pour l'instant. Enregistrez une config dans l'onglet Yaml, puis composez-en un ci-dessus.</span></div>
           ) : (
             <table className="libtable">
-              <thead><tr><th>Flux</th><th>Config</th><th>TCO</th><th>Computed</th><th>Versions</th><th></th></tr></thead>
+              <thead><tr><th>Flux</th><th>Config</th><th>TCO</th><th>Computed</th><th>Source</th><th>Versions</th><th></th></tr></thead>
               <tbody>
                 {flows.map((f) => (
                   <tr key={f.id}>
@@ -339,6 +247,9 @@ export function FlowsPanel({ notify, onOpenReport, sid, columns = [] }: Props) {
                     <td>{nameOf(configs, f.config_artefact_id)}</td>
                     <td>{nameOf(tcos, f.tco_artefact_id)}</td>
                     <td>{nameOf(computeds, f.computed_artefact_id)}</td>
+                    <td>{f.source_dataset_id
+                      ? (datasets.find((d) => d.id === f.source_dataset_id)?.name ?? "(archivée)")
+                      : "—"}</td>
                     <td>{f.config_version_no === null ? "dernière" : `épinglée v${f.config_version_no}`}</td>
                     <td className="libactions">
                       {f.archived ? (
@@ -351,9 +262,18 @@ export function FlowsPanel({ notify, onOpenReport, sid, columns = [] }: Props) {
                         </>
                       ) : (
                         <>
-                          <button className="btn sm primary" disabled={runningFlow === f.id} onClick={() => askRun(f)}>
-                            <IconPlay size={13} /> {runningFlow === f.id ? "En cours…" : "Lancer sur un fichier"}
-                          </button>
+                          {f.source_dataset_id ? (
+                            <button className="btn sm primary" disabled={runningFlow === f.id}
+                                    onClick={() => runFixedSource(f)}>
+                              <IconPlay size={13} /> {runningFlow === f.id ? "En cours…" : "Lancer"}
+                            </button>
+                          ) : (
+                            <button className="btn sm primary" disabled={runningFlow === f.id} onClick={() => askRun(f)}>
+                              <IconPlay size={13} /> {runningFlow === f.id ? "En cours…" : "Lancer sur un fichier"}
+                            </button>
+                          )}
+                          <button className="btn sm" title="Purger l'historique d'exécution"
+                                  onClick={() => purgeRuns(f.id, f.name)}>Purger</button>
                           <button className="btn sm" title="Archiver" onClick={() => del("flow", f.id)}><IconReset size={13} /></button>
                         </>
                       )}
@@ -391,6 +311,8 @@ export function FlowsPanel({ notify, onOpenReport, sid, columns = [] }: Props) {
                         </button>
                         {r.ok && <a className="btn sm" href={`/api/runs/${r.id}/export`}>Exporter</a>}
                         <a className="btn sm" href={`/api/runs/${r.id}`} target="_blank" rel="noreferrer">Rapport (json)</a>
+                        <button className="btn sm danger" title="Supprimer cette exécution"
+                                onClick={() => deleteRunRow(r.id)}>×</button>
                       </td>
                     </tr>
                     {openRun === r.id && (
@@ -444,7 +366,7 @@ export function FlowsPanel({ notify, onOpenReport, sid, columns = [] }: Props) {
           {/* ── library inventory + tco upload ── */}
           <div className="sec-h" style={{ marginTop: 26 }}>
             <h3>Bibliothèque</h3>
-            <span className="sub">Les configs sont enregistrées depuis l'onglet Yaml, les ensembles calculés depuis l'onglet Computed. Les TCO sont ajoutés ici.</span>
+            <span className="sub">Les configs sont enregistrées depuis l'onglet Yaml, les ensembles calculés depuis l'onglet Computed, les TCO depuis l'onglet Correspondances.</span>
           </div>
           <div className="libgrid">
             {(["config", "computed", "tco"] as const).map((kind) => {
@@ -463,116 +385,6 @@ export function FlowsPanel({ notify, onOpenReport, sid, columns = [] }: Props) {
               );
             })}
           </div>
-          <div className="sec-h" style={{ marginTop: 12 }}>
-            <h3 style={{ fontSize: 14 }}>Table de correspondance (TCO)</h3>
-            <span className="sub">Une valeur source (ex. « M ») mappée vers un label cible (ex. « MASCULIN »), utilisée par le mapping des champs.
-              <InfoTip>
-                <p><b>À quoi ça sert</b> — un TCO vérifie qu'une valeur de champ correspond bien au label attendu (le mapping configuré sur le champ), au lieu de laisser passer n'importe quelle valeur.</p>
-                <p><b>Comment faire</b> — construisez le tableau ligne par ligne (valeur source → label cible), ou importez un CSV déjà prêt. La colonne « Type » est optionnelle : renseignez-la si une même table sert plusieurs champs (ex. CIVILITE et PAYS dans le même fichier).</p>
-                <p><b>Ce qu'il faut</b> — au moins une ligne avec une valeur source et un label cible. Enregistrer ajoute une nouvelle version si vous avez choisi un TCO existant — l'ancienne version reste inchangée.</p>
-              </InfoTip>
-            </span>
-          </div>
-          <div className="filterbar">
-            <button className={`btn sm ${tcoMode === "build" ? "primary" : ""}`} onClick={() => setTcoMode("build")}>
-              Construire un tableau
-            </button>
-            <button className={`btn sm ${tcoMode === "session" ? "primary" : ""}`} onClick={() => setTcoMode("session")}>
-              Depuis la session active
-            </button>
-            <button className={`btn sm ${tcoMode === "upload" ? "primary" : ""}`} onClick={() => setTcoMode("upload")}>
-              Importer un fichier CSV
-            </button>
-          </div>
-
-          {tcoMode === "session" ? (
-            <div className="flowform" style={{ marginTop: 8 }}>
-              {!sid ? (
-                <p className="csub">Chargez d'abord un fichier ou une session (onglet Schéma & Règles) — peu importe le
-                  moyen, fichier, saisie vierge, source SQL ou API : la session qui en résulte peut devenir un TCO.</p>
-              ) : (
-                <>
-                  <div className="frow"><label>Ajouter une version à</label>
-                    <select value={tcoTarget} onChange={(e) => setTcoTarget(e.target.value)}>
-                      <option value="">— nouveau TCO —</option>
-                      {tcos.map((t) => <option key={t.id} value={t.id}>{t.name} (v{t.latest_version_no})</option>)}
-                    </select></div>
-                  {!tcoTarget && (
-                    <div className="frow"><label>Nom du nouveau TCO</label>
-                      <input value={tcoName} onChange={(e) => setTcoName(e.target.value)} placeholder="ex. civilites" /></div>
-                  )}
-                  <div className="frow"><label>Colonne source</label>
-                    <select value={tcoSourceCol} onChange={(e) => setTcoSourceCol(e.target.value)}>
-                      <option value="">— choisir —</option>
-                      {columns.map((c) => <option key={c} value={c}>{c}</option>)}
-                    </select></div>
-                  <div className="frow"><label>Colonne cible</label>
-                    <select value={tcoTargetCol} onChange={(e) => setTcoTargetCol(e.target.value)}>
-                      <option value="">— choisir —</option>
-                      {columns.map((c) => <option key={c} value={c}>{c}</option>)}
-                    </select></div>
-                  <div className="frow"><label>Colonne type (optionnel)</label>
-                    <select value={tcoTypeCol} onChange={(e) => setTcoTypeCol(e.target.value)}>
-                      <option value="">— aucune —</option>
-                      {columns.map((c) => <option key={c} value={c}>{c}</option>)}
-                    </select></div>
-                  {!tcoTypeCol && (
-                    <div className="frow"><label>Type fixe (optionnel)</label>
-                      <input value={tcoTypeValue} onChange={(e) => setTcoTypeValue(e.target.value)}
-                             placeholder="ex. CIVILITE — laisser vide si la table sert tous les champs" /></div>
-                  )}
-                  <div className="filterbar" style={{ marginTop: 6 }}>
-                    <button className="btn primary" disabled={!tcoSourceCol || !tcoTargetCol}
-                            onClick={saveTcoFromSession}>
-                      {tcoTarget ? "Enregistrer comme nouvelle version" : "Enregistrer le TCO dans la bibliothèque"}
-                    </button>
-                  </div>
-                </>
-              )}
-            </div>
-          ) : tcoMode === "build" ? (
-            <div className="flowform" style={{ marginTop: 8 }}>
-              <div className="frow"><label>Ajouter une version à</label>
-                <select value={tcoTarget} onChange={(e) => loadTcoForEdit(e.target.value)}>
-                  <option value="">— nouveau TCO —</option>
-                  {tcos.map((t) => <option key={t.id} value={t.id}>{t.name} (v{t.latest_version_no})</option>)}
-                </select></div>
-              {!tcoTarget && (
-                <div className="frow"><label>Nom du nouveau TCO</label>
-                  <input value={tcoName} onChange={(e) => setTcoName(e.target.value)} placeholder="ex. civilites" /></div>
-              )}
-              <table className="grid" style={{ marginTop: 8, width: "100%" }}>
-                <thead><tr><th>Type (optionnel)</th><th>Valeur source</th><th>Label cible</th><th></th></tr></thead>
-                <tbody>
-                  {tcoRows.map((r, i) => (
-                    <tr key={i}>
-                      <td><input className="mono-input" value={r.type} placeholder="ex. CIVILITE"
-                        onChange={(e) => setTcoRow(i, { type: e.target.value })} /></td>
-                      <td><input className="mono-input" value={r.source} placeholder="ex. M"
-                        onChange={(e) => setTcoRow(i, { source: e.target.value })} /></td>
-                      <td><input className="mono-input" value={r.target} placeholder="ex. MASCULIN"
-                        onChange={(e) => setTcoRow(i, { target: e.target.value })} /></td>
-                      <td><button className="hclear" onClick={() => removeTcoRow(i)}>×</button></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              <div className="filterbar" style={{ marginTop: 6 }}>
-                <button className="btn sm" onClick={addTcoRow}>+ ligne</button>
-                <button className="btn primary" onClick={saveTcoTable}>
-                  {tcoTarget ? "Enregistrer comme nouvelle version" : "Enregistrer le TCO dans la bibliothèque"}
-                </button>
-              </div>
-            </div>
-          ) : (
-            <div className="flowform" style={{ marginTop: 8 }}>
-              <div className="frow"><label>Nom du nouveau TCO</label>
-                <input value={tcoName} onChange={(e) => setTcoName(e.target.value)} placeholder="ex. civilites" /></div>
-              <div className="frow"><label>Fichier CSV</label>
-                <input type="file" ref={tcoFileRef} accept=".csv,.txt" /></div>
-              <button className="btn" onClick={saveTco}>Enregistrer le TCO dans la bibliothèque</button>
-            </div>
-          )}
         </>
       )}
     </div>

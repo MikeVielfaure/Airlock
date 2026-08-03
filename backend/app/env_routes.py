@@ -337,6 +337,37 @@ def suggest_tco(req: TcoSuggestIn):
     return {"rows": rows, "total": len(rows)}
 
 
+class TcoTargetSourceIn(BaseModel):
+    dataset_id: str
+    query: str
+
+
+@router.post("/tco/resolve-target-values")
+def resolve_tco_target_values(req: TcoTargetSourceIn, s: Session = Depends(get_session),
+        user=Depends(require_user)):
+    """
+    The allowed-values list a `target_source` currently resolves to — used
+    both to preview one while configuring it, and to populate the dropdown
+    that replaces free-text entry once one is set.
+    """
+    from app.services import auth_service as _auth
+    from app.services import tco_target_service
+
+    try:
+        d = repo.get_dataset(s, req.dataset_id)
+    except repo.NotFound as e:
+        raise HTTPException(404, str(e))
+    scope = d.environment or repo.DEFAULT_ENV
+    perm = repo.dataset_permission(s, d, user, _auth.role_in(s, user, scope), environment=scope)
+    if not repo.can_on_dataset(perm, "read"):
+        raise HTTPException(403, f"Aucun accès en lecture à la table « {d.name} ».")
+    try:
+        values = tco_target_service.resolve_allowed_values(s, req.dataset_id, req.query)
+    except tco_target_service.BadTargetSource as e:
+        raise HTTPException(422, str(e))
+    return {"values": values}
+
+
 class TcoAppendIn(BaseModel):
     artefact_id: str = ""
     name: str = ""
@@ -361,12 +392,12 @@ def append_tco(req: TcoAppendIn, s: Session = Depends(get_session),
     if empty:
         raise HTTPException(422, f"These values have no target label yet: {', '.join(empty[:5])}")
 
-    existing_csv = ""
+    existing_body: dict = {}
     art = None
     if req.artefact_id:
         try:
             art = repo.get_artefact(s, req.artefact_id)
-            existing_csv = (repo.resolve_ref(s, req.artefact_id, None).body or {}).get("csv", "")
+            existing_body = repo.resolve_ref(s, req.artefact_id, None).body or {}
         except repo.NotFound as e:
             raise HTTPException(404, str(e))
         if art.kind != "tco":
@@ -377,6 +408,32 @@ def append_tco(req: TcoAppendIn, s: Session = Depends(get_session),
         _check_env_capability(s, user, art.environment, "tco.append")
     else:
         _check_env_capability(s, user, req.environment or repo.DEFAULT_ENV, "tco.append")
+    existing_csv = existing_body.get("csv", "")
+    target_sources: dict = existing_body.get("target_sources") or {}
+
+    # A type with a target_source constrains what TARGET_LABEL may be to
+    # whatever that source's query actually returns — checked here, not only
+    # offered as a dropdown, so a direct API call cannot slip past it either.
+    if target_sources:
+        from app.services import tco_target_service
+        by_type: dict[str, list[dict]] = {}
+        for r in rows:
+            by_type.setdefault(str(r.get("TYPE", "")), []).append(r)
+        for type_, trows in by_type.items():
+            src = target_sources.get(type_)
+            if not src:
+                continue
+            try:
+                allowed = {v.upper() for v in tco_target_service.resolve_allowed_values(
+                    s, src["dataset_id"], src["query"])}
+            except tco_target_service.BadTargetSource as e:
+                raise HTTPException(422, f"Source de valeurs pour le type « {type_} » illisible : {e}")
+            bad = sorted({r["TARGET_LABEL"] for r in trows
+                         if r["TARGET_LABEL"].strip().upper() not in allowed})
+            if bad:
+                raise HTTPException(
+                    409, f"Pour le type « {type_} », ces libellés cible ne sont pas dans la "
+                        f"liste autorisée : {', '.join(bad[:5])}.")
 
     # The stored CSV's delimiter is whatever it was written with — a comma
     # from the table builder, a semicolon from an older upload — so it is
@@ -397,8 +454,9 @@ def append_tco(req: TcoAppendIn, s: Session = Depends(get_session),
         merged = merged.drop_duplicates(subset=keys, keep="last")
     csv_text = merged.fillna("").to_csv(sep=";", index=False)
 
+    new_body = {"csv": csv_text, **({"target_sources": target_sources} if target_sources else {})}
     if art is not None:
-        ver = repo.add_version(s, art.id, {"csv": csv_text},
+        ver = repo.add_version(s, art.id, new_body,
                                note=f"+{len(rows)} correspondance(s)")
         aid, version = art.id, ver.version_no
     else:

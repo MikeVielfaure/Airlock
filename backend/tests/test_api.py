@@ -783,6 +783,40 @@ def test_tco_uncovered_values_listed():
     assert vals.get("X") == 2
 
 
+def test_tco_field_matching_no_column_warns_instead_of_silently_skipping():
+    # "job" is declared but the file only has "POSTE" — the field silently
+    # matches nothing today unless this warns: no error, no NO_TCO, nothing,
+    # which reads as "fine" when it was never checked at all.
+    sid = _upload("POSTE\ncomptable\n")["session_id"]
+    r = client.post(f"/api/files/{sid}/process", json={
+        "visible_cols": ["job"],
+        "fields": {"job": {"name": ["job"], "tco_replace": True, "tco_type": "job"}},
+    })
+    assert r.status_code == 200, r.text
+    assert any("job" in w for w in r.json()["warnings"])
+
+
+def test_a_field_keyed_differently_from_its_real_column_is_not_silently_dropped():
+    # The field's dict key ("civility") need not equal the file's actual
+    # header ("CIV") — `name` is exactly what resolves that. A prior bug
+    # required the key itself to already be a literal df column, which
+    # silently dropped any field declared under a different key before that
+    # resolution ever ran (no error, no report row — just invisible).
+    sid = _upload("CIV\nM\nF\n")["session_id"]
+    client.post(f"/api/files/{sid}/tco",
+                files={"file": ("tco.csv", io.BytesIO(TCO.encode()), "text/csv")},
+                data={"source_col": "SOURCE_VALUE", "target_col": "TARGET_LABEL"})
+    r = client.post(f"/api/files/{sid}/process", json={
+        "visible_cols": ["civility"],
+        "fields": {"civility": {"name": ["CIV"], "tco_replace": True}},
+    })
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert not body["warnings"]
+    col = body["columns"].index("CIV")
+    assert [row[col] for row in body["data"]] == ["MASCULIN", "FEMININ"]
+
+
 def test_tco_configured_field_with_no_tco_loaded_surfaces_as_uncovered():
     # A field asks for tco_mapping but no TCO was ever attached to this
     # session — every value must show up as NO_TCO, distinctly from a

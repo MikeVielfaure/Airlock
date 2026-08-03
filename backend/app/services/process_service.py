@@ -207,6 +207,16 @@ class ProcessService:
         for field in fields:
             col = self._find_column(df, field, ctx)
             if col is None:
+                # A field silently matching nothing is invisible everywhere
+                # else — no error, no report row, no NO_TCO — which reads as
+                # "fine" when it actually means "never checked". A TCO field
+                # is exactly the case where that silence is most costly, so
+                # it gets a named warning instead of just being skipped.
+                if getattr(field, "tco_replace", False) or field.tco_mapping:
+                    label = (field.name or ["?"])[0]
+                    warnings.append(
+                        f"« {label} » : configuré pour une correspondance TCO, mais aucune "
+                        f"colonne du fichier ne correspond à ce nom — rien n'a été vérifié.")
                 continue
 
             # Remplacement TCO → la valeur source est remplacée par son label
@@ -456,10 +466,15 @@ class ProcessService:
         report_flagged_only: bool = False,
         variables: dict[str, str] | None = None,
     ) -> dict:
-        fields = [
-            field_configs[c] for c in visible_cols
-            if c in field_configs and c in df_edited.columns
-        ]
+        # `c in df_edited.columns` used to be required here too — wrong: `c` is
+        # the field's *key* in visible_cols, not necessarily the file's actual
+        # column name. `_find_column` (called from `apply_field_configs` below)
+        # already resolves a field via its `name` candidates and `mapping`,
+        # independent of that key — requiring the key itself to already be a
+        # literal df column silently dropped any field whose key differs from
+        # the file's header (a manually declared field, one renamed for
+        # display) before that resolution ever ran.
+        fields = [field_configs[c] for c in visible_cols if c in field_configs]
         df_post, validation, warnings = self.apply_field_configs(df_edited.copy(), fields, tco_df, variables=variables)
         clean_mask          = self.compute_clean_mask(df_edited, df_post, fields)
 

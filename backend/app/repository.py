@@ -199,6 +199,8 @@ def create_flow(s: Session, **kw) -> Flow:
         _require_kind(s, kw["tco_artefact_id"], "tco")
     if kw.get("computed_artefact_id"):
         _require_kind(s, kw["computed_artefact_id"], "computed")
+    if kw.get("source_dataset_id"):
+        get_dataset(s, kw["source_dataset_id"])   # NotFound if it doesn't exist
     flow = Flow(**kw)
     s.add(flow)
     s.flush()
@@ -280,6 +282,23 @@ def list_runs(s: Session, flow_id: Optional[str] = None, limit: int = 50) -> lis
     return list(s.scalars(q.order_by(Run.created_at.desc()).limit(limit)))
 
 
+def delete_run(s: Session, run_id: str) -> None:
+    s.delete(get_run(s, run_id))
+
+
+def purge_runs(s: Session, flow_id: str, keep_latest: int = 0) -> int:
+    """Delete a flow's stored runs, most recent first, keeping the
+    `keep_latest` newest. A run's report and export are stored in full
+    (JSON + base64) — this is the only way to reclaim that space, since
+    nothing ever expires them on its own."""
+    rows = list(s.scalars(select(Run).where(Run.flow_id == flow_id)
+                          .order_by(Run.created_at.desc())))
+    to_delete = rows[keep_latest:] if keep_latest > 0 else rows
+    for r in to_delete:
+        s.delete(r)
+    return len(to_delete)
+
+
 # ══════════════════════════════════════════════════════════════════════
 # Datasets (v14)
 # ══════════════════════════════════════════════════════════════════════
@@ -349,6 +368,10 @@ def delete_dataset_permanently(s: Session, dataset_id: str) -> None:
     ds = get_dataset(s, dataset_id)
     if not ds.archived:
         raise Conflict(f"« {ds.name} » doit d'abord être archivée.")
+    blockers = list(s.scalars(select(Flow).where(Flow.source_dataset_id == dataset_id)))
+    if blockers:
+        raise Conflict(f"« {ds.name} » est encore la source du flux "
+                       f"« {blockers[0].name} » : détachez-la d'abord.")
     s.execute(delete(DatasetGrant).where(DatasetGrant.dataset_id == dataset_id))
     s.delete(ds)   # cascades to DatasetRow via the ORM relationship
 

@@ -97,14 +97,20 @@ class PipelineEngine:
     # helpers duplicated from main (kept local so the engine is standalone) ──
     @staticmethod
     def _display_columns(visible_cols, fields, df_post) -> list[str]:
+        # See main.py's twin of this function: `col` is the field's key, not
+        # necessarily the file's actual column name — a field resolved via
+        # `name` (not the key, not a rename) must still show up here.
         out, seen = [], set()
         for col in visible_cols:
             fc = fields.get(col)
             wants_rename = bool(fc and fc.mapping and getattr(fc, "rename_output", True) and fc.mapping != col)
+            found_name = next((n for n in (fc.name or []) if n in df_post.columns), None) if fc else None
             if col in df_post.columns:
                 final = col
             elif wants_rename and fc.mapping in df_post.columns:
                 final = fc.mapping
+            elif found_name:
+                final = found_name
             else:
                 continue
             if final not in seen:
@@ -114,16 +120,24 @@ class PipelineEngine:
 
     def run(
         self,
-        raw: bytes,
+        raw: bytes | None,
         fc: FileConfig,
         tco_bytes: bytes | None = None,
         computed: list[tuple[str, str]] | None = None,
         export_filename: str = "export",
         apply_filters=None,
+        source_df: pd.DataFrame | None = None,
     ) -> EngineResult:
         """
         Execute the full pipeline. `apply_filters(df, fmap)` is injected so the
         engine reuses main._apply_filters (AND/OR grouping) without importing it.
+
+        `source_df`, when given, skips the CSV/XLSX parsing below entirely — a
+        table's rows are already a clean, structured frame, never a file with
+        an encoding or a sheet to guess. `raw` is then ignored. Everything
+        after structure (field matching, TCO, computed, export) is identical
+        either way — a fixed table is just another way rows arrive, not a
+        different pipeline.
         """
         if apply_filters is None:
             apply_filters = lambda df, fmap: df  # noqa: E731
@@ -134,7 +148,9 @@ class PipelineEngine:
         sheet_used: str | None = None
         tables_found = 0
         try:
-            if ftype == "CSV":
+            if source_df is not None:
+                df = source_df
+            elif ftype == "CSV":
                 delim = None if not fc.delimiter else fc.delimiter
                 df, _enc, _delim = self._files.load_csv_raw(raw, fc.encoding or "AUTO", delim)
             else:

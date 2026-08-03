@@ -196,6 +196,126 @@ def test_flow_run_with_errors_stores_report_no_export():
     assert client.get(f"/api/runs/{body['run_id']}/export").status_code == 404
 
 
+def _mk_dataset_with_rows(rows, name="src-ds"):
+    from app.db import session_scope
+    from app import repository as repo
+    import uuid
+    with session_scope() as s:
+        ds = repo.create_dataset(s, f"{name}-{uuid.uuid4().hex[:8]}",
+                                 {"columns": list(rows[0].keys()), "types": {}})
+        repo.insert_rows(s, ds.id, [{"key_hash": None, "data": r} for r in rows])
+        s.commit()
+        return ds.id
+
+
+def _forget_flow_and_dataset(flow_id, dataset_id):
+    """This file's tests never clean up after themselves (unique names avoid
+    collisions) — fine, until a Flow holds a *real* FK reference to a
+    Dataset: another file's fixture wiping all datasets between tests
+    (test_table_rights.py does exactly this) then hits a genuine
+    ForeignKeyViolation on Postgres for a row this file leaked. Only the
+    tests that create that cross-reference need to undo it.
+
+    Explicit bulk deletes, each flushed before the next: no ORM
+    `relationship()` links Flow/Run/Dataset (plain FK columns only), so
+    SQLAlchemy's unit-of-work has no dependency graph to order these
+    deletes correctly on its own — Postgres enforces the real constraint
+    regardless (runs -> flows, flows -> datasets), so the order here must
+    be explicit rather than left to `s.delete(obj)` + a single flush."""
+    from app.db import session_scope
+    from app.db_models import Dataset, DatasetRow, Flow, Run
+    with session_scope() as s:
+        s.query(Run).filter(Run.flow_id == flow_id).delete()
+        s.flush()
+        s.query(Flow).filter(Flow.id == flow_id).delete()
+        s.flush()
+        s.query(DatasetRow).filter(DatasetRow.dataset_id == dataset_id).delete()
+        s.flush()
+        s.query(Dataset).filter(Dataset.id == dataset_id).delete()
+        s.commit()
+
+
+def test_flow_runs_on_its_fixed_source_table_without_a_file():
+    conf, tco = _mk_config("conf-src"), _mk_tco("tco-src")
+    ds_id = _mk_dataset_with_rows([{"SIRET": "12345678901234", "CIVILITE": "M"}])
+    flow = client.post("/api/flows", json={
+        "name": "flux-src", "config_artefact_id": conf["id"], "tco_artefact_id": tco["id"],
+        "source_dataset_id": ds_id}).json()
+    assert flow["source_dataset_id"] == ds_id
+
+    try:
+        r = client.post(f"/api/flows/{flow['id']}/run")   # no file at all
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["ok"] is True
+        run = client.get(f"/api/runs/{body['run_id']}").json()
+        assert run["rows_total"] == 1 and "lignes" in run["source_name"]
+    finally:
+        _forget_flow_and_dataset(flow["id"], ds_id)
+
+
+def test_flow_without_a_fixed_source_still_requires_a_file():
+    conf, tco = _mk_config("conf-nosrc"), _mk_tco("tco-nosrc")
+    flow = client.post("/api/flows", json={
+        "name": "flux-nosrc", "config_artefact_id": conf["id"], "tco_artefact_id": tco["id"]}).json()
+    r = client.post(f"/api/flows/{flow['id']}/run")
+    assert r.status_code == 422
+
+
+def test_hard_delete_refused_while_a_flow_sources_from_it():
+    conf = _mk_config("conf-dssrc")
+    ds_id = _mk_dataset_with_rows([{"A": "1"}])
+    flow = client.post("/api/flows", json={
+        "name": "flux-dssrc", "config_artefact_id": conf["id"], "source_dataset_id": ds_id}).json()
+    try:
+        client.delete(f"/api/datasets/{ds_id}")   # archive: allowed
+        r = client.delete(f"/api/datasets/{ds_id}/permanent")
+        assert r.status_code == 409
+        assert "flux-dssrc" in r.json()["detail"]
+    finally:
+        _forget_flow_and_dataset(flow["id"], ds_id)
+
+
+def test_delete_run_removes_it():
+    conf, tco = _mk_config("conf-del"), _mk_tco("tco-del")
+    flow = client.post("/api/flows", json={
+        "name": "flux-del", "config_artefact_id": conf["id"], "tco_artefact_id": tco["id"]}).json()
+    run_id = _run(flow["id"], GOOD_FILE).json()["run_id"]
+
+    r = client.delete(f"/api/runs/{run_id}")
+    assert r.status_code == 200, r.text
+    assert client.get(f"/api/runs/{run_id}").status_code == 404
+
+
+def test_purge_flow_runs_keeps_latest_n():
+    conf, tco = _mk_config("conf-purge"), _mk_tco("tco-purge")
+    flow = client.post("/api/flows", json={
+        "name": "flux-purge", "config_artefact_id": conf["id"], "tco_artefact_id": tco["id"]}).json()
+    run_ids = [_run(flow["id"], GOOD_FILE).json()["run_id"] for _ in range(3)]
+
+    r = client.delete(f"/api/flows/{flow['id']}/runs", params={"keep_latest": 1})
+    assert r.status_code == 200, r.text
+    assert r.json()["purged"] == 2
+
+    remaining = client.get("/api/runs", params={"flow_id": flow["id"]}).json()
+    assert len(remaining) == 1
+    assert remaining[0]["id"] == run_ids[-1]                 # the most recent survives
+    assert client.get(f"/api/runs/{run_ids[0]}").status_code == 404
+
+
+def test_purge_flow_runs_defaults_to_everything():
+    conf, tco = _mk_config("conf-purge-all"), _mk_tco("tco-purge-all")
+    flow = client.post("/api/flows", json={
+        "name": "flux-purge-all", "config_artefact_id": conf["id"], "tco_artefact_id": tco["id"]}).json()
+    _run(flow["id"], GOOD_FILE)
+    _run(flow["id"], GOOD_FILE)
+
+    r = client.delete(f"/api/flows/{flow['id']}/runs")
+    assert r.status_code == 200, r.text
+    assert r.json()["purged"] == 2
+    assert client.get("/api/runs", params={"flow_id": flow["id"]}).json() == []
+
+
 def test_flow_tracks_latest_and_pin_freezes():
     conf, tco = _mk_config("conf-latest"), _mk_tco("tco-latest")
     tracking = client.post("/api/flows", json={

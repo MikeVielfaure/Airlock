@@ -133,6 +133,12 @@ class Flow(Base):
     computed_artefact_id: Mapped[str | None] = mapped_column(ForeignKey("artefacts.id"), nullable=True)
     computed_version_no: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
+    # A fixed source, resolved fresh on every run — unlike an uploaded file,
+    # a table's *content* is expected to change between runs even though the
+    # flow itself doesn't. NULL keeps today's behaviour: running requires an
+    # uploaded file.
+    source_dataset_id: Mapped[str | None] = mapped_column(ForeignKey("datasets.id"), nullable=True)
+
     default_export_filename: Mapped[str] = mapped_column(String(200), default="export")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)

@@ -267,6 +267,9 @@ export interface FlowInfo {
   computed_artefact_id: string | null;
   computed_version_no: number | null;
   default_export_filename: string;
+  // A fixed source table, read fresh on every run — set means "Lancer"
+  // needs no uploaded file; unset means the file stays required, as before.
+  source_dataset_id: string | null;
 }
 
 export interface RunInfo {

@@ -387,6 +387,9 @@ export const api = {
                            sql_computed?: { name: string; expression: string }[];
                            style_rules?: { column: string; expression: string }[];
                            csv?: string; environment?: string;
+                           // tco: {TYPE: {dataset_id, query}} — restricts TARGET_LABEL
+                           // for that type to what the query resolves, instead of free text.
+                           target_sources?: Record<string, { dataset_id: string; query: string }>;
                            body?: Record<string, unknown> }) =>
     fetch(`${BASE}/artefacts/${kind}`, {
       method: "POST", headers: authHeaders({ "Content-Type": "application/json" }),
@@ -400,11 +403,18 @@ export const api = {
                                computed?: { name: string; expression: string }[];
                                sql_computed?: { name: string; expression: string }[];
                                style_rules?: { column: string; expression: string }[]; csv?: string;
+                               target_sources?: Record<string, { dataset_id: string; query: string }>;
                                body?: Record<string, unknown> }) =>
     fetch(`${BASE}/artefacts/${kind}/${id}/versions`, {
       method: "POST", headers: authHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify(body),
     }).then((r) => json<ArtefactInfo>(r)),
+
+  resolveTcoTargetValues: (datasetId: string, query: string) =>
+    fetch(`${BASE}/environments/tco/resolve-target-values`, {
+      method: "POST", headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ dataset_id: datasetId, query }),
+    }).then((r) => json<{ values: string[] }>(r)),
 
   getConfigYaml: (id: string, no: number) =>
     fetch(`${BASE}/artefacts/config/${id}/versions/${no}/yaml`, { headers: authHeaders() }).then((r) =>
@@ -439,6 +449,7 @@ export const api = {
     config_artefact_id: string; config_version_no?: number | null;
     tco_artefact_id?: string | null; computed_artefact_id?: string | null;
     default_export_filename?: string;
+    source_dataset_id?: string | null;
   }) =>
     fetch(`${BASE}/flows`, {
       method: "POST", headers: authHeaders({ "Content-Type": "application/json" }),
@@ -456,9 +467,11 @@ export const api = {
     fetch(`${BASE}/flows/${id}/permanent`, { method: "DELETE", headers: authHeaders() })
       .then((r) => json<{ deleted: string }>(r)),
 
-  runFlow: (id: string, file: File, exportFilename?: string) => {
+  /** `file` is omitted when the flow has a fixed source table — it is then
+   * read fresh, server-side, with no upload at all. */
+  runFlow: (id: string, file?: File | null, exportFilename?: string) => {
     const fd = new FormData();
-    fd.append("file", file);
+    if (file) fd.append("file", file);
     if (exportFilename) fd.append("export_filename", exportFilename);
     return fetch(`${BASE}/flows/${id}/run`, { method: "POST", body: fd, headers: authHeaders() }).then((r) =>
       json<{ ok: boolean; stage: string; error: string | null; run_id: string;
@@ -473,6 +486,17 @@ export const api = {
 
   getRun: (id: string) =>
     fetch(`${BASE}/runs/${id}`, { headers: authHeaders() }).then((r) => json<RunDetail>(r)),
+
+  deleteRun: (id: string) =>
+    fetch(`${BASE}/runs/${id}`, { method: "DELETE", headers: authHeaders() })
+      .then((r) => json<{ deleted: string }>(r)),
+
+  /** Clear a flow's run history — each run keeps its full report and export,
+   * which adds up over time. `keepLatest` (default 0) keeps that many of
+   * the most recent runs instead of purging everything. */
+  purgeFlowRuns: (flowId: string, keepLatest = 0) =>
+    fetch(`${BASE}/flows/${flowId}/runs?keep_latest=${keepLatest}`,
+         { method: "DELETE", headers: authHeaders() }).then((r) => json<{ purged: number }>(r)),
 
   // ── EDI module (v13) ──────────────────────────────────────────
   ediKb: () => fetch(`${BASE}/edi/kb`, { headers: authHeaders() }).then((r) => json<EdiKb>(r)),

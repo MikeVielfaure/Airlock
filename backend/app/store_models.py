@@ -35,6 +35,10 @@ class ArtefactCreate(BaseModel):
     # [{column, expression}] — how a column should look, not what it holds.
     style_rules: Optional[List[Dict[str, str]]] = None
     csv: Optional[str] = None                  # tco: raw CSV text
+    # tco: {TYPE: {dataset_id, query}} — restricts what TARGET_LABEL may be
+    # when completing a correspondence of that type to values a DuckDB query
+    # against the referenced dataset actually returns, instead of free text.
+    target_sources: Optional[Dict[str, Dict[str, str]]] = None
 
 
 class ArtefactUpdate(BaseModel):
@@ -46,6 +50,7 @@ class ArtefactUpdate(BaseModel):
     sql_computed: Optional[List[Dict[str, str]]] = None
     style_rules: Optional[List[Dict[str, str]]] = None
     csv: Optional[str] = None
+    target_sources: Optional[Dict[str, Dict[str, str]]] = None
 
 
 class VersionInfo(BaseModel):
@@ -94,6 +99,11 @@ class FlowCreate(BaseModel):
     computed_artefact_id: Optional[str] = None
     computed_version_no: Optional[int] = None
     default_export_filename: str = "export"
+    # A fixed source, resolved fresh on every run — like tco/computed, not
+    # pinned data: unlike a file, the table's *content* is expected to change
+    # between runs even though the flow itself doesn't. None means "no fixed
+    # source", so running still requires an uploaded file, same as before.
+    source_dataset_id: Optional[str] = None
 
 
 class FlowUpdate(BaseModel):
@@ -106,6 +116,7 @@ class FlowUpdate(BaseModel):
     computed_artefact_id: Optional[str] = None
     computed_version_no: Optional[int] = None
     default_export_filename: Optional[str] = None
+    source_dataset_id: Optional[str] = None
 
 
 class FlowInfo(BaseModel):
@@ -120,6 +131,7 @@ class FlowInfo(BaseModel):
     computed_artefact_id: Optional[str] = None
     computed_version_no: Optional[int] = None
     default_export_filename: str = "export"
+    source_dataset_id: Optional[str] = None
 
 
 # ── runs ──────────────────────────────────────────────────────────────

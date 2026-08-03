@@ -1050,8 +1050,7 @@ export default function App() {
                     <Home me={me} env={env} profile={profile} shows={shows}
                           go={(k) => setTab(k as Tab)} />
                   )
-                    : tab === "flows" ? <FlowsPanel notify={toast} onOpenReport={loadReport}
-                        sid={sid} columns={effectiveColumns} />
+                    : tab === "flows" ? <FlowsPanel notify={toast} onOpenReport={loadReport} />
                     : tab === "admin" ? <AdminPanel me={me} notify={toast}
                                                      onIdentityChange={() => window.location.reload()} />
                     : tab === "ops" ? <OpsPanel notify={toast} />
@@ -1136,8 +1135,7 @@ export default function App() {
                     onRowsChanged={onRowsChanged} deletedTotal={deletedTotal} />
                 )}
                 {tab === "report" && <ReportPanel result={result} sid={sid} notify={toast} onLoadReport={loadReport} />}
-                {tab === "flows" && <FlowsPanel notify={toast} onOpenReport={loadReport}
-                    sid={sid} columns={effectiveColumns} />}
+                {tab === "flows" && <FlowsPanel notify={toast} onOpenReport={loadReport} />}
                 {tab === "edi" && <EdiPanel notify={toast} onSession={adoptSession} />}
                 {tab === "canvas" && <FlowCanvas notify={toast}
                     onOpenSession={(res) => { adoptSession(res, "flux"); setTab("schema"); }} />}
@@ -1154,7 +1152,8 @@ export default function App() {
                       [c, fields[c]?.tco_type || fields[c]?.mapping || c]))}
                     tcoArtefactId={tco?.artefact_id || profile?.tco_artefact_id || ""}
                     editable={profile?.tco_editable !== false}
-                    notify={toast} />
+                    notify={toast} sid={sid} columns={result?.columns ?? visible}
+                    onTcoFromArtefact={onTcoFromArtefact} />
                 )}
                 {tab === "mapping" && (
                   <MappingPanel notify={toast} sessionId={sid}

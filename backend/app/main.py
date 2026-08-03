@@ -157,15 +157,25 @@ def _display_columns(visible_cols, fields, df_post) -> list[str]:
     Resolve visible columns to the names they actually have in df_post,
     preserving order. A rename may have been skipped (e.g. name collision),
     so we trust df_post rather than assuming the rename happened.
+
+    `col` is the field's *key* in visible_cols — not necessarily the file's
+    actual column name (a manually declared field, or one whose `name` lists
+    alternates like ["job", "Poste"] while staying keyed "job"). Falling back
+    to `fc.name` mirrors `_find_column`'s own resolution, so a field that
+    genuinely got processed under an alternate name is not dropped from the
+    output just because its key never matched anything literally.
     """
     out, seen = [], set()
     for col in visible_cols:
         fc = fields.get(col)
         wants_rename = bool(fc and fc.mapping and getattr(fc, "rename_output", True) and fc.mapping != col)
+        found_name = next((n for n in (fc.name or []) if n in df_post.columns), None) if fc else None
         if col in df_post.columns:
             final = col                                   # rename skipped or none
         elif wants_rename and fc.mapping in df_post.columns:
             final = fc.mapping                            # rename was applied
+        elif found_name:
+            final = found_name                            # keyed differently from the file's header
         else:
             continue
         if final not in seen:

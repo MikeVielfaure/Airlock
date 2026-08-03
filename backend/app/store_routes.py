@@ -122,7 +122,8 @@ def create_artefact(kind: str, req: ArtefactCreate, env: str = "",
         body = store.normalise_body(kind, body=req.body, yaml=req.yaml,
                                     computed=req.computed, csv=req.csv,
                                     sql_computed=req.sql_computed,
-                                    style_rules=req.style_rules)
+                                    style_rules=req.style_rules,
+                                    target_sources=req.target_sources)
     except store.BadBody as e:
         raise HTTPException(422, str(e))
     try:
@@ -313,11 +314,19 @@ def add_version(kind: str, artefact_id: str, req: ArtefactUpdate, env: str = "",
     # obvious way round it open — an operator could rewrite a configuration by
     # appending to it instead of creating one.
     _check_kind_capability(s, user, kind, env or getattr(a, "environment", ""))
+    # A new version that doesn't mention target_sources keeps whatever the
+    # previous one had — "edit the CSV" must not silently drop a constraint
+    # nobody touched. Passing target_sources={} explicitly is how one removes it.
+    target_sources = req.target_sources
+    if kind == "tco" and target_sources is None:
+        prev = repo.resolve_ref(s, artefact_id, None).body or {}
+        target_sources = prev.get("target_sources")
     try:
         body = store.normalise_body(kind, body=req.body, yaml=req.yaml,
                                     computed=req.computed, csv=req.csv,
                                     sql_computed=req.sql_computed,
-                                    style_rules=req.style_rules)
+                                    style_rules=req.style_rules,
+                                    target_sources=target_sources)
     except store.BadBody as e:
         raise HTTPException(422, str(e))
     repo.add_version(s, artefact_id, body, req.note)
@@ -424,7 +433,8 @@ def _flow_info(f) -> FlowInfo:
         config_artefact_id=f.config_artefact_id, config_version_no=f.config_version_no,
         tco_artefact_id=f.tco_artefact_id, tco_version_no=f.tco_version_no,
         computed_artefact_id=f.computed_artefact_id, computed_version_no=f.computed_version_no,
-        default_export_filename=f.default_export_filename)
+        default_export_filename=f.default_export_filename,
+        source_dataset_id=f.source_dataset_id)
 
 
 @router.post("/flows", response_model=FlowInfo, status_code=201)
@@ -495,11 +505,15 @@ def delete_flow_permanently(flow_id: str, s: Session = Depends(get_session)):
 
 
 @router.post("/flows/{flow_id}/run", response_model=PipelineResponse)
-async def run_flow(flow_id: str, file: UploadFile = File(...),
+async def run_flow(flow_id: str, file: UploadFile | None = File(None),
                    export_filename: str = Form(""), s: Session = Depends(get_session)):
-    """Run a stored flow on an uploaded file. Persists a Run and returns the
-    same PipelineResponse shape as /api/pipeline — plus the run id in warnings-free
-    form via the `run_id` field the client can read from the response headers."""
+    """
+    Run a stored flow — on an uploaded file, or, if the flow has a fixed
+    source table and none is uploaded, on that table's rows read fresh right
+    now. Persists a Run and returns the same PipelineResponse shape as
+    /api/pipeline — plus the run id in warnings-free form via the `run_id`
+    field the client can read from the response headers.
+    """
     from app.main import _apply_filters   # reuse the AND/OR filter logic
 
     try:
@@ -507,14 +521,30 @@ async def run_flow(flow_id: str, file: UploadFile = File(...),
     except repo.NotFound as e:
         raise HTTPException(404, str(e))
 
-    raw = await file.read()
-    if not raw:
-        raise HTTPException(400, "Empty file.")
+    raw: bytes | None = None
+    source_df = None
+    source_name = ""
+    if file is not None:
+        raw = await file.read()
+        if not raw:
+            raise HTTPException(400, "Empty file.")
+        source_name = file.filename or ""
+    elif flow.source_dataset_id:
+        from app.services.dataset_frame_service import load_dataset_frame
+        try:
+            ds = repo.get_dataset(s, flow.source_dataset_id)
+            source_df = load_dataset_frame(s, flow.source_dataset_id)
+        except repo.NotFound as e:
+            raise HTTPException(422, f"Source table unresolved: {e}")
+        source_name = f"{ds.name} ({source_df.shape[0]} lignes)"
+    else:
+        raise HTTPException(422, "Ce flux n'a pas de source fixée : fournissez un fichier.")
 
     try:
-        run, res = store.run_flow(s, flow, raw, file.filename or "",
+        run, res = store.run_flow(s, flow, raw, source_name,
                                   apply_filters=_apply_filters,
-                                  export_filename=export_filename or None)
+                                  export_filename=export_filename or None,
+                                  source_df=source_df)
     except repo.NotFound as e:
         raise HTTPException(422, f"Flow inputs unresolved: {e}")
 
@@ -550,6 +580,31 @@ def get_run(run_id: str, s: Session = Depends(get_session)):
         computed_version_id=r.computed_version_id, summary=r.summary or {},
         report=r.report or {}, has_export=bool(r.export_b64),
         export_name=r.export_name, export_format=r.export_format)
+
+
+@router.delete("/runs/{run_id}")
+def delete_run(run_id: str, s: Session = Depends(get_session)):
+    try:
+        repo.delete_run(s, run_id)
+    except repo.NotFound as e:
+        raise HTTPException(404, str(e))
+    commit(s)
+    return {"deleted": run_id}
+
+
+@router.delete("/flows/{flow_id}/runs")
+def purge_flow_runs(flow_id: str, keep_latest: int = 0, s: Session = Depends(get_session)):
+    """Clear a flow's run history — each run keeps its full report and
+    export, which adds up; this is the only way to reclaim that space.
+    `keep_latest` (default 0) keeps that many of the most recent runs
+    instead of purging everything."""
+    try:
+        repo.get_flow(s, flow_id)
+    except repo.NotFound as e:
+        raise HTTPException(404, str(e))
+    n = repo.purge_runs(s, flow_id, keep_latest=max(0, keep_latest))
+    commit(s)
+    return {"purged": n}
 
 
 @router.get("/runs/{run_id}/export")

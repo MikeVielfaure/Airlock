@@ -41,7 +41,8 @@ class BadBody(Exception):
 def normalise_body(kind: str, *, body: Optional[dict], yaml: Optional[str],
                    computed: Optional[list], csv: Optional[str],
                    sql_computed: Optional[list] = None,
-                   style_rules: Optional[list] = None) -> dict:
+                   style_rules: Optional[list] = None,
+                   target_sources: Optional[dict] = None) -> dict:
     if kind == "config":
         if yaml is not None:
             try:
@@ -181,7 +182,22 @@ def normalise_body(kind: str, *, body: Optional[dict], yaml: Optional[str],
             TcoService().load_tco(str(text).encode("utf-8"))
         except Exception as e:  # noqa: BLE001
             raise BadBody(f"Invalid TCO CSV: {e}")
-        return {"csv": str(text)}
+        out = {"csv": str(text)}
+        sources = target_sources if target_sources is not None else (body or {}).get("target_sources")
+        if sources:
+            if not isinstance(sources, dict):
+                raise BadBody("`target_sources` must be a {type: {dataset_id, query}} object.")
+            clean_sources = {}
+            for type_, src in sources.items():
+                if not isinstance(src, dict):
+                    raise BadBody(f"target_sources['{type_}'] must be an object.")
+                dataset_id, query = str(src.get("dataset_id", "")).strip(), str(src.get("query", "")).strip()
+                if not dataset_id or not query:
+                    raise BadBody(f"target_sources['{type_}'] needs both `dataset_id` and `query`.")
+                clean_sources[str(type_)] = {"dataset_id": dataset_id, "query": query}
+            if clean_sources:
+                out["target_sources"] = clean_sources
+        return out
 
     raise BadBody(f"Unknown artefact kind '{kind}'.")
 
@@ -221,16 +237,20 @@ def resolve_flow(s: Session, flow: Flow) -> ResolvedFlow:
     return ResolvedFlow(fc, cver.id, tco_bytes, tco_vid, computed, comp_vid)
 
 
-def run_flow(s: Session, flow: Flow, raw: bytes, source_name: str,
+def run_flow(s: Session, flow: Flow, raw: Optional[bytes], source_name: str,
              apply_filters, engine: Optional[PipelineEngine] = None,
-             export_filename: Optional[str] = None) -> tuple[Run, EngineResult]:
-    """Execute a flow on a file and persist the run (frozen version ids + report)."""
+             export_filename: Optional[str] = None,
+             source_df=None) -> tuple[Run, EngineResult]:
+    """Execute a flow on a file, or on a pre-loaded table (`source_df`), and
+    persist the run (frozen version ids + report). Exactly one of
+    `raw`/`source_df` is given — the caller decides which, `raw` stays first
+    for the existing (and only) call site."""
     engine = engine or PipelineEngine()
     rf = resolve_flow(s, flow)
     res = engine.run(
         raw=raw, fc=rf.fc, tco_bytes=rf.tco_bytes, computed=rf.computed,
         export_filename=export_filename or flow.default_export_filename or "export",
-        apply_filters=apply_filters,
+        apply_filters=apply_filters, source_df=source_df,
     )
     run = _persist_run(
         s, res, flow_id=flow.id, flow_name=flow.name, source_name=source_name,
