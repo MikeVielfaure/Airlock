@@ -80,24 +80,27 @@ docker compose up                 # front :8080, back :8000
 
 ## État réel — à connaître
 
-**Ce qui est solide** : 324 tests verts sur SQLite et PostgreSQL, migrations
-rejouées sur base vierge, build TypeScript strict.
+**Ce qui est solide** : 621 tests backend verts sur SQLite et PostgreSQL,
+migrations rejouées sur base vierge, build TypeScript strict, CI (GitHub
+Actions : backend SQLite + Postgres, build + tests frontend) sur `main`/`dev`
+et les PR. **Les sessions de travail sont persistées** (`app/session.py`,
+`WorkSessionRow` — le blob complet pickled dans `work_sessions`, TTL 1 h) : ce
+n'est plus un `dict` de process, donc `uvicorn --workers 2` ou plusieurs
+réplicas ne perdent plus le travail en cours — ce chantier, longtemps le
+numéro un, est fait. Healthcheck (`/api/health`) et logs structurés
+(`logging_setup.py`, un JSON par ligne) existent aussi déjà.
 
 **Ce qui bloque une mise en production** :
 
-1. **Les sessions de travail vivent dans la mémoire du process**
-   (`app/session.py`, `SessionStore` = un `dict`, TTL 1 h). Conséquence :
-   `uvicorn --workers 2` casse tout, un redémarrage perd le travail en cours,
-   pas d'horizontalité. **C'est le chantier numéro un** et il contredit tout le
-   travail multi-utilisateur.
-2. **Le frontend n'a été exécuté que quelques fois** (v34–v36) et n'a **jamais
-   été utilisé par une vraie personne**. Zéro test frontend.
-3. Pas de limite de taille d'upload, pas de healthcheck, pas de logs
-   structurés, pas de CI.
-4. **La signature des `id_token` OIDC n'est pas vérifiée** — signalé dans le
+1. **Le frontend n'a été exécuté que quelques fois** et n'a **jamais été
+   utilisé par une vraie personne**. Un petit début de tests unitaires existe
+   (`*.test.tsx`/`*.test.ts`, ~9 tests, dans la CI) mais ça ne remplace pas un
+   usage réel.
+2. Pas de limite de taille d'upload.
+3. **La signature des `id_token` OIDC n'est pas vérifiée** — signalé dans le
    code à l'endroit exact. Acceptable seulement parce que le jeton vient du
    *token endpoint* en TLS.
-5. L'interface **mélange français et anglais** (barre latérale et panneaux
+4. L'interface **mélange français et anglais** (barre latérale et panneaux
    anciens en anglais).
 
 ## Regarder le frontend
@@ -129,8 +132,9 @@ qui existe s'applique : les filtres de la vue Data, le mode éditable, le
 rapport, l'export, et la réécriture dans une table. Consulter, corriger et
 réenregistrer sont les trois mêmes gestes que pour un fichier.
 
-Bornes : plafond de lignes (une session vit en mémoire) et cellules chiffrées
-masquées — les déchiffrer là contournerait la liste des détenteurs.
+Bornes : plafond de lignes (le blob d'une session est chargé en entier en
+mémoire pour être traité, persisté ou non) et cellules chiffrées masquées —
+les déchiffrer là contournerait la liste des détenteurs.
 
 Par ordre discuté : source SQL en lecture seule avec aperçu
 limité (paramètres liés, jamais de substitution textuelle), disposition

@@ -11,6 +11,7 @@ vi.mock("../lib/api", () => ({
     listAvailableVariables: vi.fn().mockResolvedValue([]),
     listSources: vi.fn().mockResolvedValue([]),
     listDatasets: vi.fn().mockResolvedValue([]),
+    listFlows: vi.fn().mockResolvedValue([]),
     checkExpression: vi.fn().mockResolvedValue({ ok: true }),
     attachSessionSource: (...args: unknown[]) => attachSessionSource(...args),
   },
