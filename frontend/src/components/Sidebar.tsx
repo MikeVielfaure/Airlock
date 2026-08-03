@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { ArtefactInfo, Presets, TcoResponse } from "../lib/types";
 import { api } from "../lib/api";
 import { IconUpload, IconLayers, IconReset } from "../lib/icons";
+import { Collapsible } from "./Collapsible";
 
 interface Props {
   presets: Presets | null;
@@ -77,9 +78,8 @@ export function Sidebar(p: Props) {
       </div>
 
       {/* SOURCE */}
-      <div className="side-block">
-        <h2 className="side-head"><span className="num">01</span> Source de données</h2>
-
+      <Collapsible className="side-block" defaultOpen
+                   title={<><span className="num">01</span> Source de données</>}>
         <div className="fgrid">
           <div className="frow">
             <label>Format</label>
@@ -162,11 +162,11 @@ export function Sidebar(p: Props) {
             )}
           </div>
         )}
-      </div>
+      </Collapsible>
 
       {/* TCO */}
-      <div className="side-block">
-        <h2 className="side-head"><span className="num">02</span> Table de référence (TCO)</h2>
+      <Collapsible className="side-block" defaultOpen={!!p.tco}
+                   title={<><span className="num">02</span> Table de référence (TCO)</>}>
         <p className="hint">Fichier CSV de paires <span style={{ fontFamily: "var(--mono)" }}>VALEUR_SOURCE / LIBELLÉ_CIBLE</span>.</p>
         <button className="btn block sm" onClick={() => tcoRef.current?.click()}>
           <IconLayers size={15} /> {p.tco ? "Remplacer TCO" : "Charger TCO"}
@@ -190,12 +190,12 @@ export function Sidebar(p: Props) {
             <span><strong>{p.tco.rows}</strong> lignes · <strong>{p.tco.labels.length}</strong> libellés</span>
           </div>
         )}
-      </div>
+      </Collapsible>
 
       {/* YAML IMPORT */}
       {(p.canChooseConfig ?? true) && (
-      <div className="side-block">
-        <h2 className="side-head"><span className="num">03</span> Importer une configuration</h2>
+      <Collapsible className="side-block" defaultOpen={false}
+                   title={<><span className="num">03</span> Importer une configuration</>}>
         <p className="hint">Règles YAML pour pré-remplir le contrôle des colonnes.</p>
         <button className="btn block sm" onClick={() => yamlRef.current?.click()}>
           <IconUpload size={15} /> Importer YAML
@@ -206,7 +206,7 @@ export function Sidebar(p: Props) {
             if (f) p.onImportYaml(await f.text());
             e.target.value = "";
           }} />
-      </div>
+      </Collapsible>
       )}
 
       {p.hasFile && (

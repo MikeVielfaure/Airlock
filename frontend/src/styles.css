@@ -138,6 +138,22 @@ input, select, textarea { font-family: inherit; }
 }
 .hint { color: var(--ink-faint); font-size: 12px; margin: -4px 0 11px; line-height: 1.45; }
 
+/* ---------- collapsible section (sidebar, dense admin tables) ---------- */
+.collapsible-head {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  background: none; border: none; padding: 0; margin: 0 0 11px; cursor: pointer;
+  font-family: var(--display); font-weight: 600; font-size: 12.5px;
+  text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-soft);
+  text-align: left;
+}
+.collapsible-head:hover { color: var(--ink); }
+.collapsible-chevron {
+  display: inline-flex; flex-shrink: 0; font-size: 10px; color: var(--ink-faint);
+  transition: transform .15s;
+}
+.collapsible-chevron.open { transform: rotate(90deg); }
+.collapsible + .collapsible { margin-top: 22px; }
+
 /* dropzone */
 .dropzone {
   border: 1.5px dashed var(--line-strong); border-radius: var(--r);
@@ -1386,6 +1402,8 @@ pre.yaml .k { color: #8db4ff; }
    needs none: it already sits right below the tab strip. */
 .ad-body h4 { margin: 0; font-size: 13px; display: flex; align-items: center; gap: 7px; }
 .ad-body h4:not(:first-child) { margin-top: var(--sp-4); }
+.ad-body .collapsible-head { font-size: 13px; text-transform: none; letter-spacing: normal; margin: 0; color: var(--ink); }
+.ad-body .collapsible:not(:first-child) { margin-top: var(--sp-4); }
 .ad-hint { font-size: 12.5px; line-height: 1.6; color: var(--ink-soft); margin: 0; max-width: 78ch; }
 .ad-note { font-size: 12px; line-height: 1.5; color: var(--ink-faint); margin: 0; }
 .ad-form { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }

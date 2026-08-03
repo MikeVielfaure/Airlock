@@ -6,6 +6,7 @@ import {
 } from "../lib/icons";
 import { InfoTip } from "./InfoTip";
 import { roleLabel } from "../lib/roles";
+import { Collapsible } from "./Collapsible";
 
 interface Props {
   me: AuthUser | null;
@@ -899,28 +900,30 @@ function Overview({ notify }: { notify: Props["notify"] }) {
         </tbody>
       </table>
 
-      <h4><IconCheck size={13} /> Ce que chaque rôle autorise</h4>
-      <p className="ad-note">
-        La politique du serveur, telle quelle : un nom de rôle n'a pas à être
-        interprété.
-      </p>
-      <table className="ad-table">
-        <thead><tr><th>Droit</th>{data.roles.map((r) => <th key={r}>{roleLabel(r)}</th>)}</tr></thead>
-        <tbody>
-          {data.capabilities.map((c) => (
-            <tr key={c.capability}>
-              <td title={c.capability}>{c.label}</td>
-              {data.roles.map((r) => (
-                <td key={r} className="ad-cell">
-                  {(data.policy[r] || []).includes(c.capability)
-                    ? <span className="ad-yes">oui</span>
-                    : <span className="ad-no">—</span>}
-                </td>
-              ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <Collapsible defaultOpen={false}
+                   title={<><IconCheck size={13} /> Ce que chaque rôle autorise <span className="count">{data.capabilities.length}</span></>}>
+        <p className="ad-note">
+          La politique du serveur, telle quelle : un nom de rôle n'a pas à être
+          interprété.
+        </p>
+        <table className="ad-table">
+          <thead><tr><th>Droit</th>{data.roles.map((r) => <th key={r}>{roleLabel(r)}</th>)}</tr></thead>
+          <tbody>
+            {data.capabilities.map((c) => (
+              <tr key={c.capability}>
+                <td title={c.capability}>{c.label}</td>
+                {data.roles.map((r) => (
+                  <td key={r} className="ad-cell">
+                    {(data.policy[r] || []).includes(c.capability)
+                      ? <span className="ad-yes">oui</span>
+                      : <span className="ad-no">—</span>}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </Collapsible>
 
       <h4><IconTable size={13} /> Comptes</h4>
       <table className="ad-table">
