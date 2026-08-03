@@ -263,6 +263,11 @@ textarea { resize: vertical; min-height: 64px; }
 
 .view { flex: 1; min-height: 0; overflow: auto; padding: 22px; }
 
+/* Same breathing room whether a file is loaded (.view) or not (.panel) —
+   these two wrap the exact same tab components (Flux, Admin, Computed…),
+   so a module can't visually change layout depending on session state. */
+.panel { flex: 1; min-height: 0; overflow: auto; padding: 22px; }
+
 /* empty state */
 .empty {
   height: 100%; display: grid; place-content: center; justify-items: center;
@@ -699,11 +704,44 @@ pre.yaml .k { color: #8db4ff; }
 .runko { color: var(--err); font-weight: 600; }
 
 .libgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
-.libcol { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; background: var(--panel, #fff); }
+.libcol {
+  border: 1px solid var(--line); border-top: 3px solid var(--line-strong); border-radius: 10px;
+  padding: 10px 12px; background: var(--panel); display: flex; flex-direction: column;
+}
+/* one accent per kind, reusing the same semantic tokens everywhere else —
+   not new colors invented just for this list. */
+.libcol.kind-config   { border-top-color: var(--accent); }
+.libcol.kind-computed { border-top-color: var(--ok); }
+.libcol.kind-tco      { border-top-color: var(--warn); }
 .libcol-h { font-size: 12px; font-weight: 700; text-transform: capitalize; margin-bottom: 8px; color: var(--ink-soft); }
+.libcol-list { max-height: 260px; overflow-y: auto; }
 .libitem { display: flex; align-items: center; justify-content: space-between; gap: 8px;
   padding: 5px 0; border-bottom: 1px dashed var(--line); font-size: 13px; }
 .libitem:last-child { border-bottom: none; }
+.libitem-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.libitem-date { font-size: 11px; color: var(--ink-faint); white-space: nowrap; flex-shrink: 0; }
+
+/* ---------- search box: one look, reused wherever a list can grow ---------- */
+.search-input {
+  display: flex; align-items: center; gap: 6px; padding: 0 9px; max-width: 260px;
+  border: 1px solid var(--line-strong); border-radius: var(--r-sm);
+  background: var(--panel); color: var(--ink-faint);
+  transition: border-color .12s, box-shadow .12s;
+}
+.search-input input { border: none; background: none; padding: 7px 0; }
+.search-input input:focus { box-shadow: none; }
+.search-input:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-tint); }
+.search-clear {
+  border: none; background: none; color: var(--ink-faint); cursor: pointer;
+  font-size: 15px; line-height: 1; padding: 2px 4px; border-radius: 4px; flex-shrink: 0;
+}
+.search-clear:hover { color: var(--err); background: var(--err-bg); }
+
+/* a table that scrolls internally past a comfortable height, instead of
+   pushing everything below it further down the page. */
+.tablescroll { max-height: 380px; overflow-y: auto; border: 1px solid var(--line); border-radius: var(--r); }
+.tablescroll table { margin: 0; }
+.tablescroll thead th { position: sticky; top: 0; background: var(--panel); z-index: 1; }
 
 /* ═══════════════════════════════════════════════════════════════
    EDI module (v13)

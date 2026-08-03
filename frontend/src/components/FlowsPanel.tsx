@@ -2,6 +2,11 @@ import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../lib/api";
 import type { ArtefactInfo, DatasetInfo, FlowInfo, ReportRow, RunInfo } from "../lib/types";
 import { IconLayers, IconPlay, IconReset } from "../lib/icons";
+import { SearchInput, matchesSearch } from "./SearchInput";
+
+const KIND_LABEL: Record<string, string> = { config: "Configs", computed: "Calculs", tco: "TCO" };
+const fmtShortDate = (iso: string) => new Date(iso).toLocaleDateString(undefined,
+  { day: "2-digit", month: "2-digit", year: "2-digit" });
 
 interface Props {
   notify: (msg: string, kind?: "ok" | "err" | "info") => void;
@@ -43,6 +48,9 @@ export function FlowsPanel({ notify, onOpenReport }: Props) {
   const [datasets, setDatasets] = useState<DatasetInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [showArchivedFlows, setShowArchivedFlows] = useState(false);
+  const [libSearch, setLibSearch] = useState("");
+  const [flowSearch, setFlowSearch] = useState("");
+  const [runSearch, setRunSearch] = useState("");
 
   // flow composer
   const [fName, setFName] = useState("");
@@ -230,6 +238,9 @@ export function FlowsPanel({ notify, onOpenReport }: Props) {
           </div>
 
           {/* ── flows list ── */}
+          <div className="frow" style={{ maxWidth: 260 }}>
+            <SearchInput value={flowSearch} onChange={setFlowSearch} placeholder="Rechercher un flux..." />
+          </div>
           <label className="csub" style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
             <input type="checkbox" checked={showArchivedFlows}
                    onChange={(e) => setShowArchivedFlows(e.target.checked)} />
@@ -238,10 +249,11 @@ export function FlowsPanel({ notify, onOpenReport }: Props) {
           {flows.length === 0 ? (
             <div className="banner"><span>Aucun flux pour l'instant. Enregistrez une config dans l'onglet Yaml, puis composez-en un ci-dessus.</span></div>
           ) : (
+            <div className="tablescroll">
             <table className="libtable">
               <thead><tr><th>Flux</th><th>Config</th><th>TCO</th><th>Computed</th><th>Source</th><th>Versions</th><th></th></tr></thead>
               <tbody>
-                {flows.map((f) => (
+                {flows.filter((f) => matchesSearch(f.name, flowSearch)).map((f) => (
                   <tr key={f.id}>
                     <td><strong>{f.name}</strong>{f.archived ? " · archivé" : ""}<div className="csub mono">{f.id}</div></td>
                     <td>{nameOf(configs, f.config_artefact_id)}</td>
@@ -282,6 +294,7 @@ export function FlowsPanel({ notify, onOpenReport }: Props) {
                 ))}
               </tbody>
             </table>
+            </div>
           )}
 
           {/* ── runs ── */}
@@ -289,13 +302,17 @@ export function FlowsPanel({ notify, onOpenReport }: Props) {
             <h3>Exécutions enregistrées</h3>
             <span className="sub">Chaque exécution de flux est conservée avec les versions figées des artefacts utilisés.</span>
           </div>
+          <div className="frow" style={{ maxWidth: 260 }}>
+            <SearchInput value={runSearch} onChange={setRunSearch} placeholder="Rechercher par flux ou fichier..." />
+          </div>
           {runs.length === 0 ? (
             <div className="banner"><span>Aucune exécution pour l'instant.</span></div>
           ) : (
+            <div className="tablescroll">
             <table className="libtable">
               <thead><tr><th>Date</th><th>Flux</th><th>Fichier</th><th>Résultat</th><th>Lignes</th><th></th></tr></thead>
               <tbody>
-                {runs.map((r) => (
+                {runs.filter((r) => matchesSearch(r.flow_name, runSearch) || matchesSearch(r.source_name, runSearch)).map((r) => (
                   <Fragment key={r.id}>
                     <tr>
                       <td>{fmtDate(r.created_at)}</td>
@@ -361,6 +378,7 @@ export function FlowsPanel({ notify, onOpenReport }: Props) {
                 ))}
               </tbody>
             </table>
+            </div>
           )}
 
           {/* ── library inventory + tco upload ── */}
@@ -368,19 +386,28 @@ export function FlowsPanel({ notify, onOpenReport }: Props) {
             <h3>Bibliothèque</h3>
             <span className="sub">Les configs sont enregistrées depuis l'onglet Yaml, les ensembles calculés depuis l'onglet Computed, les TCO depuis l'onglet Correspondances.</span>
           </div>
+          <div className="frow" style={{ maxWidth: 260, marginBottom: 10 }}>
+            <SearchInput value={libSearch} onChange={setLibSearch} placeholder="Rechercher dans la bibliothèque..." />
+          </div>
           <div className="libgrid">
             {(["config", "computed", "tco"] as const).map((kind) => {
-              const list = kind === "config" ? configs : kind === "computed" ? computeds : tcos;
+              const all = kind === "config" ? configs : kind === "computed" ? computeds : tcos;
+              const list = all.filter((a) => matchesSearch(a.name, libSearch));
               return (
-                <div key={kind} className="libcol">
-                  <div className="libcol-h">{kind} <span className="csub">({list.length})</span></div>
-                  {list.length === 0 && <div className="csub">vide</div>}
-                  {list.map((a) => (
-                    <div key={a.id} className="libitem">
-                      <span>{a.name} <span className="csub">v{a.latest_version_no}</span></span>
-                      <button className="btn sm" title="Archiver" onClick={() => del(kind, a.id)}>×</button>
-                    </div>
-                  ))}
+                <div key={kind} className={`libcol kind-${kind}`}>
+                  <div className="libcol-h">{KIND_LABEL[kind]} <span className="csub">({list.length}{libSearch ? `/${all.length}` : ""})</span></div>
+                  {list.length === 0 && <div className="csub">{all.length === 0 ? "vide" : "aucun résultat"}</div>}
+                  <div className="libcol-list">
+                    {list.map((a) => (
+                      <div key={a.id} className="libitem">
+                        <span className="libitem-name">{a.name} <span className="csub">v{a.latest_version_no}</span></span>
+                        <span className="libitem-date" title={`Modifié le ${new Date(a.updated_at).toLocaleString()}`}>
+                          {fmtShortDate(a.updated_at)}
+                        </span>
+                        <button className="btn sm" title="Archiver" onClick={() => del(kind, a.id)}>×</button>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               );
             })}

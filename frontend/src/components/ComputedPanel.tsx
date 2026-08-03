@@ -4,6 +4,10 @@ import { api } from "../lib/api";
 import type { ArtefactInfo } from "../lib/types";
 import { IconCode, IconReset, IconUpload, IconDownload } from "../lib/icons";
 import { InfoTip } from "./InfoTip";
+import { SearchInput, matchesSearch } from "./SearchInput";
+
+const fmtShortDate = (iso: string) => new Date(iso).toLocaleDateString(undefined,
+  { day: "2-digit", month: "2-digit", year: "2-digit" });
 
 interface Props {
   sid: string | null;
@@ -256,6 +260,7 @@ export function ComputedPanel({ sid, tabs, columns, computed, setComputed, sqlCo
                                styleErrors, notify }: Props) {
   const [tab, setTab] = useState<SubTab>("columns");
   const [lib, setLib] = useState<ArtefactInfo[]>([]);
+  const [libSearch, setLibSearch] = useState("");
   const [saveName, setSaveName] = useState("");
   const [saveTarget, setSaveTarget] = useState("");
   const refreshLib = useCallback(() => { api.listArtefacts("computed").then(setLib).catch(() => {}); }, []);
@@ -870,14 +875,24 @@ export function ComputedPanel({ sid, tabs, columns, computed, setComputed, sqlCo
             {lib.length === 0 ? (
               <div className="banner"><span>Rien dans la bibliothèque pour l'instant.</span></div>
             ) : (
-              <div className="libcol" style={{ marginTop: 6 }}>
-                {lib.map((a) => (
-                  <div key={a.id} className="libitem">
-                    <span>{a.name} <span className="csub">v{a.latest_version_no}</span></span>
-                    <button className="btn sm" onClick={() => loadFromLibrary(a)}>Charger</button>
+              <>
+                <div className="frow" style={{ maxWidth: 260, marginTop: 6 }}>
+                  <SearchInput value={libSearch} onChange={setLibSearch} placeholder="Rechercher un ensemble..." />
+                </div>
+                <div className="libcol kind-computed">
+                  <div className="libcol-list">
+                    {lib.filter((a) => matchesSearch(a.name, libSearch)).map((a) => (
+                      <div key={a.id} className="libitem">
+                        <span className="libitem-name">{a.name} <span className="csub">v{a.latest_version_no}</span></span>
+                        <span className="libitem-date" title={`Modifié le ${new Date(a.updated_at).toLocaleString()}`}>
+                          {fmtShortDate(a.updated_at)}
+                        </span>
+                        <button className="btn sm" onClick={() => loadFromLibrary(a)}>Charger</button>
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
+                </div>
+              </>
             )}
           </div>
         )}

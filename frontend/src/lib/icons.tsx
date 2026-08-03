@@ -56,3 +56,6 @@ export const IconInfo = ({ size, className }: P): JSX.Element => (
 export const IconMinimize = ({ size, className }: P): JSX.Element => (
   <svg {...s(size)} className={className}><path d="M9 3v3a2 2 0 0 1-2 2H4M15 3v3a2 2 0 0 0 2 2h3M21 15h-3a2 2 0 0 0-2 2v3M3 15h3a2 2 0 0 1 2 2v3" {...stroke} /></svg>
 );
+export const IconSearch = ({ size, className }: P): JSX.Element => (
+  <svg {...s(size)} className={className}><circle cx="11" cy="11" r="7" {...stroke} /><path d="m21 21-4.3-4.3" {...stroke} /></svg>
+);
