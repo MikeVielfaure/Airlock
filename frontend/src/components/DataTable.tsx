@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties } from "react";
+import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent } from "react";
 import type { CellStatus, FieldType, ProcessResponse, RowsMutationResponse, TablePreview } from "../lib/types";
 import { api } from "../lib/api";
 import { IconMaximize, IconMinimize, IconPlay, IconReset, IconSave } from "../lib/icons";
@@ -164,12 +164,26 @@ export function DataTable(props: Props) {
   // ── editable mode ─────────────────────────────────────────
   const [editMode, setEditMode] = useState(false);
   const [editing, setEditing] = useState<{ idx: number; ci: number; val: string } | null>(null);
+  // Enter/Escape/Tab already decide whether to commit — but removing the
+  // input from the DOM (setEditing(null)) fires a native blur on it too, and
+  // that handler exists to save on click-away. Without this flag, Escape's
+  // "cancel" still re-submitted the unchanged value through onBlur.
+  const skipNextBlur = useRef(false);
   // Optimistic overlay of saved edits, keyed `${dfIndex}:${displayedCol}`.
   // Cleared when a new run or a new preview arrives (the server then owns the values).
   const [pending, setPending] = useState<Record<string, string>>({});
-  useEffect(() => { setPending({}); setEditing(null); }, [result, preview]);
+  useEffect(() => { setPending({}); setEditing(null); setFocus(null); }, [result, preview]);
   const pendingCount = Object.keys(pending).length;
   const editableCol = (name: string) => !computed.has(name) && srcOf[name] !== undefined;
+
+  // ── keyboard grid navigation ───────────────────────────────
+  // `r` indexes into the currently rendered `rows` array (post filter/sort/
+  // page), `c` into `colIdx` (post drag-reorder) — both are display-order
+  // positions, not dataframe indices, so Tab/arrows follow what's on screen.
+  // (moveFocus/tabMove/onGridKeyDown are defined further down, once `rows`
+  // and `colIdx` exist — they close over this state.)
+  const [focus, setFocus] = useState<{ r: number; c: number } | null>(null);
+  const clampN = (v: number, max: number) => Math.max(0, Math.min(max, v));
 
   const commitEdit = async (idx: number, ci: number, val: string) => {
     const col = columns[ci];
@@ -285,6 +299,63 @@ export function DataTable(props: Props) {
     }
     return previewIdx.map((oi) => ({ cells: data[oi], num: oi + 1, idx: preview?.index?.[oi] ?? oi }));
   }, [serverMode, srv, page, pageSize, previewIdx, data, preview]);
+
+  const moveFocus = (dr: number, dc: number) => setFocus((f) => {
+    if (!f) return f;
+    return { r: clampN(f.r + dr, rows.length - 1), c: clampN(f.c + dc, colIdx.length - 1) };
+  });
+  const tabMove = (dir: 1 | -1) => setFocus((f) => {
+    if (!f) return f;
+    let { r, c } = f;
+    c += dir;
+    if (c >= colIdx.length) { c = 0; r = clampN(r + 1, rows.length - 1); }
+    else if (c < 0) { c = colIdx.length - 1; r = clampN(r - 1, rows.length - 1); }
+    return { r, c };
+  });
+  // Focus can point past the row/column count after a filter/sort shrinks
+  // the grid — pull it back in rather than pointing at nothing.
+  useEffect(() => {
+    setFocus((f) => {
+      if (!f) return f;
+      if (!rows.length || !colIdx.length) return null;
+      return { r: clampN(f.r, rows.length - 1), c: clampN(f.c, colIdx.length - 1) };
+    });
+  }, [rows.length, colIdx.length]);
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!focus || !el) return;
+    const rowTop = focus.r * ROW_H, rowBottom = rowTop + ROW_H;
+    if (rowTop < el.scrollTop) el.scrollTop = rowTop;
+    else if (rowBottom > el.scrollTop + viewH) el.scrollTop = rowBottom - viewH;
+    const rownumW = 64;
+    const colLeft = rownumW + focus.c * COL_W, colRight = colLeft + COL_W;
+    if (colLeft < el.scrollLeft + rownumW) el.scrollLeft = colLeft - rownumW;
+    else if (colRight > el.scrollLeft + el.clientWidth) el.scrollLeft = colRight - el.clientWidth;
+  }, [focus, viewH]);
+  const cellValueOf = (row: { idx: number; cells: string[] }, ci: number) => {
+    const key = `${row.idx}:${columns[ci]}`;
+    return key in pending ? pending[key] : row.cells[ci] ?? "";
+  };
+  const onGridKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (editing || !focus) return;
+    const row = rows[focus.r]; const ci = colIdx[focus.c]; const name = ci !== undefined ? columns[ci] : undefined;
+    if (e.key === "ArrowDown") { e.preventDefault(); moveFocus(1, 0); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); moveFocus(-1, 0); }
+    else if (e.key === "ArrowRight") { e.preventDefault(); moveFocus(0, 1); }
+    else if (e.key === "ArrowLeft") { e.preventDefault(); moveFocus(0, -1); }
+    else if (e.key === "Tab") { e.preventDefault(); tabMove(e.shiftKey ? -1 : 1); }
+    else if (e.key === "Enter") {
+      e.preventDefault();
+      if (editMode && row && row.idx >= 0 && name && editableCol(name)) {
+        setEditing({ idx: row.idx, ci, val: cellValueOf(row, ci) });
+      } else moveFocus(1, 0);
+    } else if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      if (editMode && row && row.idx >= 0 && name && editableCol(name)) {
+        e.preventDefault();
+        setEditing({ idx: row.idx, ci, val: e.key });
+      }
+    }
+  };
 
   const total = rows.length;
   const start = Math.max(0, Math.floor(scrollTop / ROW_H) - OVERSCAN);
@@ -486,7 +557,7 @@ export function DataTable(props: Props) {
           {pendingCount > 0 ? (
             <span><strong>{pendingCount}</strong> cellule{pendingCount > 1 ? "s" : ""} modifiée{pendingCount > 1 ? "s" : ""} — les couleurs ci-dessous sont périmées tant que vous ne relancez pas la validation.</span>
           ) : (
-            <span>Mode édition : cliquez une cellule, saisissez la correction, <kbd>Entrée</kbd> pour enregistrer · <kbd>Échap</kbd> pour annuler. Les colonnes calculées sont en lecture seule.</span>
+            <span>Mode édition : cliquez une cellule (ou déplacez-vous avec les flèches / <kbd>Tab</kbd>), tapez pour remplacer, <kbd>Entrée</kbd> pour enregistrer et descendre · <kbd>Échap</kbd> pour annuler. Les colonnes calculées sont en lecture seule.</span>
           )}
           {pendingCount > 0 && (
             <span className="editbar-actions">
@@ -511,7 +582,8 @@ export function DataTable(props: Props) {
       {columns.length === 0 ? (
         <div className="banner"><span>Aucune colonne à afficher. Activez des colonnes dans l'onglet Schéma.</span></div>
       ) : (
-        <div className="vtable" ref={scrollRef} onScroll={(e) => setScrollTop((e.target as HTMLDivElement).scrollTop)}>
+        <div className="vtable" ref={scrollRef} tabIndex={0} onKeyDown={onGridKeyDown}
+          onScroll={(e) => setScrollTop((e.target as HTMLDivElement).scrollTop)}>
           <div className="vthead" style={{ gridTemplateColumns: gridCols }}>
             <div className="vth rownum">
               {anyFilter && <button className="hclear" title="Réinitialiser les filtres" onClick={() => setFilters({})}>×</button>}
@@ -554,7 +626,7 @@ export function DataTable(props: Props) {
                   </span>
                 ) : row.num}
               </div>
-              {colIdx.map((ci) => {
+              {colIdx.map((ci, c) => {
                 const name = columns[ci];
                 const key = `${row.idx}:${name}`;
                 const edited = key in pending;
@@ -562,6 +634,8 @@ export function DataTable(props: Props) {
                 const st: CellStatus | undefined = edited ? "EDITED" : row.status?.[ci];
                 const sty = edited ? undefined : row.styles?.[ci];
                 const canEdit = editMode && row.idx >= 0 && editableCol(name);
+                const r = start + k;
+                const isFocused = focus?.r === r && focus?.c === c;
                 const isEditing = editing && editing.idx === row.idx && editing.ci === ci;
                 if (isEditing) {
                   return (
@@ -569,26 +643,36 @@ export function DataTable(props: Props) {
                       <input className="celledit" autoFocus value={editing.val}
                         onChange={(e) => setEditing({ ...editing, val: e.target.value })}
                         onKeyDown={(e) => {
-                          if (e.key === "Enter") commitEdit(editing.idx, ci, editing.val);
-                          else if (e.key === "Escape") setEditing(null);
+                          // Refocus the grid container after a keyboard-driven exit (not on
+                          // blur, which fires because focus is already moving elsewhere) so
+                          // arrow/Tab navigation keeps working on the next keypress — the
+                          // input's autoFocus otherwise leaves nothing focused once it unmounts.
+                          if (e.key === "Enter") { skipNextBlur.current = true; commitEdit(editing.idx, ci, editing.val); moveFocus(1, 0); scrollRef.current?.focus(); }
+                          else if (e.key === "Escape") { skipNextBlur.current = true; setEditing(null); scrollRef.current?.focus(); }
+                          else if (e.key === "Tab") { e.preventDefault(); skipNextBlur.current = true; commitEdit(editing.idx, ci, editing.val); tabMove(e.shiftKey ? -1 : 1); scrollRef.current?.focus(); }
                         }}
                         onPaste={(e) => {
                           const text = e.clipboardData.getData("text");
                           const grid = parsePastedTable(text);
                           if (grid.length > 1 || grid[0]?.length > 1) {
                             e.preventDefault();
+                            skipNextBlur.current = true;
                             setEditing(null);
                             pasteIntoTable(ci, text);
                           }
                         }}
-                        onBlur={() => commitEdit(editing.idx, ci, editing.val)} />
+                        onBlur={() => {
+                          if (skipNextBlur.current) { skipNextBlur.current = false; return; }
+                          commitEdit(editing.idx, ci, editing.val);
+                        }} />
                     </div>
                   );
                 }
                 return (
-                  <div key={ci} className={`vtd ${st ? `cell-${st}` : ""} ${canEdit ? "editable" : ""}`} title={canEdit ? `${cell || "(vide)"} — cliquer pour modifier` : cell}
+                  <div key={ci} className={`vtd ${st ? `cell-${st}` : ""} ${canEdit ? "editable" : ""} ${isFocused ? "focused" : ""}`}
+                    title={canEdit ? `${cell || "(vide)"} — cliquer pour modifier` : cell}
                     style={parseStyleToken(sty)}
-                    onClick={canEdit ? () => setEditing({ idx: row.idx, ci, val: cell }) : undefined}>
+                    onClick={() => { setFocus({ r, c }); scrollRef.current?.focus(); if (canEdit) setEditing({ idx: row.idx, ci, val: cell }); }}>
                     {cell === "" ? <span className="nullv">null</span> : cell}
                   </div>
                 );
