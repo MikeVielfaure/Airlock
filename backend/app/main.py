@@ -1439,7 +1439,6 @@ def process(sid: str, req: ProcessRequest, env: str = "",
             sess.last_clean_mask = clean_mask
             sess.last_computed = computed_names
             sess.last_styles = result.get("styles", {})               # for paginated row fetches
-            sess.last_report = result["report"]                       # full report for /report
             sess.identifier_fields = id_fields
 
             # ── confidentiality ──────────────────────────────────────────
@@ -1452,6 +1451,25 @@ def process(sid: str, req: ProcessRequest, env: str = "",
             derived = {c.name: c.expression for c in (req.computed or [])}
             sensitivity = _crypto.propagate(declared, derived)
             sess.sensitivity = sensitivity
+
+            # Mask the report DataFrame itself, once, before it is cached —
+            # `sess.last_report` (read by the /report download route) and the
+            # `report` embedded in this very response both derive from it, so
+            # this is the one place that protects both. Found live: the report
+            # also carries the raw value inside `resultat`'s free-text message
+            # (e.g. `check_type KO — "abc"`), not only in its own dedicated
+            # columns — masking only valeur_originale/valeur_finale would have
+            # left it leaking through the message, the exact "value comes back
+            # through a side channel" failure mode this project has hit before.
+            report_df = result["report"]
+            if sensitivity and len(report_df):
+                sens_rows = report_df["colonne"].isin(sensitivity)
+                if sens_rows.any():
+                    report_df = report_df.copy()
+                    for _col in ("valeur_originale", "valeur_finale", "resultat"):
+                        report_df.loc[sens_rows, _col] = _crypto.MASK
+                    result["report"] = report_df
+            sess.last_report = report_df                              # full report for /report
             # A key that no longer exists makes the configuration unusable: better a
             # clear refusal than a run quietly producing masked nonsense.
             missing = _missing_keys(sensitivity)
@@ -1509,19 +1527,14 @@ def process(sid: str, req: ProcessRequest, env: str = "",
         except Exception as e:  # noqa: BLE001 — surface a clean error instead of a raw 500
             raise HTTPException(422, f"Processing failed: {e}")
 
-        # Mask before the response is built, not in each consumer: the screen, the
-        # report and anything reading this payload get the same protected view.
+        # Mask the grid preview before the response is built — the report is
+        # already masked above, on the DataFrame itself, before `report_rows`
+        # was built from it.
         if sensitivity:
             _sens_idx = [i for i, c in enumerate(cols) if c in sensitivity]
             if _sens_idx:
                 data = [[_crypto.MASK if (i in _sens_idx and v) else v
                          for i, v in enumerate(row)] for row in data]
-                for r in report_rows:
-                    if getattr(r, "colonne", None) in sensitivity:
-                        if getattr(r, "valeur_finale", None):
-                            r.valeur_finale = _crypto.MASK
-                        if getattr(r, "valeur_source", None):
-                            r.valeur_source = _crypto.MASK
 
         return ProcessResponse(
             columns=cols,
@@ -1616,6 +1629,19 @@ def get_rows(
                 row_styles.append(str(tok.get(idx, "")) if tok is not None else "")
             status.append(row_status)
             styles.append(row_styles)
+
+        # Same masking as /process — this route is the grid's actual data
+        # source once a table is validated (`serverMode` in DataTable.tsx is
+        # simply `!!result`), so a mask applied only in /process's own
+        # response body never reaches the screen at all. Found live: the
+        # confidentiality UI's own end-to-end QA was the first time any
+        # column was ever marked sensitive and then actually viewed through
+        # a browser, past this route rather than /process's response.
+        if sess.sensitivity:
+            _sens_idx = [i for i, c in enumerate(cols) if c in sess.sensitivity]
+            if _sens_idx:
+                data = [[_crypto.MASK if (i in _sens_idx and v) else v
+                         for i, v in enumerate(row)] for row in data]
 
         return RowsResponse(
             columns=cols, data=data, status=status, styles=styles,
@@ -1762,6 +1788,17 @@ def export_table(
             except json.JSONDecodeError:
                 fmap = {}
             out_df = _apply_filters(out_df, fmap or {})
+
+        # A confidential column masked on screen must not still leave in the
+        # clear the moment it's written to a file — the export is exactly
+        # the kind of "next exit" crypto_service.py's own docstring warns
+        # never to forget. Found live: never wired to sensitivity at all
+        # before this.
+        if sess.sensitivity:
+            out_df = out_df.copy()
+            for col in out_df.columns:
+                if col in sess.sensitivity:
+                    out_df[col] = out_df[col].map(_crypto.mask_value)
 
         safe = "".join(ch for ch in filename if ch.isalnum() or ch in (" ", "-", "_")).strip() or "export"
 

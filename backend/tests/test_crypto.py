@@ -92,6 +92,71 @@ def test_confidential_values_are_masked_in_what_is_displayed():
     assert "3000" not in str(r["data"])
 
 
+# ── found live, while building the confidentiality UI: the mask applied to
+# the initial /process response was never enough on its own, because the
+# grid, the report and the export each read from a different place. ────────
+
+def test_the_report_masks_confidential_values_including_the_free_text_message():
+    """
+    The report's dedicated columns aren't the only carrier: `resultat` is a
+    free-text message and can embed the raw value too (e.g. `check_type KO —
+    "abc"`). The masking bug this closes used `getattr(dict, "colonne")` on a
+    plain dict (always None — dicts aren't attribute-accessed) and referenced
+    a field, `valeur_source`, that doesn't even exist on `ReportRow` — so the
+    report was, in practice, never masked at all.
+    """
+    sid = _upload("MATRICULE;SALAIRE\nM1; 3000 \nM2;abc\n")
+    r = client.post(f"/api/files/{sid}/process", json={
+        "visible_cols": ["MATRICULE", "SALAIRE"],
+        "fields": {"MATRICULE": {"name": ["MATRICULE"], "type": "string"},
+                   "SALAIRE": {"name": ["SALAIRE"], "type": "integer",
+                               "sensitive": "paie", "check_type": True}}})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    report = [row for row in body["report"] if row["colonne"] == "SALAIRE"]
+    assert len(report) == 2
+    for row in report:
+        assert row["valeur_originale"] == cs.MASK
+        assert row["valeur_finale"] == cs.MASK
+        assert row["resultat"] == cs.MASK
+    assert "3000" not in r.text and "abc" not in r.text
+
+
+def test_paginated_rows_are_masked_like_the_initial_preview():
+    """The grid's actual data source once a table is validated is this route
+    (`serverMode` in DataTable.tsx is simply `!!result`), not the /process
+    response body — a mask applied only there never reaches the screen."""
+    sid = _upload()
+    r = client.post(f"/api/files/{sid}/process", json={
+        "visible_cols": ["MATRICULE", "SALAIRE"],
+        "fields": {"MATRICULE": {"name": ["MATRICULE"], "type": "string"},
+                   "SALAIRE": {"name": ["SALAIRE"], "type": "integer",
+                               "sensitive": "paie"}}})
+    assert r.status_code == 200, r.text
+    rows = client.get(f"/api/files/{sid}/rows?offset=0&limit=100")
+    assert rows.status_code == 200, rows.text
+    body = rows.json()
+    col = body["columns"].index("SALAIRE")
+    assert all(row[col] == cs.MASK for row in body["data"])
+    assert "3000" not in rows.text and "4500" not in rows.text
+
+
+def test_export_masks_confidential_columns():
+    """A value masked on screen must not still leave in the clear the moment
+    it's written to a file — export was never wired to sensitivity at all."""
+    sid = _upload()
+    r = client.post(f"/api/files/{sid}/process", json={
+        "visible_cols": ["MATRICULE", "SALAIRE"],
+        "fields": {"MATRICULE": {"name": ["MATRICULE"], "type": "string"},
+                   "SALAIRE": {"name": ["SALAIRE"], "type": "integer",
+                               "sensitive": "paie"}}})
+    assert r.status_code == 200, r.text
+    out = client.get(f"/api/files/{sid}/export?fmt=csv&filename=t&encoding=utf-8&delimiter=%3B")
+    assert out.status_code == 200, out.text
+    assert cs.MASK in out.text
+    assert "3000" not in out.text and "4500" not in out.text
+
+
 def test_the_unmapped_values_list_stops_quoting_confidential_data():
     """That list prints values verbatim — on a confidential column it would hand
     them over in the clear, which is exactly the leak being closed."""
