@@ -296,6 +296,14 @@ class SetSourceKey(BaseModel):
     source_column: str
 
 
+class DiffRequest(BaseModel):
+    """Compare this session against an attached source on a key — one or
+    more columns forming the row's identity on both sides. A composite key
+    is allowed here, unlike the source-key lookup's: this produces a report,
+    never a value fed into a per-row expression."""
+    keys: list[str]
+
+
 class RowsResponse(BaseModel):
     columns: List[str]
     data: List[List[str]]

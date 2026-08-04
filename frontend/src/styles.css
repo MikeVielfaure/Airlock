@@ -635,6 +635,7 @@ pre.yaml .k { color: #8db4ff; }
   border: 1px solid var(--line); background: var(--panel-2); color: var(--ink-soft);
 }
 .microchip:hover { border-color: var(--accent); color: var(--accent); }
+.microchip.on { background: var(--accent-tint); border-color: var(--accent); color: var(--accent); font-weight: 600; }
 .reference { border-left: 1px solid var(--line); padding-left: 18px; align-self: start; }
 .ref-h { font-family: var(--display); font-weight: 600; font-size: 12.5px; text-transform: uppercase;
   letter-spacing: .05em; color: var(--ink-soft); margin-bottom: 8px; }

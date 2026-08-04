@@ -34,6 +34,7 @@ import type {
   ProcessResponse,
   RowsResponse,
   SourceInfo,
+  DiffResult,
   TablePreview,
   TcoResponse,
   VariableSchema,
@@ -309,6 +310,12 @@ export const api = {
   clearSourceKey: (sid: string, name: string) =>
     fetch(`${BASE}/files/${sid}/sources/${encodeURIComponent(name)}/key`,
          { method: "DELETE", headers: authHeaders() }).then((r) => json<{ ok: boolean }>(r)),
+
+  diffSource: (sid: string, name: string, keys: string[]) =>
+    fetch(`${BASE}/files/${sid}/sources/${encodeURIComponent(name)}/diff`, {
+      method: "POST", headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ keys }),
+    }).then((r) => json<DiffResult>(r)),
 
   /** Référentiel variables pickable outside the référentiel itself. */
   listAvailableVariables: (kind = "") =>

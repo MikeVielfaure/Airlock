@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { AvailableVariable, ComputedColumn, DatasetInfo, FlowInfo, SourceInfo, StyleRule, VariableSchema } from "../lib/types";
+import type { AvailableVariable, ComputedColumn, DatasetInfo, DiffResult, FlowInfo, SourceInfo, StyleRule, VariableSchema } from "../lib/types";
 import { api } from "../lib/api";
 import type { ArtefactInfo } from "../lib/types";
 import { IconCode, IconReset, IconUpload, IconDownload, IconSave } from "../lib/icons";
@@ -295,6 +295,41 @@ function SqlBlock({ col, columns, sources, serverError, onChange, onRemove }: {
   );
 }
 
+/** Counts + a capped sample of added/removed/changed rows from comparing a
+ * session against an attached source on a chosen key. */
+function DiffResultView({ r }: { r: DiffResult }) {
+  return (
+    <div style={{ marginTop: 8 }}>
+      <div style={{ display: "flex", gap: 14, fontSize: 12.5, flexWrap: "wrap" }}>
+        <span>Ajoutées <b>{r.added}</b></span>
+        <span>Retirées <b>{r.removed}</b></span>
+        <span>Modifiées <b>{r.changed}</b></span>
+        <span className="csub">Identiques {r.identical}</span>
+      </div>
+      {r.sample.length === 0 ? (
+        <p className="hint">Aucune différence — les deux tables correspondent sur cette clé.</p>
+      ) : (
+        <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 4 }}>
+          {r.sample.map((row, i) => (
+            <div key={i} className="csub" style={{ fontFamily: "var(--mono)" }}>
+              <span style={{
+                color: row.status === "added" ? "var(--ok)" : row.status === "removed" ? "var(--err)" : "var(--accent)",
+                fontWeight: 600,
+              }}>
+                {row.status === "added" ? "+ ajoutée" : row.status === "removed" ? "− retirée" : "~ modifiée"}
+              </span>
+              {" "}{Object.entries(row.key).map(([k, v]) => `${k}=${v}`).join(", ")}
+              {row.changes && " — " + Object.entries(row.changes)
+                .map(([col, ch]) => `${col} : "${ch.was}" → "${ch.now}"`).join(", ")}
+            </div>
+          ))}
+        </div>
+      )}
+      {r.truncated && <p className="hint">Trop de différences pour tout afficher — le compte ci-dessus reste exact.</p>}
+    </div>
+  );
+}
+
 /** How one existing column should look — a condition (plain or, starting
  * with SELECT/WITH, cross-source SQL) producing a STYLE() token, never a
  * new value. */
@@ -387,6 +422,31 @@ export function ComputedPanel({ sid, tabs, columns, computed, setComputed, sqlCo
     if (!sid) return;
     try { await api.clearSourceKey(sid, name); refreshSources(); }
     catch (e) { notify(e instanceof Error ? e.message : "Échec du retrait de la clé.", "err"); }
+  };
+
+  // ── diff a source against this session — a report (added/removed/changed
+  // rows), never a value fed into an expression, so its key can be composite
+  // unlike the [source.champ] lookup's single-column one ──
+  const [diffOpen, setDiffOpen] = useState<Record<string, boolean>>({});
+  const [diffKeys, setDiffKeys] = useState<Record<string, string[]>>({});
+  const [diffResult, setDiffResult] = useState<Record<string, DiffResult | null>>({});
+  const [diffBusy, setDiffBusy] = useState<string | null>(null);
+  const toggleDiffKey = (name: string, col: string) => setDiffKeys((d) => {
+    const cur = d[name] ?? [];
+    return { ...d, [name]: cur.includes(col) ? cur.filter((c) => c !== col) : [...cur, col] };
+  });
+  const runDiff = async (s: SourceInfo) => {
+    const keys = diffKeys[s.name] ?? [];
+    if (!sid || !keys.length) return;
+    setDiffBusy(s.name);
+    try {
+      const r = await api.diffSource(sid, s.name, keys);
+      setDiffResult((d) => ({ ...d, [s.name]: r }));
+    } catch (e) {
+      notify(e instanceof Error ? e.message : "Échec de la comparaison.", "err");
+    } finally {
+      setDiffBusy(null);
+    }
   };
 
   // ── attach a flow as a source — a flow is already the same lazily-
@@ -952,6 +1012,38 @@ export function ComputedPanel({ sid, tabs, columns, computed, setComputed, sqlCo
                               onClick={() => setKey(s)}>Définir</button>
                           </div>
                         )}
+
+                        <div style={{ marginTop: 6 }}>
+                          <button className="btn sm" onClick={() => setDiffOpen((o) => ({ ...o, [s.name]: !o[s.name] }))}>
+                            {diffOpen[s.name] ? "Masquer la comparaison" : "Comparer"}
+                          </button>
+                          {diffOpen[s.name] && (
+                            <div className="sql-assistant" style={{ marginTop: 6 }}>
+                              <p className="hint">
+                                Choisissez une ou plusieurs colonnes communes qui identifient une
+                                ligne des deux côtés — une clé composite est acceptée ici (ce n'est
+                                pas une expression, juste un rapport).
+                              </p>
+                              <div className="chipbar">
+                                {columns.filter((c) => s.columns.includes(c)).map((c) => (
+                                  <button key={c} className={`microchip ${(diffKeys[s.name] ?? []).includes(c) ? "on" : ""}`}
+                                    onClick={() => toggleDiffKey(s.name, c)}>{c}</button>
+                                ))}
+                                {columns.filter((c) => s.columns.includes(c)).length === 0 && (
+                                  <span className="csub">Aucune colonne de même nom des deux côtés.</span>
+                                )}
+                              </div>
+                              <div>
+                                <button className="btn sm primary"
+                                  disabled={!(diffKeys[s.name] ?? []).length || diffBusy === s.name}
+                                  onClick={() => runDiff(s)}>
+                                  {diffBusy === s.name ? "Comparaison…" : "Lancer la comparaison"}
+                                </button>
+                              </div>
+                              {diffResult[s.name] && <DiffResultView r={diffResult[s.name]!} />}
+                            </div>
+                          )}
+                        </div>
                       </div>
                     ))}
                   </div>

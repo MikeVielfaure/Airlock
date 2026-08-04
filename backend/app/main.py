@@ -31,7 +31,7 @@ from app.models import (
     MatchInfo, Presets, ProcessRequest, ProcessResponse, ProcessStats, RowsResponse, TablePreview, TcoResponse,
     PipelineResponse, SourceInfo, AttachDatasetSource, AttachSessionSource, ReorderRowRequest,
     AttachExternalDbSource, AttachApiSource, AttachFlowSource, SetSourceKey,
-    ExternalDbSessionRequest, ApiSessionRequest,
+    ExternalDbSessionRequest, ApiSessionRequest, DiffRequest,
 )
 from app.services.config_service import ConfigService
 from app.services.file_service import FileService
@@ -43,6 +43,7 @@ from app.services.function_service import (
 )
 from app.services.process_service import ProcessService
 from app.services.tco_service import TcoService
+from app.services import diff_service as _diff
 from app.session import store
 from app.db import commit, get_session, init_db, session_scope
 from app.logging_setup import configure_logging
@@ -702,6 +703,28 @@ def clear_source_key(sid: str, name: str, s: DbSession = Depends(get_session)):
     with _session(sid, s) as sess:
         sess.attached_keys.pop(name, None)
         return {"ok": True}
+
+
+@app.post("/api/files/{sid}/sources/{name}/diff")
+def diff_source(sid: str, name: str, req: DiffRequest, s: DbSession = Depends(get_session)):
+    """Compare this session against an attached source on a chosen key —
+    added/removed/changed rows. A report, so a composite key is fine here
+    even though the [source.champ] lookup restricts itself to one column."""
+    with _session(sid, s) as sess:
+        right = sess.attached.get(name)
+        if right is None:
+            raise HTTPException(404, f"Source « {name} » introuvable.")
+        left = sess.active_df().copy()
+        # A column already flagged sensitive by the last run must not leak its
+        # real value into a diff any more than into the grid itself — same
+        # depth-of-masking rule as everywhere else, applied before comparing.
+        for col in sess.sensitivity:
+            if col in left.columns:
+                left[col] = _crypto.MASK
+        try:
+            return _diff.diff_frames(left, right, req.keys)
+        except ValueError as e:
+            raise HTTPException(422, str(e))
 
 
 @app.post("/api/files/{sid}/header", response_model=TablePreview)

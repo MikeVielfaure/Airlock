@@ -32,6 +32,29 @@ export interface SourceInfo {
   join_source?: string | null;
 }
 
+/** One row's identity, e.g. { code: "1" } or { region: "EST", code: "1" }
+ * for a composite key. */
+export type DiffKey = Record<string, string>;
+
+export interface DiffSampleRow {
+  key: DiffKey;
+  status: "added" | "removed" | "changed";
+  changes?: Record<string, { was: string; now: string }>;
+}
+
+export interface DiffResult {
+  keys: string[];
+  left_rows: number;
+  right_rows: number;
+  added: number;
+  removed: number;
+  changed: number;
+  identical: number;
+  columns_compared: string[];
+  sample: DiffSampleRow[];
+  truncated: boolean;
+}
+
 /** A référentiel variable pickable from outside the référentiel itself — a
  * calculated column's variable list, or a source-attachment connection
  * select. Secrets never appear here at all. */
