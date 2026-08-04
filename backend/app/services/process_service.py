@@ -12,6 +12,17 @@ from app.services.function_service import FunctionService
 from app.services.tco_service import TcoService
 
 
+def _is_error_status(v) -> bool:
+    """Whether one cell's raw validation status is a genuine problem — not a
+    literal "OK", but also not a "MAPPING OK" success (the TCO replace path
+    appends the matched label, e.g. "MAPPING OK — Monsieur", so it is never
+    the bare string "OK"). Mirrors `generate_report`'s own status bucketing
+    just below, so the stats and the report never disagree about what counts
+    as a problem — a row TCO-mapped successfully is not a row "in error"."""
+    s = str(v)
+    return s != "OK" and not s.startswith("MAPPING OK")
+
+
 class ProcessService:
 
     def __init__(self):
@@ -324,12 +335,12 @@ class ProcessService:
         per_col: dict[str, dict] = {}
         for col in df.columns:
             v = validation.get(col, pd.Series(["OK"] * n))
-            err   = int((v != "OK").sum())
+            err   = int(v.map(_is_error_status).sum())
             clean = int(clean_mask.get(col, pd.Series([False] * n, dtype=bool)).sum())
             per_col[col] = {"errors": err, "cleans": clean}
 
-        rows_err   = int(pd.DataFrame(validation).ne("OK").any(axis=1).sum()) \
-                     if validation else 0
+        rows_err   = int(pd.DataFrame({c: v.map(_is_error_status) for c, v in validation.items()})
+                        .any(axis=1).sum()) if validation else 0
         rows_clean = int(pd.DataFrame(clean_mask).any(axis=1).sum()) \
                      if clean_mask else 0
 
