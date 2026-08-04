@@ -1,6 +1,6 @@
 import type { AuthUser, EnvProfile } from "../lib/types";
 import {
-  IconCheck, IconCode, IconGrid, IconLayers, IconList, IconPlay, IconTable,
+  IconCheck, IconCode, IconGrid, IconLayers, IconList, IconLock, IconPlay, IconTable,
 } from "../lib/icons";
 import { roleLabel } from "../lib/roles";
 
@@ -56,6 +56,10 @@ const MODULES: {
     blurb: "Des expressions nommées, réutilisables partout où un calcul est "
          + "possible.",
     icon: <IconCheck size={20} /> },
+  { key: "keys", label: "Confidentialité",
+    blurb: "Créer une clé, gérer ses détenteurs, déclarer un champ "
+         + "confidentiel, consulter le journal des révélations.",
+    icon: <IconLock size={20} /> },
 ];
 
 export function Home({ me, env, profile, shows, go }: Props) {
@@ -81,18 +85,11 @@ export function Home({ me, env, profile, shows, go }: Props) {
           <span className="kpi-sub">Portée du profil de « {env} »</span>
         </div>
         {(me?.is_superadmin || me?.setup_mode) && (
-          <>
-            <div className="kpi-card">
-              <span className="kpi-label">Moteur de calcul</span>
-              <strong className="kpi-val ok">DuckDB + Pandas</strong>
-              <span className="kpi-sub">SQL multi-source et colonnes calculées</span>
-            </div>
-            <div className="kpi-card">
-              <span className="kpi-label">Confidentialité</span>
-              <strong className="kpi-val">Chiffrement par clé + accès nominatif</strong>
-              <span className="kpi-sub">Détenteurs nommés, chaque lecture tracée, clé détruite = donnée effacée</span>
-            </div>
-          </>
+          <div className="kpi-card">
+            <span className="kpi-label">Moteur de calcul</span>
+            <strong className="kpi-val ok">DuckDB + Pandas</strong>
+            <span className="kpi-sub">SQL multi-source et colonnes calculées</span>
+          </div>
         )}
       </div>
 

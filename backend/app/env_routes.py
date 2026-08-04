@@ -53,7 +53,7 @@ def _check_env_capability(s: Session, user, environment: str, capability: str = 
 
 # Every module the application can show. A profile names a subset.
 ALL_MODULES = ["schema", "computed", "data", "report", "yaml", "flows", "edi",
-               "datasets", "mapping", "canvas", "functions", "ops", "tco"]
+               "datasets", "mapping", "canvas", "functions", "ops", "tco", "keys"]
 
 TEMPLATES: Dict[str, dict] = {
     "complet": {

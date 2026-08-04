@@ -10,6 +10,8 @@ import type {
   VariableRow,
   MappingSuggestion,
   PivotObjectResponse,
+  CryptoKeyOut,
+  RevealEventOut,
   DatasetInfo,
   DatasetWriteLog,
   RowsMutationResponse,
@@ -403,6 +405,44 @@ export const api = {
   // ── artefact library / flows / runs (v12) ─────────────────────
   listEnvironments: () => fetch(`${BASE}/environments`, { headers: authHeaders() })
     .then((r) => json<{ environments: string[]; default: string }>(r)),
+
+  // ── confidentiality: keys, holders, audit ──────────────────────
+  /** Whether confidential columns can be used at all on this install (needs
+   * FX_MASTER_KEY) — checked before offering the option, never after. */
+  keyStatus: () => fetch(`${BASE}/keys/status`, { headers: authHeaders() })
+    .then((r) => json<{ available: boolean; reason: string }>(r)),
+
+  listKeys: () => fetch(`${BASE}/keys?env=${encodeURIComponent(CURRENT_ENV)}`, { headers: authHeaders() })
+    .then((r) => json<CryptoKeyOut[]>(r)),
+
+  createKey: (name: string, label: string) =>
+    fetch(`${BASE}/keys?env=${encodeURIComponent(CURRENT_ENV)}`, {
+      method: "POST", headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ name, label }),
+    }).then((r) => json<CryptoKeyOut>(r)),
+
+  /** Only a current holder may — routed through them rather than an admin,
+   * so nobody can grant themselves access to a column they were never
+   * trusted with. */
+  addHolder: (keyId: string, email: string) =>
+    fetch(`${BASE}/keys/${keyId}/holders`, {
+      method: "POST", headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ email }),
+    }).then((r) => json<CryptoKeyOut>(r)),
+
+  removeHolder: (keyId: string, userId: string) =>
+    fetch(`${BASE}/keys/${keyId}/holders/${encodeURIComponent(userId)}`,
+         { method: "DELETE", headers: authHeaders() }).then((r) => json<CryptoKeyOut>(r)),
+
+  /** Destroys the key and, with it, everything it protected — confirmation
+   * is the key's own name, retyped, not a checkbox. */
+  revokeKey: (keyId: string, confirmName: string) =>
+    fetch(`${BASE}/keys/${keyId}?confirm=${encodeURIComponent(confirmName)}`,
+         { method: "DELETE", headers: authHeaders() }).then((r) => json<{ revoked: string }>(r)),
+
+  /** Who looked at what, environment-scoped — admin only. */
+  listReveals: () => fetch(`${BASE}/keys/reveals?env=${encodeURIComponent(CURRENT_ENV)}`, { headers: authHeaders() })
+    .then((r) => json<RevealEventOut[]>(r)),
 
   listArtefacts: (kind: "config" | "computed" | "tco" | "edi_model" | "mapping" | "graph" | "function" | "source",
                   opts?: { env?: string; includeArchived?: boolean }) =>

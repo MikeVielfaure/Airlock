@@ -27,12 +27,13 @@ import { LoginGate } from "./components/LoginGate";
 import { Home } from "./components/Home";
 import { AdminPanel } from "./components/AdminPanel";
 import { SourceSelector } from "./components/SourceSelector";
-import { IconGrid, IconTable, IconList, IconCode, IconLayers, IconPlay } from "./lib/icons";
+import { KeysPanel } from "./components/KeysPanel";
+import { IconGrid, IconTable, IconList, IconCode, IconLayers, IconPlay, IconLock } from "./lib/icons";
 
 /** Modules that never touch a file, and so deserve the whole width. */
-const FULL_WIDTH = new Set(["home", "admin", "ops", "canvas", "flows", "functions"]);
+const FULL_WIDTH = new Set(["home", "admin", "ops", "canvas", "flows", "functions", "keys"]);
 
-type Tab = "schema" | "computed" | "data" | "report" | "yaml" | "flows" | "edi" | "datasets" | "mapping" | "canvas" | "functions" | "ops" | "tco" | "admin" | "home";
+type Tab = "schema" | "computed" | "data" | "report" | "yaml" | "flows" | "edi" | "datasets" | "mapping" | "canvas" | "functions" | "ops" | "tco" | "admin" | "home" | "keys";
 type Toast = { id: number; msg: string; kind: "ok" | "err" | "info" };
 
 export default function App() {
@@ -715,6 +716,11 @@ export default function App() {
   }, [fields, columns]);
 
   const [envs, setEnvs] = useState<string[]>(["default"]);
+  // Fetched once for the FieldEditor's "Confidentialité" key selector — a
+  // capability check for *assigning* a key belongs there (config.write), not
+  // here; this only decides whether the option exists at all on this server.
+  const [keysAvailable, setKeysAvailable] = useState(false);
+  const [availableKeys, setAvailableKeys] = useState<{ name: string; label: string }[]>([]);
   /**
    * The environment and the tab live in the URL.
    *
@@ -751,6 +757,22 @@ export default function App() {
     // documented.
     api.envProfile(env).then(setProfile).catch(() => setProfile(null));
   }, [env]);
+
+  // Re-run after mount/env change, and also handed to KeysPanel so creating
+  // or revoking a key there is reflected immediately in the FieldEditor's
+  // selector — otherwise a key created this session would stay invisible to
+  // "Confidentialité" until an unrelated env switch happened to remount it.
+  const refreshAvailableKeys = useCallback(() => {
+    api.keyStatus().then((st) => {
+      setKeysAvailable(st.available);
+      if (!st.available) { setAvailableKeys([]); return; }
+      api.listKeys()
+        .then((ks) => setAvailableKeys(ks.filter((k) => k.active)
+          .map((k) => ({ name: k.name, label: k.label }))))
+        .catch(() => setAvailableKeys([]));
+    }).catch(() => { setKeysAvailable(false); setAvailableKeys([]); });
+  }, []);
+  useEffect(() => { refreshAvailableKeys(); }, [env, refreshAvailableKeys]);
 
   /**
    * A module is shown when the profile lists it (no profile = everything).
@@ -925,6 +947,11 @@ export default function App() {
           <IconPlay size={15} /> Exploitation
         </button>
       ))}
+      {gate("keys", (
+        <button className={`tab ${tab === "keys" ? "active" : ""}`} onClick={() => setTab("keys")}>
+          <IconLock size={15} /> Confidentialité
+        </button>
+      ))}
       {(me?.is_superadmin || me?.setup_mode) && (
         <button className={`tab ${tab === "admin" ? "active" : ""}`} onClick={() => setTab("admin")}>
           <IconLayers size={15} /> Administration
@@ -1054,6 +1081,7 @@ export default function App() {
                     : tab === "admin" ? <AdminPanel me={me} notify={toast}
                                                      onIdentityChange={() => window.location.reload()} />
                     : tab === "ops" ? <OpsPanel notify={toast} />
+                    : tab === "keys" ? <KeysPanel me={me} env={env} notify={toast} onKeysChanged={refreshAvailableKeys} />
                     : tab === "canvas" ? <FlowCanvas notify={toast}
                         onOpenSession={(res) => { adoptSession(res, "flux"); setTab("schema"); }} />
                     : tab === "functions" ? <FunctionsPanel notify={toast} />
@@ -1108,7 +1136,9 @@ export default function App() {
                     header={header} setHeader={setHeader} applyHeader={applyHeader}
                     fields={fields} setField={setField} resetFields={resetFields}
                     addColumn={addColumn} removeColumn={removeColumn}
-                    presets={presets} tcoLabels={tco?.labels ?? []} stats={result?.stats ?? null}
+                    presets={presets} tcoLabels={tco?.labels ?? []}
+                    keysAvailable={keysAvailable} availableKeys={availableKeys}
+                    stats={result?.stats ?? null}
                     configFields={configFields}
                     unmatchedConfig={unmatchedConfig} assignConfigField={assignConfigField}
                     strictHeader={strictHeader} setStrictHeader={setStrictHeader}
@@ -1141,6 +1171,7 @@ export default function App() {
                     onOpenSession={(res) => { adoptSession(res, "flux"); setTab("schema"); }} />}
                 {tab === "functions" && <FunctionsPanel notify={toast} />}
                 {tab === "ops" && <OpsPanel notify={toast} />}
+                {tab === "keys" && <KeysPanel me={me} env={env} notify={toast} onKeysChanged={refreshAvailableKeys} />}
                 {tab === "admin" && (
                   <AdminPanel me={me} notify={toast}
                               onIdentityChange={() => window.location.reload()} />

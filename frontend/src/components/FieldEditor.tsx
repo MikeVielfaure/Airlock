@@ -5,6 +5,8 @@ interface Props {
   field: FieldConfig;
   presets: Presets;
   tcoLabels: string[];
+  keysAvailable: boolean;
+  availableKeys: { name: string; label: string }[];
   configFields: Record<string, FieldConfig>;
   onChange: (patch: Partial<FieldConfig>) => void;
 }
@@ -17,7 +19,7 @@ const CASE_LABELS: Record<string, string> = {
 const NAME_TOKENS = ["MOIS", "MOIS2", "MOIS_NOM", "MOIS_COURT", "JOUR", "JOUR_NOM", "ANNEE", "DATENOW"];
 const NAME_FUNCS = ["LEFT(", "RIGHT(", "SUBSTRING(", "CONCAT(", "UPPER(", "LOWER(", "REPLACE("];
 
-export function FieldEditor({ col, field, presets, tcoLabels, configFields, onChange }: Props) {
+export function FieldEditor({ col, field, presets, tcoLabels, keysAvailable, availableKeys, configFields, onChange }: Props) {
   const isDate = field.type === "date";
   const isNum = field.type === "integer" || field.type === "float";
   const renaming = Boolean(field.mapping) && field.rename_output;
@@ -260,6 +262,22 @@ export function FieldEditor({ col, field, presets, tcoLabels, configFields, onCh
                   title={pat} onClick={() => onChange({ regex: pat })}>{label}</button>
               ))}
             </div>
+          </div>
+
+          {/* CONFIDENTIALITY */}
+          <div className="editor-section-h">Confidentialité</div>
+          <div className="frow full">
+            <label>Clé de chiffrement
+              <span style={{ color: "var(--ink-faint)" }}> — la colonne n'est plus jamais stockée ni affichée en clair pour qui ne détient pas la clé</span>
+            </label>
+            {!keysAvailable ? (
+              <div className="csub">Aucune clé maîtresse configurée sur ce serveur — la confidentialité par colonne n'est pas disponible.</div>
+            ) : (
+              <select value={field.sensitive ?? ""} onChange={(e) => onChange({ sensitive: e.target.value || null })}>
+                <option value="">Aucune</option>
+                {availableKeys.map((k) => <option key={k.name} value={k.name}>{k.label || k.name}</option>)}
+              </select>
+            )}
           </div>
 
           {/* MAPPING */}

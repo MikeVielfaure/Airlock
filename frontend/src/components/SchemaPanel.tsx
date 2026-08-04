@@ -19,6 +19,8 @@ interface Props {
   removeColumn: (name: string) => void;
   presets: Presets;
   tcoLabels: string[];
+  keysAvailable: boolean;
+  availableKeys: { name: string; label: string }[];
   stats: ProcessStats | null;
   configFields: Record<string, FieldConfig>;
   unmatchedConfig: FieldConfig[];
@@ -232,6 +234,8 @@ export function SchemaPanel(p: Props) {
               field={p.fields[editing]}
               presets={p.presets}
               tcoLabels={p.tcoLabels}
+              keysAvailable={p.keysAvailable}
+              availableKeys={p.availableKeys}
               configFields={p.configFields}
               onChange={(patch) => p.setField(editing, patch)}
             />

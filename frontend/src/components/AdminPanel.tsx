@@ -26,6 +26,7 @@ const MODULE_LABEL: Record<string, string> = {
   schema: "Schéma & Règles", computed: "Calculs", data: "Données", report: "Rapport",
   yaml: "Configuration", tco: "Correspondances", datasets: "Tables BDD", mapping: "Mapping",
   flows: "Flux", edi: "EDIFACT", canvas: "Studio Flux", functions: "Fonctions", ops: "Exploitation",
+  keys: "Confidentialité",
 };
 const moduleLabel = (m: string): string => MODULE_LABEL[m] ?? m;
 

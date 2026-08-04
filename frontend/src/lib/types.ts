@@ -61,6 +61,32 @@ export interface DiffResult {
   truncated: boolean;
 }
 
+// A key protecting one or more confidential columns. Holders are the access
+// list itself — no separate role — so a key nobody can act on is destroyed
+// rather than orphaned, and adding a holder requires already holding it.
+export interface CryptoKeyOut {
+  id: string;
+  name: string;
+  label: string;
+  environment: string;
+  active: boolean;
+  holders: { user_id: string; email: string; display_name: string }[];
+  i_hold: boolean;
+  created_at: string;
+  revoked_at: string;
+}
+
+// One reveal, from the audit trail — who looked, at what, when.
+export interface RevealEventOut {
+  id: string;
+  user_email: string;
+  key_name: string;
+  columns: string[];
+  context: string;
+  rows: number;
+  at: string;
+}
+
 /** A référentiel variable pickable from outside the référentiel itself — a
  * calculated column's variable list, or a source-attachment connection
  * select. Secrets never appear here at all. */
@@ -105,6 +131,9 @@ export interface FieldConfig {
   tco_type?: string | null;
   identifiant: boolean;
   check_type: boolean;
+  // Name of the key protecting this column — mirrors the backend field one
+  // for one. Set = never stored or shown in the clear to a non-holder.
+  sensitive?: string | null;
 }
 
 export interface HeaderConfig {
