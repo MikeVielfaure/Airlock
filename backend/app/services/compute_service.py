@@ -55,6 +55,30 @@ def _dot_lookup(const: dict, name: str) -> str | None:
     return str(val)
 
 
+def _build_source_index(attached: dict[str, pd.DataFrame] | None,
+                        attached_keys: dict[str, tuple[str, str]] | None,
+                        ) -> tuple[dict[str, dict[str, dict]], set[str]]:
+    """One dict-of-dicts per attached source that has a declared key, built
+    once per `evaluate()` call rather than per row. Keys are stringified —
+    `cols` (the row values `_ref` compares against) are strings throughout
+    this evaluator, so an int64 source column would otherwise never match a
+    row's stringified value. A source whose key column has duplicate values
+    is left out of `indexed` and flagged in `ambiguous` instead: guessing
+    which row wins would be a silently wrong value, not a missing one."""
+    indexed: dict[str, dict[str, dict]] = {}
+    ambiguous: set[str] = set()
+    for name, (_local_col, source_col) in (attached_keys or {}).items():
+        src = (attached or {}).get(name)
+        if src is None or source_col not in src.columns:
+            continue
+        if src[source_col].duplicated().any():
+            ambiguous.add(name)
+            continue
+        keyed = src.set_index(src[source_col].astype(str))
+        indexed[name] = keyed.to_dict("index")
+    return indexed, ambiguous
+
+
 def _is_blank(v) -> bool:
     """True for nulls and empty/whitespace values (used by ISNULL/NOTNULL)."""
     if v is None:
@@ -330,7 +354,9 @@ class ComputeService:
 
     def evaluate(self, df: pd.DataFrame, expr: str,
                  lookup_map: dict[str, str] | None = None,
-                 variables: dict[str, str] | None = None) -> pd.Series:
+                 variables: dict[str, str] | None = None,
+                 attached: dict[str, pd.DataFrame] | None = None,
+                 attached_keys: dict[str, tuple[str, str]] | None = None) -> pd.Series:
         """
         Evaluate `expr` for every row of `df`, returning a string Series.
         A row that errors yields '#ERR' rather than crashing the request.
@@ -339,7 +365,13 @@ class ComputeService:
         then a built-in dynamic token (DATENOW, MOIS, JOUR…). `lookup_map`
         (source -> label) backs LOOKUP() against the loaded TCO. [NAME.field]
         reaches one level (or more, NAME.a.b) into a variable whose value is a
-        JSON object — the shape a référentiel connection point already stores.
+        JSON object — the shape a référentiel connection point already stores
+        — unless NAME matches an attached source with a declared key
+        (`attached_keys`), in which case it's a row lookup instead (see
+        `_build_source_index`). Deliberately single-column keys, one field
+        deep: anything needing a composite key, a join without a 1:1 key, or
+        an aggregate belongs in a SQL block (`duck_compute.py`) — this engine
+        stays mono-row on purpose.
         """
         code = self.compile_expr(expr)
         # Real nulls (NaN/NaT/None) become "" so [x] is empty rather than the
@@ -350,6 +382,7 @@ class ComputeService:
 
         lm = lookup_map or {}
         const = {**dynamic_tokens(), **(variables or {})}   # variables override tokens
+        indexed, ambiguous = _build_source_index(attached, attached_keys)
 
         def _lookup(value, default=""):
             return lm.get(str(value), default)
@@ -364,6 +397,18 @@ class ComputeService:
                     return series[_i]
                 if name in const:
                     return const[name]
+                if "." in name:
+                    base, _, rest = name.partition(".")
+                    if base in ambiguous:
+                        raise ComputeError(
+                            f"« {base} » a plusieurs lignes pour la même clé — "
+                            f"dédupliquez la source ou utilisez un bloc SQL.")
+                    if base in indexed:
+                        local_col, _src_col = (attached_keys or {})[base]
+                        local_series = cols.get(local_col)
+                        local_val = local_series[_i] if local_series is not None else None
+                        row = indexed[base].get(local_val)
+                        return "" if row is None else ("" if row.get(rest) is None else str(row.get(rest)))
                 return _dot_lookup(const, name) or ""
 
             def _col(name, default="", _i=i):

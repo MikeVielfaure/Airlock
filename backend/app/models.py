@@ -261,6 +261,11 @@ class SourceInfo(BaseModel):
     name: str
     columns: List[str]
     row_count: int
+    # The declared (local_column, source_column) join key, if any — lets a
+    # plain computed column address this source as [name.field]. None means
+    # this source is only reachable from a SQL block, same as before.
+    join_local: Optional[str] = None
+    join_source: Optional[str] = None
 
 
 class AttachDatasetSource(BaseModel):
@@ -279,6 +284,16 @@ class AttachFlowSource(BaseModel):
     upload a file on its behalf."""
     name: str
     flow_id: str
+
+
+class SetSourceKey(BaseModel):
+    """A single-column join key on an already-attached source, declared once
+    so a plain computed column can address it as [name.field] instead of
+    only through a SQL block. The source's columns aren't known until after
+    it's attached, so this is always a separate step, never a field on the
+    attach request itself."""
+    local_column: str
+    source_column: str
 
 
 class RowsResponse(BaseModel):

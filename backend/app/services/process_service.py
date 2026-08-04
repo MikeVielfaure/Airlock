@@ -462,6 +462,7 @@ class ProcessService:
         sql_computed: list[tuple[str, str, str]] | None = None,
         style_rules: list[tuple[str, str]] | None = None,
         attached: dict[str, pd.DataFrame] | None = None,
+        attached_keys: dict[str, tuple[str, str]] | None = None,
         sensitive_cols: frozenset = frozenset(),
         report_flagged_only: bool = False,
         variables: dict[str, str] | None = None,
@@ -505,7 +506,8 @@ class ProcessService:
                 if not name:
                     continue
                 try:
-                    df_post[name] = cs.evaluate(df_post, expr, lookup_map=lookup_map, variables=variables or {})
+                    df_post[name] = cs.evaluate(df_post, expr, lookup_map=lookup_map, variables=variables or {},
+                                                attached=attached, attached_keys=attached_keys)
                     computed_names.append(name)
                 except ComputeError as e:
                     compute_errors[name] = str(e)

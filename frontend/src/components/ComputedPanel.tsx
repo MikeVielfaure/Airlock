@@ -35,6 +35,14 @@ const TEMPLATES: { label: string; expr: (cols: string[]) => string }[] = [
   { label: "Valeur par défaut", expr: (c) => `DEFAULT([${c[0] ?? "col1"}], "N/A")` },
 ];
 
+const SQL_TEMPLATES: { label: string; expr: (sources: SourceInfo[]) => string }[] = [
+  { label: "Compter une source", expr: (s) =>
+      `SELECT self._row_id, (SELECT COUNT(*) FROM ${s[0]?.name ?? "source"}) AS total\nFROM self` },
+  { label: "Somme d'une colonne", expr: (s) =>
+      `SELECT self._row_id, (SELECT SUM(${s[0]?.columns[0] ?? "colonne"}) FROM ${s[0]?.name ?? "source"}) AS somme\nFROM self` },
+  { label: "Jointure simple", expr: () => "SELECT self._row_id\nFROM self" },
+];
+
 const FUNCS = [
   ["IF(cond, a, b)", "renvoie a si cond est vrai, sinon b"],
   ["ISNULL(x) / NOTNULL(x)", "teste si vide / null — ex. IF(ISNULL([x]), \"N/A\", [x])"],
@@ -117,9 +125,13 @@ function SqlBlock({ col, columns, sources, serverError, onChange, onRemove }: {
   onRemove: () => void;
 }) {
   const [showAssistant, setShowAssistant] = useState(false);
+  const [assistantMode, setAssistantMode] = useState<"join" | "aggregate">("join");
   const [sourceName, setSourceName] = useState("");
   const [idPairs, setIdPairs] = useState<{ local: string; src: string }[]>([{ local: "", src: "" }]);
   const [fillPairs, setFillPairs] = useState<{ src: string; local: string }[]>([{ src: "", local: "" }]);
+  const [aggFunc, setAggFunc] = useState<"COUNT" | "SUM" | "AVG" | "MIN" | "MAX">("COUNT");
+  const [aggCol, setAggCol] = useState("");
+  const [aggName, setAggName] = useState("");
   const source = sources.find((s) => s.name === sourceName);
 
   const generate = () => {
@@ -130,6 +142,13 @@ function SqlBlock({ col, columns, sources, serverError, onChange, onRemove }: {
     const on = validId.map((p) => `self.${p.local} = ${sourceName}.${p.src}`).join(" AND ");
     onChange({ ...col, mode: "fill_empty",
               expression: `SELECT ${select}\nFROM self LEFT JOIN ${sourceName} ON ${on}` });
+  };
+
+  const generateAggregate = () => {
+    if (!sourceName || !aggName || (aggFunc !== "COUNT" && !aggCol)) return;
+    const arg = aggCol || "*";
+    onChange({ ...col, mode: "fill_empty",
+              expression: `SELECT self._row_id, (SELECT ${aggFunc}(${arg}) FROM ${sourceName}) AS ${aggName}\nFROM self` });
   };
 
   return (
@@ -151,11 +170,13 @@ function SqlBlock({ col, columns, sources, serverError, onChange, onRemove }: {
 
       {showAssistant && (
         <div className="sql-assistant">
-          <p className="hint">
-            Choisissez une source, les colonnes qui identifient une ligne (ex.
-            nom + prénom) et les colonnes à en tirer — « Générer » écrit la
-            requête et bascule sur « Compléter le vide ».
-          </p>
+          <div className="filterbar" style={{ marginBottom: 4 }}>
+            <button className={`btn sm ${assistantMode === "join" ? "primary" : ""}`}
+              onClick={() => setAssistantMode("join")}>Jointure</button>
+            <button className={`btn sm ${assistantMode === "aggregate" ? "primary" : ""}`}
+              onClick={() => setAssistantMode("aggregate")}>Agrégat (sans jointure)</button>
+          </div>
+
           <div className="frow"><label>Source</label>
             <select value={sourceName} onChange={(e) => setSourceName(e.target.value)}>
               <option value="">— choisir —</option>
@@ -163,54 +184,96 @@ function SqlBlock({ col, columns, sources, serverError, onChange, onRemove }: {
             </select>
           </div>
 
-          <span className="csub">Colonnes identifiantes (locale = source)</span>
-          {idPairs.map((p, i) => (
-            <div className="sql-pair" key={i}>
-              <select value={p.local} onChange={(e) => setIdPairs(idPairs.map((x, j) =>
-                (j === i ? { ...x, local: e.target.value } : x)))}>
-                <option value="">colonne locale…</option>
-                {columns.map((c) => <option key={c} value={c}>{c}</option>)}
-              </select>
-              <span>=</span>
-              <select value={p.src} disabled={!source} onChange={(e) => setIdPairs(idPairs.map((x, j) =>
-                (j === i ? { ...x, src: e.target.value } : x)))}>
-                <option value="">colonne source…</option>
-                {(source?.columns ?? []).map((c) => <option key={c} value={c}>{c}</option>)}
-              </select>
-              <button className="hclear" onClick={() => setIdPairs(idPairs.filter((_, j) => j !== i))}>×</button>
-            </div>
-          ))}
-          <button className="btn sm" onClick={() => setIdPairs([...idPairs, { local: "", src: "" }])}>
-            + identifiant
-          </button>
+          {assistantMode === "join" ? (
+            <>
+              <p className="hint">
+                Choisissez les colonnes qui identifient une ligne (ex. nom +
+                prénom) et les colonnes à en tirer — « Générer » écrit la
+                requête et bascule sur « Compléter le vide ».
+              </p>
+              <span className="csub">Colonnes identifiantes (locale = source)</span>
+              {idPairs.map((p, i) => (
+                <div className="sql-pair" key={i}>
+                  <select value={p.local} onChange={(e) => setIdPairs(idPairs.map((x, j) =>
+                    (j === i ? { ...x, local: e.target.value } : x)))}>
+                    <option value="">colonne locale…</option>
+                    {columns.map((c) => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                  <span>=</span>
+                  <select value={p.src} disabled={!source} onChange={(e) => setIdPairs(idPairs.map((x, j) =>
+                    (j === i ? { ...x, src: e.target.value } : x)))}>
+                    <option value="">colonne source…</option>
+                    {(source?.columns ?? []).map((c) => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                  <button className="hclear" onClick={() => setIdPairs(idPairs.filter((_, j) => j !== i))}>×</button>
+                </div>
+              ))}
+              <button className="btn sm" onClick={() => setIdPairs([...idPairs, { local: "", src: "" }])}>
+                + identifiant
+              </button>
 
-          <span className="csub">Colonnes à compléter (source → locale)</span>
-          {fillPairs.map((p, i) => (
-            <div className="sql-pair" key={i}>
-              <select value={p.src} disabled={!source} onChange={(e) => setFillPairs(fillPairs.map((x, j) =>
-                (j === i ? { ...x, src: e.target.value } : x)))}>
-                <option value="">colonne source…</option>
-                {(source?.columns ?? []).map((c) => <option key={c} value={c}>{c}</option>)}
-              </select>
-              <span>→</span>
-              <select value={p.local} onChange={(e) => setFillPairs(fillPairs.map((x, j) =>
-                (j === i ? { ...x, local: e.target.value } : x)))}>
-                <option value="">colonne locale…</option>
-                {columns.map((c) => <option key={c} value={c}>{c}</option>)}
-              </select>
-              <button className="hclear" onClick={() => setFillPairs(fillPairs.filter((_, j) => j !== i))}>×</button>
-            </div>
-          ))}
-          <button className="btn sm" onClick={() => setFillPairs([...fillPairs, { src: "", local: "" }])}>
-            + colonne
-          </button>
+              <span className="csub">Colonnes à compléter (source → locale)</span>
+              {fillPairs.map((p, i) => (
+                <div className="sql-pair" key={i}>
+                  <select value={p.src} disabled={!source} onChange={(e) => setFillPairs(fillPairs.map((x, j) =>
+                    (j === i ? { ...x, src: e.target.value } : x)))}>
+                    <option value="">colonne source…</option>
+                    {(source?.columns ?? []).map((c) => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                  <span>→</span>
+                  <select value={p.local} onChange={(e) => setFillPairs(fillPairs.map((x, j) =>
+                    (j === i ? { ...x, local: e.target.value } : x)))}>
+                    <option value="">colonne locale…</option>
+                    {columns.map((c) => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                  <button className="hclear" onClick={() => setFillPairs(fillPairs.filter((_, j) => j !== i))}>×</button>
+                </div>
+              ))}
+              <button className="btn sm" onClick={() => setFillPairs([...fillPairs, { src: "", local: "" }])}>
+                + colonne
+              </button>
 
-          <div>
-            <button className="btn sm primary"
-              disabled={!sourceName || !idPairs.some((p) => p.local && p.src)
-                       || !fillPairs.some((p) => p.src && p.local)}
-              onClick={generate}>Générer la requête</button>
-          </div>
+              <div>
+                <button className="btn sm primary"
+                  disabled={!sourceName || !idPairs.some((p) => p.local && p.src)
+                           || !fillPairs.some((p) => p.src && p.local)}
+                  onClick={generate}>Générer la requête</button>
+              </div>
+            </>
+          ) : (
+            <>
+              <p className="hint">
+                Pas de jointure — une seule valeur calculée sur toute la source
+                (nombre de lignes, somme, moyenne…), répétée sur chaque ligne
+                locale. « Générer » écrit la requête et bascule sur « Compléter
+                le vide ».
+              </p>
+              <div className="frow"><label>Fonction</label>
+                <select value={aggFunc} onChange={(e) => setAggFunc(e.target.value as typeof aggFunc)}>
+                  <option value="COUNT">COUNT — nombre de lignes</option>
+                  <option value="SUM">SUM — somme</option>
+                  <option value="AVG">AVG — moyenne</option>
+                  <option value="MIN">MIN — minimum</option>
+                  <option value="MAX">MAX — maximum</option>
+                </select>
+              </div>
+              <div className="frow"><label>Colonne</label>
+                <select value={aggCol} disabled={!source} onChange={(e) => setAggCol(e.target.value)}>
+                  <option value="">{aggFunc === "COUNT" ? "toutes les lignes (*)" : "colonne…"}</option>
+                  {(source?.columns ?? []).map((c) => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </div>
+              <div className="frow"><label>Nom local</label>
+                <input className="mono-input" placeholder="ex. total_commandes" value={aggName}
+                  onChange={(e) => setAggName(e.target.value.replace(/\s+/g, "_"))} />
+              </div>
+              <div>
+                <button className="btn sm primary"
+                  disabled={!sourceName || !aggName || (aggFunc !== "COUNT" && !aggCol)}
+                  onClick={generateAggregate}>Générer la requête</button>
+              </div>
+            </>
+          )}
         </div>
       )}
 
@@ -293,6 +356,29 @@ export function ComputedPanel({ sid, tabs, columns, computed, setComputed, sqlCo
   }, [sid]);
   useEffect(() => { refreshSources(); }, [refreshSources]);
   useEffect(() => { api.listDatasets().then(setDatasets).catch(() => {}); }, []);
+
+  // ── declare/edit a source's join key — a single column pair, set once,
+  // that lets [source.champ] work directly in a plain expression instead of
+  // only through a SQL block ──
+  const [keyDraft, setKeyDraft] = useState<Record<string, { local: string; source: string }>>({});
+  const draftFor = (name: string) => keyDraft[name] ?? { local: "", source: "" };
+  const setDraft = (name: string, patch: Partial<{ local: string; source: string }>) =>
+    setKeyDraft((d) => ({ ...d, [name]: { ...draftFor(name), ...patch } }));
+  const setKey = async (s: SourceInfo) => {
+    const d = draftFor(s.name);
+    if (!sid || !d.local || !d.source) return;
+    try {
+      await api.setSourceKey(sid, s.name, d.local, d.source);
+      setKeyDraft((prev) => { const next = { ...prev }; delete next[s.name]; return next; });
+      refreshSources();
+      notify(`Clé définie sur « ${s.name} ».`, "ok");
+    } catch (e) { notify(e instanceof Error ? e.message : "Échec de la définition de la clé.", "err"); }
+  };
+  const clearKey = async (name: string) => {
+    if (!sid) return;
+    try { await api.clearSourceKey(sid, name); refreshSources(); }
+    catch (e) { notify(e instanceof Error ? e.message : "Échec du retrait de la clé.", "err"); }
+  };
 
   // ── attach a flow as a source — a flow is already the same lazily-
   // resolved object a table/BDD externe/API source is: re-run fresh each
@@ -437,10 +523,13 @@ export function ComputedPanel({ sid, tabs, columns, computed, setComputed, sqlCo
   const saveSourceToLibrary = async (sourceKind: "dataset" | "external_db" | "api" | "flow",
                                      name: string, recipe: Record<string, unknown>) => {
     if (!name.trim()) { notify("La source a besoin d'un nom.", "err"); return; }
+    const attached = sources.find((s) => s.name === name.trim());
+    const keyFields = attached?.join_local && attached?.join_source
+      ? { join_local: attached.join_local, join_source: attached.join_source } : {};
     try {
       await api.createArtefact("source", {
         name: name.trim(), description: SOURCE_KIND_LABEL[sourceKind],
-        body: { source_kind: sourceKind, name: name.trim(), ...recipe },
+        body: { source_kind: sourceKind, name: name.trim(), ...recipe, ...keyFields },
       });
       notify(`Source « ${name.trim()} » enregistrée dans la bibliothèque.`, "ok");
       refreshSourceLib();
@@ -467,6 +556,9 @@ export function ComputedPanel({ sid, tabs, columns, computed, setComputed, sqlCo
         await api.attachFlowSource(sid, name, String(body.flow_id));
       } else {
         notify("Type de source inconnu.", "err"); return;
+      }
+      if (body.join_local && body.join_source) {
+        await api.setSourceKey(sid, name, String(body.join_local), String(body.join_source));
       }
       refreshSources();
       notify(`Source « ${name} » (v${a.latest_version_no}) chargée depuis la bibliothèque.`, "ok");
@@ -536,9 +628,9 @@ export function ComputedPanel({ sid, tabs, columns, computed, setComputed, sqlCo
   const add = (expr = "") =>
     setComputed([...computed, { name: `computed_${computed.length + 1}`, expression: expr }]);
 
-  const addSql = () =>
+  const addSql = (expr = "SELECT self._row_id\nFROM self") =>
     setSqlComputed([...sqlComputed,
-      { name: `sql_${sqlComputed.length + 1}`, expression: "SELECT self._row_id\nFROM self" }]);
+      { name: `sql_${sqlComputed.length + 1}`, expression: expr }]);
 
   const addStyleRule = () =>
     setStyleRules([...styleRules, { column: columns[0] ?? "", expression: "" }]);
@@ -620,6 +712,10 @@ export function ComputedPanel({ sid, tabs, columns, computed, setComputed, sqlCo
                 <p><b>Comment faire</b> — « Ajouter une colonne », nommez-la, écrivez une expression avec <code>[nom_colonne]</code>. Cliquez une colonne dans la barre du bas pour l'insérer sans la taper.</p>
                 <p><b>Ce qu'il faut</b> — rien de particulier : ça marche dès qu'un fichier est chargé.</p>
               </InfoTip>
+            </p>
+            <p className="hint">
+              Besoin de croiser une autre source, de compter ou d'agréger (nombre de lignes, somme…) ?
+              → onglet <b>« SQL avancé »</b>.
             </p>
             <div className="filterbar">
               <button className="btn primary sm" onClick={() => add()}><IconCode size={14} /> Ajouter une colonne</button>
@@ -714,7 +810,10 @@ export function ComputedPanel({ sid, tabs, columns, computed, setComputed, sqlCo
               </InfoTip>
             </p>
             <div className="filterbar">
-              <button className="btn primary sm" onClick={addSql}><IconCode size={14} /> Ajouter un bloc SQL</button>
+              <button className="btn primary sm" onClick={() => addSql()}><IconCode size={14} /> Ajouter un bloc SQL</button>
+              {SQL_TEMPLATES.map((t) => (
+                <button key={t.label} className="btn sm" onClick={() => addSql(t.expr(sources))}>{t.label}</button>
+              ))}
               {sqlComputed.length > 0 && (
                 <button className="btn sm" onClick={() => setSqlComputed([])}><IconReset size={13} /> Réinitialiser</button>
               )}
@@ -816,9 +915,32 @@ export function ComputedPanel({ sid, tabs, columns, computed, setComputed, sqlCo
                 ) : (
                   <div className="libcol" style={{ marginTop: 6 }}>
                     {sources.map((s) => (
-                      <div key={s.name} className="libitem">
-                        <span><code>{s.name}</code> <span className="csub">{s.row_count} ligne(s), {s.columns.length} colonne(s)</span></span>
-                        <button className="btn sm" onClick={() => detachSource(s.name)}>Détacher</button>
+                      <div key={s.name} style={{ padding: "5px 0", borderBottom: "1px dashed var(--line)" }}>
+                        <div className="libitem" style={{ borderBottom: "none", padding: 0 }}>
+                          <span><code>{s.name}</code> <span className="csub">{s.row_count} ligne(s), {s.columns.length} colonne(s)</span></span>
+                          <button className="btn sm" onClick={() => detachSource(s.name)}>Détacher</button>
+                        </div>
+                        {s.join_local ? (
+                          <div className="csub" style={{ marginTop: 4, display: "flex", alignItems: "center", gap: 6 }}>
+                            Clé : <code>{s.join_local}</code> = <code>{s.name}.{s.join_source}</code>
+                            <button className="hclear" title="Retirer la clé" onClick={() => clearKey(s.name)}>×</button>
+                          </div>
+                        ) : (
+                          <div style={{ marginTop: 4, display: "flex", alignItems: "center", gap: 6 }}>
+                            <span className="csub">Clé (optionnel, pour [{s.name}.champ]) :</span>
+                            <select value={draftFor(s.name).local} onChange={(e) => setDraft(s.name, { local: e.target.value })}>
+                              <option value="">colonne locale…</option>
+                              {columns.map((c) => <option key={c} value={c}>{c}</option>)}
+                            </select>
+                            <span className="csub">=</span>
+                            <select value={draftFor(s.name).source} onChange={(e) => setDraft(s.name, { source: e.target.value })}>
+                              <option value="">colonne source…</option>
+                              {s.columns.map((c) => <option key={c} value={c}>{c}</option>)}
+                            </select>
+                            <button className="btn sm" disabled={!draftFor(s.name).local || !draftFor(s.name).source}
+                              onClick={() => setKey(s)}>Définir</button>
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>

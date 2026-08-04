@@ -62,6 +62,11 @@ class Session:
     # Extra sources joined against this session's own data for cross-source
     # SQL (name -> frame) — attached explicitly, never a second session.
     attached: dict = field(default_factory=dict)
+    # A declared (local_column, source_column) pair per attached source —
+    # lets a plain computed column address it directly as [name.field]
+    # instead of only through a SQL block. Optional: a source with no key
+    # here just isn't reachable outside SQL blocks, same as before.
+    attached_keys: dict = field(default_factory=dict)
     last_df: Optional[pd.DataFrame] = None      # last processed frame (for export)
     last_cols: Optional[list] = None            # displayed columns of last run
     last_validation: Optional[dict] = None      # final col -> status Series (full file)

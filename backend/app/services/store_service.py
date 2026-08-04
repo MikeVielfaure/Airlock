@@ -211,11 +211,23 @@ def normalise_body(kind: str, *, body: Optional[dict], yaml: Optional[str],
         name = str(data.get("name", "")).strip()
         if not name:
             raise BadBody("A source needs a `name` (used in SQL joins).")
+
+        # A single-column key, declared once here rather than retyped in every
+        # expression — the same name a flow's plain computed columns (not just
+        # SQL blocks) can address as `[name.field]`. Structural check only
+        # (non-empty strings); "the column actually exists" is a resolution-time
+        # concern (the source's shape isn't known until it's actually fetched).
+        join_local = str(data.get("join_local", "")).strip()
+        join_source = str(data.get("join_source", "")).strip()
+        if bool(join_local) != bool(join_source):
+            raise BadBody("A join key needs both `join_local` and `join_source`, or neither.")
+        key_fields = {"join_local": join_local, "join_source": join_source} if join_local else {}
+
         if source_kind == "dataset":
             dataset_id = str(data.get("dataset_id", "")).strip()
             if not dataset_id:
                 raise BadBody("A dataset source needs `dataset_id`.")
-            return {"source_kind": "dataset", "name": name, "dataset_id": dataset_id}
+            return {"source_kind": "dataset", "name": name, "dataset_id": dataset_id, **key_fields}
         if source_kind == "external_db":
             connection = str(data.get("connection", "")).strip()
             query = str(data.get("query", "")).strip()
@@ -225,7 +237,7 @@ def normalise_body(kind: str, *, body: Optional[dict], yaml: Optional[str],
             if not isinstance(params, dict):
                 raise BadBody("`params` must be a {name: value} object.")
             out = {"source_kind": "external_db", "name": name, "connection": connection,
-                   "query": query, "params": {str(k): str(v) for k, v in params.items()}}
+                   "query": query, "params": {str(k): str(v) for k, v in params.items()}, **key_fields}
             if data.get("schema_name"):
                 out["schema_name"] = str(data["schema_name"])
             return out
@@ -236,7 +248,7 @@ def normalise_body(kind: str, *, body: Optional[dict], yaml: Optional[str],
             out = {"source_kind": "api", "name": name, "connection": connection,
                    "path": str(data.get("path", "")), "method": str(data.get("method", "GET")),
                    "response_kind": str(data.get("response_kind", "json")),
-                   "data_path": str(data.get("data_path", ""))}
+                   "data_path": str(data.get("data_path", "")), **key_fields}
             if data.get("body") is not None:
                 out["body"] = data["body"]
             if data.get("schema_name"):
@@ -251,7 +263,7 @@ def normalise_body(kind: str, *, body: Optional[dict], yaml: Optional[str],
             flow_id = str(data.get("flow_id", "")).strip()
             if not flow_id:
                 raise BadBody("A flow source needs `flow_id`.")
-            return {"source_kind": "flow", "name": name, "flow_id": flow_id}
+            return {"source_kind": "flow", "name": name, "flow_id": flow_id, **key_fields}
         raise BadBody("A source needs `source_kind` to be one of dataset, external_db, api, flow.")
 
     raise BadBody(f"Unknown artefact kind '{kind}'.")
@@ -263,7 +275,8 @@ class ResolvedFlow:
                  tco_bytes: Optional[bytes], tco_version_id: Optional[str],
                  computed: list[tuple[str, str]], computed_version_id: Optional[str],
                  sql_computed: Optional[list[tuple[str, str, str]]] = None,
-                 attached: Optional[dict] = None):
+                 attached: Optional[dict] = None,
+                 attached_keys: Optional[dict] = None):
         self.fc = fc
         self.config_version_id = config_version_id
         self.tco_bytes = tco_bytes
@@ -272,6 +285,7 @@ class ResolvedFlow:
         self.computed_version_id = computed_version_id
         self.sql_computed = sql_computed or []
         self.attached = attached or {}
+        self.attached_keys = attached_keys or {}
 
 
 def resolve_flow(s: Session, flow: Flow, _chain: frozenset = frozenset()) -> ResolvedFlow:
@@ -309,6 +323,7 @@ def resolve_flow(s: Session, flow: Flow, _chain: frozenset = frozenset()) -> Res
         comp_vid = pver.id
 
     attached: dict = {}
+    attached_keys: dict = {}
     if flow.source_artefact_id:
         from app.services import source_recipe
         sver = repo.resolve_ref(s, flow.source_artefact_id, flow.source_version_no)
@@ -317,9 +332,12 @@ def resolve_flow(s: Session, flow: Flow, _chain: frozenset = frozenset()) -> Res
         if sver.body.get("source_kind") == "flow" and sver.body.get("flow_id") in (_chain | {flow.id}):
             raise ValueError(f"référence circulaire de flux détectée sur la source « {sver.body['name']} ».")
         frame = source_recipe.build_source_frame(s, sver.body, scope, _chain=_chain | {flow.id})
-        attached[sver.body["name"]] = frame
+        name = sver.body["name"]
+        attached[name] = frame
+        if sver.body.get("join_local") and sver.body.get("join_source"):
+            attached_keys[name] = (sver.body["join_local"], sver.body["join_source"])
 
-    return ResolvedFlow(fc, cver.id, tco_bytes, tco_vid, computed, comp_vid, sql_computed, attached)
+    return ResolvedFlow(fc, cver.id, tco_bytes, tco_vid, computed, comp_vid, sql_computed, attached, attached_keys)
 
 
 def run_flow(s: Session, flow: Flow, raw: Optional[bytes], source_name: str,
@@ -334,7 +352,7 @@ def run_flow(s: Session, flow: Flow, raw: Optional[bytes], source_name: str,
     rf = resolve_flow(s, flow, _chain=_chain)
     res = engine.run(
         raw=raw, fc=rf.fc, tco_bytes=rf.tco_bytes, computed=rf.computed,
-        sql_computed=rf.sql_computed, attached=rf.attached,
+        sql_computed=rf.sql_computed, attached=rf.attached, attached_keys=rf.attached_keys,
         export_filename=export_filename or flow.default_export_filename or "export",
         apply_filters=apply_filters, source_df=source_df,
     )

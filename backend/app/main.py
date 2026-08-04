@@ -30,7 +30,8 @@ from app.models import (
     FieldConfig, FileResponse, HeaderRequest, ImportRequest, ImportResponse,
     MatchInfo, Presets, ProcessRequest, ProcessResponse, ProcessStats, RowsResponse, TablePreview, TcoResponse,
     PipelineResponse, SourceInfo, AttachDatasetSource, AttachSessionSource, ReorderRowRequest,
-    AttachExternalDbSource, AttachApiSource, AttachFlowSource, ExternalDbSessionRequest, ApiSessionRequest,
+    AttachExternalDbSource, AttachApiSource, AttachFlowSource, SetSourceKey,
+    ExternalDbSessionRequest, ApiSessionRequest,
 )
 from app.services.config_service import ConfigService
 from app.services.file_service import FileService
@@ -424,11 +425,16 @@ def _check_declared_schema(s: DbSession, connection: str, scope: str,
         raise HTTPException(422, str(e))
 
 
+def _source_info(sess, name: str, df: pd.DataFrame) -> SourceInfo:
+    key = sess.attached_keys.get(name)
+    return SourceInfo(name=name, columns=list(df.columns), row_count=int(len(df)),
+                      join_local=key[0] if key else None, join_source=key[1] if key else None)
+
+
 @app.get("/api/files/{sid}/sources", response_model=list[SourceInfo])
 def list_sources(sid: str, s: DbSession = Depends(get_session)):
     with _session(sid, s) as sess:
-        return [SourceInfo(name=n, columns=list(df.columns), row_count=int(len(df)))
-                for n, df in sess.attached.items()]
+        return [_source_info(sess, n, df) for n, df in sess.attached.items()]
 
 
 @app.post("/api/files/{sid}/sources/dataset", response_model=SourceInfo)
@@ -464,7 +470,7 @@ def attach_dataset_source(sid: str, req: AttachDatasetSource,
         df, _masked = _ds.mask_encrypted_columns(df)
 
         sess.attached[name] = df
-        return SourceInfo(name=name, columns=list(df.columns), row_count=int(len(df)))
+        return _source_info(sess, name, df)
 
 
 @app.post("/api/files/{sid}/sources/session", response_model=SourceInfo)
@@ -491,7 +497,7 @@ def attach_session_source(sid: str, req: AttachSessionSource,
         if not name:
             raise HTTPException(422, "La source a besoin d'un nom.")
         sess.attached[name] = df
-        return SourceInfo(name=name, columns=list(df.columns), row_count=int(len(df)))
+        return _source_info(sess, name, df)
 
 
 @app.post("/api/files/{sid}/sources/upload", response_model=SourceInfo)
@@ -513,7 +519,7 @@ async def attach_upload_source(sid: str, name: str = Form(...), file: UploadFile
             raise HTTPException(422, f"Impossible de lire le fichier : {e}")
 
         sess.attached[name] = df
-        return SourceInfo(name=name, columns=list(df.columns), row_count=int(len(df)))
+        return _source_info(sess, name, df)
 
 
 @app.post("/api/files/{sid}/sources/external_db", response_model=SourceInfo)
@@ -558,7 +564,7 @@ def attach_external_db_source(sid: str, req: AttachExternalDbSource, env: str = 
 
         _check_declared_schema(s, req.connection, scope, req.schema_name, df)
         sess.attached[name] = df
-        return SourceInfo(name=name, columns=list(df.columns), row_count=int(len(df)))
+        return _source_info(sess, name, df)
 
 
 @app.post("/api/files/{sid}/sources/api", response_model=SourceInfo)
@@ -632,7 +638,7 @@ def attach_api_source(sid: str, req: AttachApiSource, env: str = "",
 
         _check_declared_schema(s, req.connection, scope, req.schema_name, df)
         sess.attached[name] = df
-        return SourceInfo(name=name, columns=list(df.columns), row_count=int(len(df)))
+        return _source_info(sess, name, df)
 
 
 @app.post("/api/files/{sid}/sources/flow", response_model=SourceInfo)
@@ -664,13 +670,37 @@ def attach_flow_source(sid: str, req: AttachFlowSource, env: str = "",
         if len(df) > MAX_SOURCE_ROWS:
             raise HTTPException(413, f"Le résultat du flux contient plus de {MAX_SOURCE_ROWS} lignes.")
         sess.attached[name] = df
-        return SourceInfo(name=name, columns=list(df.columns), row_count=int(len(df)))
+        return _source_info(sess, name, df)
 
 
 @app.delete("/api/files/{sid}/sources/{name}")
 def detach_source(sid: str, name: str, s: DbSession = Depends(get_session)):
     with _session(sid, s) as sess:
         sess.attached.pop(name, None)
+        sess.attached_keys.pop(name, None)
+        return {"ok": True}
+
+
+@app.put("/api/files/{sid}/sources/{name}/key", response_model=SourceInfo)
+def set_source_key(sid: str, name: str, req: SetSourceKey, s: DbSession = Depends(get_session)):
+    """A single-column join key on a source already attached — declared once
+    here so a plain computed column can address it as [name.field] instead
+    of only through a SQL block. The source's columns aren't known until
+    after it's attached, so this is always a separate step from attaching."""
+    with _session(sid, s) as sess:
+        df = sess.attached.get(name)
+        if df is None:
+            raise HTTPException(404, f"Source « {name} » introuvable.")
+        if req.source_column not in df.columns:
+            raise HTTPException(422, f"« {req.source_column} » n'existe pas dans la source « {name} ».")
+        sess.attached_keys[name] = (req.local_column, req.source_column)
+        return _source_info(sess, name, df)
+
+
+@app.delete("/api/files/{sid}/sources/{name}/key")
+def clear_source_key(sid: str, name: str, s: DbSession = Depends(get_session)):
+    with _session(sid, s) as sess:
+        sess.attached_keys.pop(name, None)
         return {"ok": True}
 
 
@@ -1356,6 +1386,7 @@ def process(sid: str, req: ProcessRequest, env: str = "",
                 sql_computed=[(c.name, c.expression, c.mode) for c in req.sql_computed],
                 style_rules=[(r.column, r.expression) for r in req.style_rules],
                 attached=sess.attached,
+                attached_keys=sess.attached_keys,
                 sensitive_cols=declared_sensitive,
                 report_flagged_only=True,
                 variables=effective_variables,

@@ -297,6 +297,19 @@ export const api = {
     fetch(`${BASE}/files/${sid}/sources/${encodeURIComponent(name)}`,
          { method: "DELETE", headers: authHeaders() }).then((r) => json<{ ok: boolean }>(r)),
 
+  /** A single-column join key on an already-attached source, declared once
+   * so a plain computed column can use [name.field] directly instead of
+   * only through a SQL block. */
+  setSourceKey: (sid: string, name: string, localColumn: string, sourceColumn: string) =>
+    fetch(`${BASE}/files/${sid}/sources/${encodeURIComponent(name)}/key`, {
+      method: "PUT", headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ local_column: localColumn, source_column: sourceColumn }),
+    }).then((r) => json<SourceInfo>(r)),
+
+  clearSourceKey: (sid: string, name: string) =>
+    fetch(`${BASE}/files/${sid}/sources/${encodeURIComponent(name)}/key`,
+         { method: "DELETE", headers: authHeaders() }).then((r) => json<{ ok: boolean }>(r)),
+
   /** Référentiel variables pickable outside the référentiel itself. */
   listAvailableVariables: (kind = "") =>
     fetch(`${BASE}/variables/available?env=${encodeURIComponent(CURRENT_ENV)}${kind ? `&kind=${encodeURIComponent(kind)}` : ""}`,

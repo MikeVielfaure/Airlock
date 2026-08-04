@@ -26,6 +26,10 @@ export interface SourceInfo {
   name: string;
   columns: string[];
   row_count: number;
+  // The declared join key, if any — lets a plain computed column address
+  // this source as [name.field] instead of only through a SQL block.
+  join_local?: string | null;
+  join_source?: string | null;
 }
 
 /** A référentiel variable pickable from outside the référentiel itself — a

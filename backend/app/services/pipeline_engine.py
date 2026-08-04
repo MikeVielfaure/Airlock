@@ -128,6 +128,7 @@ class PipelineEngine:
         computed: list[tuple[str, str]] | None = None,
         sql_computed: list[tuple[str, str, str]] | None = None,
         attached: dict[str, pd.DataFrame] | None = None,
+        attached_keys: dict[str, tuple[str, str]] | None = None,
         export_filename: str = "export",
         apply_filters=None,
         source_df: pd.DataFrame | None = None,
@@ -246,7 +247,7 @@ class PipelineEngine:
                 df_edited=work, visible_cols=visible, field_configs=fields,
                 tco_df=tco_df, identifier_fields=id_fields,
                 computed=computed or [], sql_computed=sql_computed or [],
-                attached=attached or {}, sensitive_cols=sensitive_cols,
+                attached=attached or {}, attached_keys=attached_keys or {}, sensitive_cols=sensitive_cols,
                 report_flagged_only=True, variables=fc.variables,
             )
         except Exception as e:  # noqa: BLE001
