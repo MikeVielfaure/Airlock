@@ -758,10 +758,11 @@ export default function App() {
     api.envProfile(env).then(setProfile).catch(() => setProfile(null));
   }, [env]);
 
-  // Re-run after mount/env change, and also handed to KeysPanel so creating
-  // or revoking a key there is reflected immediately in the FieldEditor's
-  // selector — otherwise a key created this session would stay invisible to
-  // "Confidentialité" until an unrelated env switch happened to remount it.
+  // Re-run after mount/env change/login, and also handed to KeysPanel so
+  // creating or revoking a key there is reflected immediately in the
+  // FieldEditor's selector — otherwise a key created this session would
+  // stay invisible to "Confidentialité" until an unrelated env switch
+  // happened to remount it.
   const refreshAvailableKeys = useCallback(() => {
     api.keyStatus().then((st) => {
       setKeysAvailable(st.available);
@@ -772,7 +773,18 @@ export default function App() {
         .catch(() => setAvailableKeys([]));
     }).catch(() => { setKeysAvailable(false); setAvailableKeys([]); });
   }, []);
-  useEffect(() => { refreshAvailableKeys(); }, [env, refreshAvailableKeys]);
+  useEffect(() => {
+    // This effect also runs on the very first render, before the login
+    // gate resolves — `GET /api/keys` needs a signed-in caller once any
+    // account exists, so that first attempt 401s and silently leaves the
+    // list empty. Re-running once `gateDone` flips true (right after
+    // login) is what actually populates it; `env` alone never changes
+    // across that transition, so depending on it alone was not enough —
+    // found live: an existing key from a past session simply never
+    // appeared in FieldEditor's selector on a fresh page load.
+    if (!gateDone) return;
+    refreshAvailableKeys();
+  }, [env, gateDone, refreshAvailableKeys]);
 
   /**
    * A module is shown when the profile lists it (no profile = everything).
