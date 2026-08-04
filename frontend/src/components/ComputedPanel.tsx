@@ -140,14 +140,21 @@ function SqlBlock({ col, columns, sources, serverError, onChange, onRemove }: {
     if (!sourceName || !validId.length || !validFill.length) return;
     const select = ["self._row_id", ...validFill.map((p) => `${sourceName}.${p.src} AS ${p.local}`)].join(", ");
     const on = validId.map((p) => `self.${p.local} = ${sourceName}.${p.src}`).join(" AND ");
-    onChange({ ...col, mode: "fill_empty",
+    // "Compléter le vide" only ever fills a column that already exists (the
+    // backend refuses otherwise, on purpose — see duck_compute.py) — so a
+    // target typed as a brand-new name needs "Remplacer" instead, or every
+    // first-time join into a new column would fail right after "Générer".
+    const allExist = validFill.every((p) => columns.includes(p.local));
+    onChange({ ...col, mode: allExist ? "fill_empty" : "replace",
               expression: `SELECT ${select}\nFROM self LEFT JOIN ${sourceName} ON ${on}` });
   };
 
   const generateAggregate = () => {
     if (!sourceName || !aggName || (aggFunc !== "COUNT" && !aggCol)) return;
     const arg = aggCol || "*";
-    onChange({ ...col, mode: "fill_empty",
+    // Same "compléter n'introduit jamais de colonne" rule as generate() below —
+    // an aggregate's whole point is usually a brand-new summary column.
+    onChange({ ...col, mode: columns.includes(aggName) ? "fill_empty" : "replace",
               expression: `SELECT self._row_id, (SELECT ${aggFunc}(${arg}) FROM ${sourceName}) AS ${aggName}\nFROM self` });
   };
 
@@ -212,20 +219,22 @@ function SqlBlock({ col, columns, sources, serverError, onChange, onRemove }: {
                 + identifiant
               </button>
 
-              <span className="csub">Colonnes à compléter (source → locale)</span>
+              <span className="csub">Colonnes à compléter (source → locale, existante ou nouvelle)</span>
+              <datalist id="sql-fill-local-cols">
+                {columns.map((c) => <option key={c} value={c} />)}
+              </datalist>
               {fillPairs.map((p, i) => (
                 <div className="sql-pair" key={i}>
                   <select value={p.src} disabled={!source} onChange={(e) => setFillPairs(fillPairs.map((x, j) =>
-                    (j === i ? { ...x, src: e.target.value } : x)))}>
+                    (j === i ? { ...x, src: e.target.value, local: x.local || e.target.value } : x)))}>
                     <option value="">colonne source…</option>
                     {(source?.columns ?? []).map((c) => <option key={c} value={c}>{c}</option>)}
                   </select>
                   <span>→</span>
-                  <select value={p.local} onChange={(e) => setFillPairs(fillPairs.map((x, j) =>
-                    (j === i ? { ...x, local: e.target.value } : x)))}>
-                    <option value="">colonne locale…</option>
-                    {columns.map((c) => <option key={c} value={c}>{c}</option>)}
-                  </select>
+                  <input className="mono-input" list="sql-fill-local-cols" value={p.local}
+                    placeholder="colonne locale (existante ou nouvelle)…"
+                    onChange={(e) => setFillPairs(fillPairs.map((x, j) =>
+                      (j === i ? { ...x, local: e.target.value.replace(/\s+/g, "_") } : x)))} />
                   <button className="hclear" onClick={() => setFillPairs(fillPairs.filter((_, j) => j !== i))}>×</button>
                 </div>
               ))}
@@ -391,7 +400,9 @@ export function ComputedPanel({ sid, tabs, columns, computed, setComputed, sqlCo
     if (!sid || !flowSrcName.trim() || !flowSrcId) return;
     try {
       await api.attachFlowSource(sid, flowSrcName.trim(), flowSrcId);
-      setFlowSrcName(""); setFlowSrcId("");
+      // Deliberately not cleared: a key can only be declared once the source
+      // is attached (its columns aren't known before), and "Enregistrer" —
+      // which picks up that key — needs this same name still in the field.
       refreshSources();
       notify(`Source « ${flowSrcName.trim()} » attachée.`, "ok");
     } catch (e) { notify(e instanceof Error ? e.message : "Échec de l'attachement.", "err"); }
@@ -433,7 +444,7 @@ export function ComputedPanel({ sid, tabs, columns, computed, setComputed, sqlCo
     const params = Object.fromEntries(dbParams.filter((p) => p.key.trim()).map((p) => [p.key.trim(), p.value]));
     try {
       await api.attachExternalDbSource(sid, dbName.trim(), dbConn, dbQuery.trim(), params, dbSchemaName || undefined);
-      setDbName(""); setDbQuery(""); setDbParams([]);
+      // Deliberately not cleared — see attachFlow's comment above.
       refreshSources();
       notify(`Source « ${dbName.trim()} » attachée.`, "ok");
     } catch (e) { notify(e instanceof Error ? e.message : "Échec de l'attachement.", "err"); }
@@ -473,7 +484,7 @@ export function ComputedPanel({ sid, tabs, columns, computed, setComputed, sqlCo
     try {
       await api.attachApiSource(sid, apiName.trim(), apiConn, apiPath, apiMethod,
         apiResponseKind, apiDataPath, body, apiSchemaName || undefined);
-      setApiName(""); setApiPath(""); setApiDataPath(""); setApiBody("");
+      // Deliberately not cleared — see attachFlow's comment above.
       refreshSources();
       notify(`Source « ${apiName.trim()} » attachée.`, "ok");
     } catch (e) { notify(e instanceof Error ? e.message : "Échec de l'attachement.", "err"); }
@@ -483,7 +494,7 @@ export function ComputedPanel({ sid, tabs, columns, computed, setComputed, sqlCo
     if (!sid || !attachName.trim() || !attachDatasetId) return;
     try {
       await api.attachDatasetSource(sid, attachName.trim(), attachDatasetId);
-      setAttachName(""); setAttachDatasetId("");
+      // Deliberately not cleared — see attachFlow's comment above.
       refreshSources();
       notify(`Source « ${attachName.trim()} » attachée.`, "ok");
     } catch (e) { notify(e instanceof Error ? e.message : "Échec de l'attachement.", "err"); }

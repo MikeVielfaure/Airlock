@@ -48,7 +48,7 @@ def create_artefact(s: Session, kind: str, name: str, body: dict,
         Artefact.kind == kind, Artefact.name == name, Artefact.environment == env,
         Artefact.archived.is_(False)))
     if existing is not None:
-        raise Conflict(f"A {kind} named '{name}' already exists in '{env}' (id {existing.id}).")
+        raise Conflict(f"Un « {kind} » nommé « {name} » existe déjà dans « {env} » (id {existing.id}).")
     art = Artefact(kind=kind, name=name, description=description,
                    environment=env, latest_version_no=1,
                    derived_from=derived_from or "",
