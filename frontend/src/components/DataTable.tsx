@@ -155,6 +155,7 @@ export function DataTable(props: Props) {
   const [enc, setEnc] = useState(validEnc);
   const [delim, setDelim] = useState(validDelim);
   const [onlyFiltered, setOnlyFiltered] = useState(false);
+  const [includeStyle, setIncludeStyle] = useState(false);
   useEffect(() => { setName(defaultName); setEnc(validEnc); setDelim(validDelim); }, [defaultName, validEnc, validDelim]);
 
   // ── server-side pagination (after a run) ─────────────────
@@ -438,6 +439,7 @@ export function DataTable(props: Props) {
   const doExport = () => {
     if (!sid) return;
     const qs = new URLSearchParams({ fmt, encoding: enc, delimiter: delim, filename: name || "export" });
+    if (fmt === "xlsx" && includeStyle) qs.set("style", "1");
     if (onlyFiltered) {
       const active = Object.fromEntries(Object.entries(filters).filter(([, v]) => v.trim() !== ""));
       if (Object.keys(active).length) qs.append("filters", JSON.stringify(active));
@@ -741,6 +743,15 @@ export function DataTable(props: Props) {
                 <div className="csub">{anyFilter
                   ? "Applique vos filtres de colonne à tout le fichier, pas seulement à l'échantillon."
                   : "Définissez un filtre de colonne ci-dessus pour activer cette option."}</div>
+              </span>
+            </label>
+            <label className="check" style={{ alignSelf: "end", opacity: fmt === "xlsx" ? 1 : 0.5 }}>
+              <input type="checkbox" checked={includeStyle} disabled={fmt !== "xlsx"}
+                onChange={(e) => setIncludeStyle(e.target.checked)} />
+              <span className="ctxt">Inclure la mise en forme
+                <div className="csub">{fmt === "xlsx"
+                  ? "Applique les règles de « Mise en forme » comme un vrai style de cellule Excel."
+                  : "Disponible seulement pour l'export Excel (.xlsx)."}</div>
               </span>
             </label>
             <button className="btn primary" onClick={doExport} disabled={!sid}>

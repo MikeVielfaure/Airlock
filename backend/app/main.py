@@ -44,6 +44,7 @@ from app.services.function_service import (
 from app.services.process_service import ProcessService
 from app.services.tco_service import TcoService
 from app.services import diff_service as _diff
+from app.services import xlsx_style
 from app.session import store
 from app.db import commit, get_session, init_db, session_scope
 from app.logging_setup import configure_logging
@@ -1731,6 +1732,7 @@ def export_table(
     delimiter: str = ";",
     filename: str = "export",
     filters: str = "",
+    style: bool = False,
     _cap=Depends(require_capability("file.export")),
     s: DbSession = Depends(get_session),
 ):
@@ -1775,7 +1777,15 @@ def export_table(
 
         if fmt.lower() == "xlsx":
             buf = io.BytesIO()
-            out_df.to_excel(buf, index=False, na_rep="")
+            # Style rules already compute a per-cell token for the on-screen
+            # grid (`sess.last_styles`, set at /process) — applying it here
+            # too is the only new work; nothing is recomputed.
+            if style and sess.last_styles:
+                with pd.ExcelWriter(buf, engine="openpyxl") as writer:
+                    out_df.to_excel(writer, index=False, na_rep="", sheet_name="export")
+                    xlsx_style.apply_xlsx_styles(writer.sheets["export"], out_df, sess.last_styles)
+            else:
+                out_df.to_excel(buf, index=False, na_rep="")
             buf.seek(0)
             return StreamingResponse(
                 buf,
