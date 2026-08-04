@@ -306,6 +306,12 @@ function DiffResultView({ r }: { r: DiffResult }) {
         <span>Modifiées <b>{r.changed}</b></span>
         <span className="csub">Identiques {r.identical}</span>
       </div>
+      {r.columns_excluded_sensitive.length > 0 && (
+        <p className="hint">
+          Colonne(s) confidentielle(s) exclue(s) de la comparaison, jamais montrée(s) ici : {" "}
+          <code>{r.columns_excluded_sensitive.join(", ")}</code>.
+        </p>
+      )}
       {r.sample.length === 0 ? (
         <p className="hint">Aucune différence — les deux tables correspondent sur cette clé.</p>
       ) : (

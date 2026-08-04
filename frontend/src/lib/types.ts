@@ -51,6 +51,12 @@ export interface DiffResult {
   changed: number;
   identical: number;
   columns_compared: string[];
+  // Confidential columns are never compared — masking both sides equally
+  // would make them silently read as "identical" whether or not they
+  // actually are, and masking only one side would leak the other's real
+  // value. Excluded outright instead, and named here so nothing is hidden
+  // silently.
+  columns_excluded_sensitive: string[];
   sample: DiffSampleRow[];
   truncated: boolean;
 }

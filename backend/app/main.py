@@ -716,14 +716,20 @@ def diff_source(sid: str, name: str, req: DiffRequest, s: DbSession = Depends(ge
         if right is None:
             raise HTTPException(404, f"Source « {name} » introuvable.")
         left = sess.active_df().copy()
+        right = right.copy()
         # A column already flagged sensitive by the last run must not leak its
         # real value into a diff any more than into the grid itself — same
-        # depth-of-masking rule as everywhere else, applied before comparing.
+        # depth-of-masking rule as everywhere else. Both sides are masked
+        # (not just the session's), and `diff_frames` excludes them from the
+        # comparison entirely rather than letting a masked-vs-real mismatch
+        # read as a false "changed" on every row.
         for col in sess.sensitivity:
             if col in left.columns:
                 left[col] = _crypto.MASK
+            if col in right.columns:
+                right[col] = _crypto.MASK
         try:
-            return _diff.diff_frames(left, right, req.keys)
+            return _diff.diff_frames(left, right, req.keys, sensitive=frozenset(sess.sensitivity))
         except ValueError as e:
             raise HTTPException(422, str(e))
 
