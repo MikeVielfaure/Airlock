@@ -147,6 +147,21 @@ def run(req: RunRequest, s: Session = Depends(get_session),
             "preview": _preview(result["records"], req.limit)}
 
 
+def _open_as_session(s: Session, records: list) -> "FileResponse":  # noqa: F821 — imported at call site
+    from app.dataset_routes import _table_preview
+    from app.models import FileResponse
+    from app.session import store
+
+    df = pivot_service.records_to_frame(records).drop(columns=["_doc"], errors="ignore")
+    if len(df) > 200_000:
+        raise HTTPException(
+            413, f"Le résultat contient {len(df)} lignes, au-delà de la limite "
+                 f"de 200 000. Utilisez une brique `dataset_write` pour l'écrire par lots.")
+    sid = store.create(s, df, file_type="FLOW", encoding="N/A", delimiter="N/A")
+    return FileResponse(session_id=sid, type="FLOW", encoding="N/A",
+                        delimiter="N/A", preview=_table_preview(df))
+
+
 @router.post("/adopt")
 def adopt(req: RunRequest, s: Session = Depends(get_session),
           user=Depends(require_user)):
@@ -157,12 +172,13 @@ def adopt(req: RunRequest, s: Session = Depends(get_session),
     cross-referenced interactively: once adopted, Schéma & Règles, Calculs,
     Rapport and Correspondances apply exactly as they would to an uploaded
     file, because none of them know or care where a session came from.
+
+    A graph that names two or more nodes in `outputs` opens each of them as
+    its own tab instead of a single session — still one run, since every
+    node's result is already sitting in `all_records` by the time the graph
+    finishes; nothing is executed twice.
     """
     _check_run_capability(s, user, req.environment)
-    from app.dataset_routes import _table_preview
-    from app.models import FileResponse
-    from app.session import store
-
     graph = _resolve_graph(s, req)
     params = _bind_params(graph, req.params)
     from app.ops_routes import run_and_record
@@ -170,15 +186,11 @@ def adopt(req: RunRequest, s: Session = Depends(get_session),
         s, graph, params=params, environment=req.environment or "default",
         graph_id=req.graph_id or "", loaders=_loaders(s))
 
-    df = pivot_service.records_to_frame(result["records"]).drop(columns=["_doc"], errors="ignore")
-    if len(df) > 200_000:
-        raise HTTPException(
-            413, f"Le résultat contient {len(df)} lignes, au-delà de la limite "
-                 f"de 200 000. Utilisez une brique `dataset_write` pour l'écrire par lots.")
+    if len(graph.outputs) > 1:
+        sessions = [_open_as_session(s, result["all_records"][nid]) for nid in graph.outputs]
+        return {"sessions": sessions}
 
-    sid = store.create(s, df, file_type="FLOW", encoding="N/A", delimiter="N/A")
-    return FileResponse(session_id=sid, type="FLOW", encoding="N/A",
-                        delimiter="N/A", preview=_table_preview(df))
+    return _open_as_session(s, result["records"])
 
 
 @router.post("/{graph_id}/call")

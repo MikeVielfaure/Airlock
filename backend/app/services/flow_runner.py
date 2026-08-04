@@ -1271,7 +1271,16 @@ def run_graph(graph: FlowGraph, ctx: RunContext,
             **({"meta": res.meta} if res.meta else {}),
         })
 
-    out_id = graph.resolve_output()
+    # A graph naming several `outputs` may have no single unambiguous
+    # terminal — that is expected, not an error, since the caller (`adopt`)
+    # reads `all_records` instead; fall back to the first named output rather
+    # than making `resolve_output()`'s "several terminal nodes" refusal fire
+    # for a graph that was deliberately built to have more than one.
+    out_id = graph.outputs[0] if len(graph.outputs) > 1 else graph.resolve_output()
     out = results[out_id]
     return {"records": out.records, "output": out_id, "meta": out.meta,
-            "trace": ctx.trace}
+            "trace": ctx.trace,
+            # Every node's own result, additive and unused by the single-output
+            # callers (`run`, `call_as_api`) — what lets `adopt` open several
+            # terminal nodes as separate tabs without a second execution.
+            "all_records": {nid: r.records for nid, r in results.items()}}

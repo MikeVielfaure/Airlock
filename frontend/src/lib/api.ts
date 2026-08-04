@@ -881,7 +881,9 @@ export const api = {
     fetch(`${BASE}/graphs/adopt`, {
       method: "POST", headers: authHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({ ...body, environment: CURRENT_ENV }),
-    }).then((r) => json<FileResponse>(r)),
+      // A graph naming 2+ `outputs` returns { sessions: [...] } instead of a
+      // single FileResponse — one open tab per named node, one run.
+    }).then((r) => json<FileResponse | { sessions: FileResponse[] }>(r)),
 
   /** The stored graph document, to reopen on the canvas. */
   loadGraph: (id: string) => fetch(`${BASE}/artefacts/graph/${id}`, { headers: authHeaders() })

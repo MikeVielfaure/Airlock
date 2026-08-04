@@ -131,6 +131,11 @@ class FlowGraph(BaseModel):
     edges: List[FlowEdge] = Field(default_factory=list)
     # Which node's result the flow returns. Defaults to the single terminal node.
     output: str = ""
+    # Optional: several terminal nodes to open as separate tabs at once when
+    # adopted as a working session (a flow producing more than one related
+    # table, rather than one). Empty is the default and changes nothing about
+    # `output`/`resolve_output()` — this is additive, read only by `adopt`.
+    outputs: List[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _coherent(self) -> "FlowGraph":
@@ -148,6 +153,9 @@ class FlowGraph(BaseModel):
                 raise ValueError(f"node '{e.src}' cannot feed itself")
         if self.output and self.output not in known:
             raise ValueError(f"output names unknown node '{self.output}'")
+        unknown_outputs = [o for o in self.outputs if o not in known]
+        if unknown_outputs:
+            raise ValueError(f"outputs name unknown node(s): {', '.join(unknown_outputs)}")
         if self.nodes:
             self.topological_order()          # raises on a cycle
         return self

@@ -91,6 +91,11 @@ export function FlowCanvas({ notify, onOpenSession }: Props) {
   const [busy, setBusy] = useState("");
   const [saved, setSaved] = useState<ArtefactInfo[]>([]);
   const [showYaml, setShowYaml] = useState(false);
+  // Nodes to open as separate tabs at once when adopted — empty (the
+  // default) or a single one behaves exactly as before: one session, picked
+  // by `output`/the lone terminal. Checking 2+ is what makes a flow with
+  // several unconnected results open several tabs in one "Ouvrir comme session".
+  const [outputs, setOutputs] = useState<string[]>([]);
 
   // Options for the per-brick inspector fields (hotfolder/smtp connections,
   // stored configs, stored tables) — loaded once, refreshed on demand.
@@ -161,6 +166,13 @@ export function FlowCanvas({ notify, onOpenSession }: Props) {
       n.id === id ? { ...n, config: { ...n.config, [key]: value } } : n));
   };
 
+  // Nodes nothing reads from — the candidates for the flow's output(s),
+  // mirroring FlowGraph.terminals() on the backend exactly.
+  const terminalIds = (() => {
+    const fed = new Set(edges.map((e) => e.from));
+    return nodes.filter((n) => !fed.has(n.id)).map((n) => n.id);
+  })();
+
   /* ── serialisation: the canvas and the YAML are one graph ── */
   const toYaml = useCallback(() => {
     const lines: string[] = [`name: ${name || "flux"}`];
@@ -181,11 +193,14 @@ export function FlowCanvas({ notify, onOpenSession }: Props) {
       lines.push("edges:");
       edges.forEach((e) => lines.push(`  - {from: ${e.from}, to: ${e.to}}`));
     }
+    if (outputs.length > 1) {
+      lines.push(`outputs: [${outputs.join(", ")}]`);
+    }
     return lines.join("\n") + "\n";
-  }, [name, params, nodes, edges]);
+  }, [name, params, nodes, edges, outputs]);
 
   const loadGraph = (doc: { name?: string; nodes?: Node[]; edges?: Edge[];
-                           params?: { name: string; default: string }[] }) => {
+                           params?: { name: string; default: string }[]; outputs?: string[] }) => {
     setName(doc.name ?? "");
     setParams(doc.params ?? []);
     setNodes((doc.nodes ?? []).map((n, i) => {
@@ -198,6 +213,7 @@ export function FlowCanvas({ notify, onOpenSession }: Props) {
       };
     }));
     setEdges(doc.edges ?? []);
+    setOutputs(doc.outputs ?? []);
     setTrace([]); setFailed("");
   };
 
@@ -238,8 +254,13 @@ export function FlowCanvas({ notify, onOpenSession }: Props) {
     setBusy("adopt"); setFailed("");
     try {
       const res = await api.adoptGraph({ yaml: toYaml() });
-      notify(`Session ouverte — ${res.preview.total_rows} ligne(s).`, "ok");
-      onOpenSession?.(res);
+      if ("sessions" in res) {
+        res.sessions.forEach((s) => onOpenSession?.(s));
+        notify(`${res.sessions.length} onglet(s) ouvert(s) — ${res.sessions.map((s) => s.preview.total_rows).join(", ")} ligne(s).`, "ok");
+      } else {
+        notify(`Session ouverte — ${res.preview.total_rows} ligne(s).`, "ok");
+        onOpenSession?.(res);
+      }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       const m = msg.match(/Node '([^']+)'/);
@@ -320,6 +341,22 @@ export function FlowCanvas({ notify, onOpenSession }: Props) {
             <IconCode size={13} /> {showYaml ? "Canevas" : "YAML"}
           </button>
         </div>
+
+        {terminalIds.length > 1 && (
+          <div className="fc-bar" style={{ flexWrap: "wrap" }}>
+            <span className="csub">
+              Plusieurs sorties possibles — cochez-en 2 ou plus pour qu'« Ouvrir comme session »
+              ouvre un onglet par sortie cochée (sinon, une seule session comme avant) :
+            </span>
+            {terminalIds.map((id) => (
+              <label key={id} className="check" style={{ marginLeft: 4 }}>
+                <input type="checkbox" checked={outputs.includes(id)}
+                  onChange={(e) => setOutputs((o) => e.target.checked ? [...o, id] : o.filter((x) => x !== id))} />
+                <span className="ctxt">{id}</span>
+              </label>
+            ))}
+          </div>
+        )}
 
         {showYaml ? (
           <pre className="fc-yaml">{toYaml()}</pre>
