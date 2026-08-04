@@ -80,7 +80,7 @@ docker compose up                 # front :8080, back :8000
 
 ## État réel — à connaître
 
-**Ce qui est solide** : 621 tests backend verts sur SQLite et PostgreSQL,
+**Ce qui est solide** : 651+ tests backend verts sur SQLite et PostgreSQL,
 migrations rejouées sur base vierge, build TypeScript strict, CI (GitHub
 Actions : backend SQLite + Postgres, build + tests frontend) sur `main`/`dev`
 et les PR. **Les sessions de travail sont persistées** (`app/session.py`,
@@ -104,10 +104,28 @@ l'interface.
    utilisé par une vraie personne**. Un petit début de tests unitaires existe
    (`*.test.tsx`/`*.test.ts`, ~9 tests, dans la CI) mais ça ne remplace pas un
    usage réel.
-2. Pas de limite de taille d'upload.
-3. **La signature des `id_token` OIDC n'est pas vérifiée** — signalé dans le
-   code à l'endroit exact. Acceptable seulement parce que le jeton vient du
-   *token endpoint* en TLS.
+
+**Résolu depuis** (chantier durcissement production) :
+- ~~Pas de limite de taille d'upload~~ — `_MaxBodySizeMiddleware`
+  (`main.py`) refuse tôt sur `Content-Length` (`FX_MAX_UPLOAD_MB`, défaut
+  200 Mo) ; Caddy (`docker-compose.prod.yml`) en refuse une plus tôt encore
+  à la porte, y compris un corps chunké sans `Content-Length`.
+- ~~La signature des `id_token` OIDC n'est pas vérifiée~~ — périmé : déjà
+  vérifiée via JWKS (`decode_id_token`, `auth_service.py`), dix tests
+  dédiés (`test_oidc_signature.py`). Voir le README pour le détail.
+- CORS était `allow_origins=["*"]` en dur — configurable par
+  `FX_CORS_ORIGINS` maintenant.
+- Pas de TLS/reverse proxy, pas de sauvegarde Postgres, secret
+  `FX_MASTER_KEY` sans gestion dédiée — couverts par
+  `docker-compose.prod.yml` + `Caddyfile` (HTTPS automatique via Let's
+  Encrypt), `scripts/backup_postgres.sh`/`restore_postgres.sh` (dump SQL
+  gzippé + rotation, cron documenté dans le README), `.env.example`.
+- L'interface de confidentialité (créer une clé, détenteurs, audit,
+  déclarer un champ confidentiel) a désormais une UI (`KeysPanel.tsx`) —
+  avant elle n'était atteignable qu'en API directe. En la construisant,
+  trois fuites de masquage réelles ont été trouvées et corrigées (la
+  grille, l'export, le rapport intégré à `/process`) : voir les commits
+  `77a75ce`/`5874612` sur `dev`.
 
 ## Regarder le frontend
 

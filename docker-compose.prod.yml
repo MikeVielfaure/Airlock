@@ -1,0 +1,23 @@
+# Overlay for a real deployment — used together with docker-compose.yml
+# (and explicitly skips docker-compose.override.yml's dev-only ports,
+# since Docker Compose only auto-loads override.yml when no -f is given):
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+#
+# The base docker-compose.yml publishes no host ports on its own — only
+# docker-compose.override.yml (local dev) and this file (via Caddy) do.
+# Letting backend/frontend answer directly on the host here too would mean
+# anyone could reach them without TLS or the upload size limit at the edge.
+services:
+  caddy:
+    image: caddy:2-alpine
+    ports: ["80:80", "443:443"]
+    environment:
+      DOMAIN: ${DOMAIN:-localhost}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on: [frontend]
+volumes:
+  caddy_data:
+  caddy_config:

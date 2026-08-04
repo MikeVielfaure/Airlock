@@ -15,13 +15,14 @@ import io
 import json
 import base64
 import logging
+import os
 import time
 
 import numpy as np
 import pandas as pd
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 from app.models import (
     AddRowsRequest, BlankSessionRequest, CellEdit, DeleteRowsRequest, EditCellsRequest, EditCellsResponse,
@@ -91,9 +92,49 @@ app.include_router(run_router)        # flows served at a readable address, with
 app.include_router(env_router)        # environment profiles: modules, pinned config, actions
 app.include_router(ops_router)        # connection points + the operations table      # visual flows: bricks wired into a graph, callable as an API   # pivot central: to-object, convert anything<->anything, suggest
 
+_MAX_UPLOAD_BYTES = int(os.environ.get("FX_MAX_UPLOAD_MB", "200")) * 1024 * 1024
+
+
+class _MaxBodySizeMiddleware:
+    """
+    Refuse early on Content-Length rather than let pandas load an enormous
+    file into memory. This is the backend's own line of defense — the
+    reverse proxy in front (Caddy in `docker-compose.prod.yml`) refuses a
+    request far earlier still, before these bytes ever reach this
+    container, including a chunked body with no Content-Length that this
+    check alone cannot see coming.
+    """
+    def __init__(self, app, max_bytes: int):
+        self.app = app
+        self.max_bytes = max_bytes
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http":
+            for k, v in scope.get("headers", []):
+                if k == b"content-length" and int(v) > self.max_bytes:
+                    resp = Response(
+                        f"Fichier trop volumineux (max {self.max_bytes // (1024 * 1024)} Mo).",
+                        status_code=413)
+                    await resp(scope, receive, send)
+                    return
+        await self.app(scope, receive, send)
+
+
+# Added before CORSMiddleware so CORS ends up outermost (Starlette wraps
+# the LAST-added middleware around all the others) — a 413 from this check
+# must still carry CORS headers, or a cross-origin browser call sees an
+# opaque CORS failure instead of the real, readable error.
+app.add_middleware(_MaxBodySizeMiddleware, max_bytes=_MAX_UPLOAD_BYTES)
+
+def _parse_cors_origins(raw: str) -> list[str]:
+    """Empty/unset stays `["*"]` so local dev keeps working unchanged; set
+    FX_CORS_ORIGINS to the real domain(s), comma-separated, once one exists."""
+    return [o.strip() for o in raw.split(",") if o.strip()] or ["*"]
+
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],          # tighten for production
+    allow_origins=_parse_cors_origins(os.environ.get("FX_CORS_ORIGINS", "*")),
     allow_methods=["*"],
     allow_headers=["*"],
 )

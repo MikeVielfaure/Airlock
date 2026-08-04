@@ -1,0 +1,21 @@
+# Reverse proxy + TLS for a real deployment (see docker-compose.prod.yml).
+#
+# {$DOMAIN} comes from the DOMAIN environment variable (.env). Point it at
+# your real domain once you have one — Caddy then gets a Let's Encrypt
+# certificate and renews it automatically, no config change needed. Until
+# then, DOMAIN=localhost serves HTTPS too — verified live — but with a
+# certificate from Caddy's own internal CA rather than Let's Encrypt (which
+# cannot issue for "localhost"), so a browser warns until either a real
+# domain is set or Caddy's local root CA is trusted manually.
+{$DOMAIN:localhost} {
+	reverse_proxy frontend:80
+
+	# Comfortably above FX_MAX_UPLOAD_MB (200 by default) so the backend's
+	# own clear error message is what a normal oversized upload sees —
+	# this is only the outer net for a request that shouldn't have made it
+	# this far at all (e.g. no Content-Length, so the backend's own check
+	# never got a chance to fire).
+	request_body {
+		max_size 210MB
+	}
+}

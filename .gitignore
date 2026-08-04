@@ -7,3 +7,4 @@ dist/
 *.tsbuildinfo
 .env
 CLAUDE.local.md
+backups/

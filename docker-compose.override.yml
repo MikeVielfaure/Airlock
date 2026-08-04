@@ -1,0 +1,13 @@
+# Local development only. Docker Compose loads this file automatically
+# alongside docker-compose.yml whenever no explicit -f is given — so
+# `docker compose up` keeps working exactly as this README describes
+# (backend/frontend reachable directly on 8000/8080).
+#
+# A real deployment names its files explicitly
+# (`-f docker-compose.yml -f docker-compose.prod.yml`), which skips this
+# override — Caddy becomes the only public door, as intended.
+services:
+  backend:
+    ports: ["8000:8000"]
+  frontend:
+    ports: ["8080:80"]

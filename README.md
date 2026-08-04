@@ -405,6 +405,77 @@ second moteur et un second dialecte pour un besoin qui n'est pas celui-là.
 
 ---
 
+## Durcissement avant une vraie mise en production (v37)
+
+Avant de mettre une instance sur un vrai serveur et de la montrer à des
+clients potentiels, trois des freins listés plus haut ont été traités —
+un quatrième s'est révélé déjà réglé en creusant.
+
+**Taille d'upload.** `POST /api/files` (et les autres routes d'upload)
+faisaient `await file.read()` sans aucune limite — un envoi énorme, par
+erreur ou non, se serait chargé entier en mémoire avant que quoi que ce
+soit ne le remarque. `_MaxBodySizeMiddleware` (`main.py`) refuse en 413 dès
+que `Content-Length` dépasse `FX_MAX_UPLOAD_MB` (défaut 200 Mo) — avant
+même que Starlette ne commence à analyser le multipart. C'est un filet
+côté application, pas une garantie de mémoire bornée pour un fichier juste
+sous la limite : pandas charge le fichier entier, une limite déjà assumée
+ailleurs dans ce projet (le blob de session).
+
+**CORS** était `allow_origins=["*"]` en dur, avec un commentaire dans le
+code qui le disait déjà : `# tighten for production`. Devenu
+`FX_CORS_ORIGINS`, une liste de domaines séparés par des virgules — vide
+ou absente, le comportement ne change pas.
+
+**TLS et reverse proxy.** `docker-compose.yml` ne change pas : il reste
+exactement ce que ce README documente pour le développement local
+(backend et frontend joignables directement sur 8000/8080). Un second
+fichier, `docker-compose.prod.yml`, s'utilise **en plus** :
+```
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+```
+`docker-compose.yml` lui-même ne publie plus aucun port directement —
+`docker-compose.override.yml` (chargé automatiquement par Compose quand on
+ne passe aucun `-f`, donc par le `docker compose up` de tous les jours) y
+remet 8000/8080 pour le développement local, exactement comme avant. En
+prod, seul `docker-compose.prod.yml` ajoute des ports : **Caddy** en
+80/443, unique porte d'entrée — laisser backend/frontend accessibles à côté
+aurait rendu le TLS et la limite de taille contournables. Caddy plutôt que
+nginx+certbot : un `Caddyfile` d'une dizaine de lignes suffit, le
+certificat Let's Encrypt s'obtient et se renouvelle tout seul, sans étape
+manuelle ni tâche cron à poser pour le renouvellement. Le domaine vient de
+la variable `DOMAIN` (`.env`) ; sans domaine encore, `DOMAIN=localhost`
+sert quand même en HTTPS (vérifié en direct) — via le certificat interne de
+Caddy plutôt que Let's Encrypt, qui ne peut pas en délivrer pour
+`localhost`, donc le navigateur avertit tant qu'aucun vrai domaine n'est
+branché. Brancher un vrai domaine plus tard ne demande qu'un redémarrage de
+Caddy.
+
+**Sauvegarde Postgres.** `scripts/backup_postgres.sh` fait un
+`pg_dump` (SQL brut, gzippé) puis supprime les dumps plus vieux que
+`FX_BACKUP_KEEP_DAYS` jours (14 par défaut) — à poser en tâche cron
+quotidienne. SQL brut plutôt que `pg_dump -Fc` : restorable par un simple
+`psql`, sans version de `pg_restore` à faire correspondre à celle qui a
+produit le dump. `scripts/restore_postgres.sh` restaure un dump donné,
+mais exige de retaper le nom de la base en confirmation avant d'écraser
+quoi que ce soit — même logique que partout ailleurs dans ce projet où un
+geste détruit des données (révoquer une clé de confidentialité, archiver
+une configuration) : pas de `-y` implicite.
+
+**Secrets.** `.env.example` (commité, sans valeur réelle) liste ce qu'un
+déploiement doit fournir — `FX_MASTER_KEY` généré par `openssl rand -base64
+32`, mot de passe Postgres, domaine. `.env` lui-même est ignoré par git
+depuis le début du projet ; la seule nouveauté est de documenter comment le
+remplir et de rappeler pourquoi `FX_MASTER_KEY` mérite une sauvegarde à
+part, durable : la perdre rend illisible tout ce qu'elle protège, et c'est
+volontaire (v25).
+
+**Ce qui s'est révélé déjà réglé** : la signature des `id_token` OIDC.
+L'affirmation inverse, plus bas dans ce document, était périmée — voir
+« Identité : comptes internes et SSO (v24) » pour l'état réel, vérifié en
+lisant le code plutôt qu'en faisant confiance à ce qui était écrit ici.
+
+---
+
 ## L'écran de l'opératrice, vérifié pour de vrai (v36)
 
 Le cas d'usage RH a été monté entièrement — environnement, configuration
@@ -1094,11 +1165,15 @@ attente d'expiration.
 
 ### Limites, à connaître avant de déployer
 
-- **La signature des `id_token` OIDC n'est pas vérifiée.** Le jeton n'est accepté
-  que lorsqu'il vient directement du *token endpoint* en TLS — le seul chemin
-  qui s'en dispense légitimement. Un déploiement acceptant des jetons d'ailleurs
-  doit d'abord valider la signature via le JWKS de l'émetteur (rotation de clés
-  et dérive d'horloge comprises). C'est signalé dans le code, à l'endroit exact.
+- ~~La signature des `id_token` OIDC n'est pas vérifiée~~ — périmé, corrigé
+  depuis : `decode_id_token` (`auth_service.py`) vérifie la signature via le
+  JWKS de l'émetteur dès qu'un fournisseur en a un (récupéré automatiquement
+  par la découverte, avec cache et rotation de clé gérés), et refuse un
+  algorithme non reconnu, une mauvaise audience/émetteur, un jeton expiré.
+  Dix tests dédiés (`test_oidc_signature.py`) couvrent ces cas. Le repli non
+  vérifié ne subsiste que pour un fournisseur configuré à la main sans passer
+  par la découverte (donc sans `jwks_url`) — un cas dégradé, documenté comme
+  tel dans le code, pas le chemin normal.
 - Pas de MFA, pas de politique d'expiration de mot de passe, pas de
   réinitialisation en libre-service.
 - Le profil d'environnement (v23) **cadre** l'interface ; c'est cette couche-ci
