@@ -2,13 +2,14 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api, downloadBase64, type EdiModelRef } from "../lib/api";
 import type {
   ArtefactInfo, EdiConvertResponse, EdiDownload, EdiGenerateResponse,
-  EdiInspectResponse, EdiKb, EdiPivotPreview, EdiValidateResponse,
+  EdiInspectResponse, EdiKb, EdiModelDeviations, EdiPivotPreview, EdiValidateResponse,
   FileResponse, TablePreview,
 } from "../lib/types";
 import {
   IconCheck, IconCode, IconDownload, IconLayers, IconList, IconPlay,
   IconSave, IconTable, IconUpload, IconWarn,
 } from "../lib/icons";
+import { ModelPicker, useModelRef } from "./EdiModelPicker";
 
 type Sub = "inspect" | "transform" | "generate" | "convert" | "models" | "doc";
 
@@ -16,56 +17,6 @@ interface Props {
   notify: (msg: string, kind?: "ok" | "err" | "info") => void;
   /** Hand a pivoted table over to the main Data view, as if it had been uploaded. */
   onSession?: (res: FileResponse) => void;
-}
-
-/** A model is either picked from the library or typed inline in the editor. */
-function useModelRef(models: ArtefactInfo[]) {
-  const [id, setId] = useState("");
-  const [pinned, setPinned] = useState(false);
-  const [yaml, setYaml] = useState("");
-  const [inline, setInline] = useState(false);
-  const ref = (): EdiModelRef | null => {
-    if (inline) return yaml.trim() ? { yaml } : null;
-    if (!id) return null;
-    const m = models.find((a) => a.id === id);
-    return { id, version: pinned && m ? m.latest_version_no : null };
-  };
-  return { id, setId, pinned, setPinned, yaml, setYaml, inline, setInline, ref };
-}
-
-function ModelPicker({ label, models, ctl }: {
-  label: string; models: ArtefactInfo[]; ctl: ReturnType<typeof useModelRef>;
-}) {
-  return (
-    <div className="edi-field">
-      <label>{label}</label>
-      <div className="edi-row">
-        <select value={ctl.inline ? "__inline" : ctl.id}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  if (v === "__inline") { ctl.setInline(true); return; }
-                  ctl.setInline(false); ctl.setId(v);
-                }}>
-          <option value="">— choisir un modèle —</option>
-          {models.map((m) => (
-            <option key={m.id} value={m.id}>{m.name} (v{m.latest_version_no})</option>
-          ))}
-          <option value="__inline">✎ coller le YAML directement…</option>
-        </select>
-        {!ctl.inline && ctl.id && (
-          <label className="edi-check" title="Figer la version au lieu de suivre la dernière">
-            <input type="checkbox" checked={ctl.pinned}
-                   onChange={(e) => ctl.setPinned(e.target.checked)} /> figer
-          </label>
-        )}
-      </div>
-      {ctl.inline && (
-        <textarea className="mono" rows={8} value={ctl.yaml} spellCheck={false}
-                  placeholder="name: …&#10;message_type: ORDERS&#10;header: …"
-                  onChange={(e) => ctl.setYaml(e.target.value)} />
-      )}
-    </div>
-  );
 }
 
 function ErrorList({ title, errors }: { title: string; errors: { code: string; message: string; tag: string; message_no: number; segment_pos: number }[] }) {
@@ -178,6 +129,14 @@ export function EdiPanel({ notify, onSession }: Props) {
   const needFile = (f: File | null): f is File => {
     if (!f) { notify("Choisissez d'abord un fichier.", "err"); return false; }
     return true;
+  };
+  // Extraction is best-effort — a segment/qualifier the model doesn't
+  // expect is skipped rather than blocking the pivot. Silent is the
+  // problem: without this, nothing tells the operator data was left out.
+  const notifyDeviations = (r: EdiModelDeviations) => {
+    if (r.model_errors.length) {
+      notify(`${r.model_errors.length} écart(s) par rapport au modèle (voir Écarts) — rien n'a été perdu, juste ignoré.`, "info");
+    }
   };
 
   return (
@@ -333,8 +292,9 @@ export function EdiPanel({ notify, onSession }: Props) {
               const m = tModel.ref();
               if (!needFile(ediFile) || !needModel(m)) return;
               run("csv", async () => {
-                const r = await api.ediPivot(ediFile, m, mode, "csv") as { files: EdiDownload[] };
+                const r = await api.ediPivot(ediFile, m, mode, "csv") as { files: EdiDownload[] } & EdiModelDeviations;
                 r.files.forEach(downloadBase64);
+                notifyDeviations(r);
               });
             }}><IconDownload size={14} /> CSV</button>
 
@@ -342,8 +302,9 @@ export function EdiPanel({ notify, onSession }: Props) {
               const m = tModel.ref();
               if (!needFile(ediFile) || !needModel(m)) return;
               run("xlsx", async () => {
-                const r = await api.ediPivot(ediFile, m, mode, "xlsx") as { files: EdiDownload[] };
+                const r = await api.ediPivot(ediFile, m, mode, "xlsx") as { files: EdiDownload[] } & EdiModelDeviations;
                 r.files.forEach(downloadBase64);
+                notifyDeviations(r);
               });
             }}><IconDownload size={14} /> Excel</button>
 
@@ -352,9 +313,10 @@ export function EdiPanel({ notify, onSession }: Props) {
                 const m = tModel.ref();
                 if (!needFile(ediFile) || !needModel(m)) return;
                 run("session", async () => {
-                  const r = await api.ediPivot(ediFile, m, "flat", "session") as FileResponse;
+                  const r = await api.ediPivot(ediFile, m, "flat", "session") as FileResponse & EdiModelDeviations;
                   onSession(r);
                   notify("Table pivotée ouverte dans la vue Data.", "ok");
+                  notifyDeviations(r);
                 });
               }}><IconTable size={14} /> Ouvrir dans Data</button>
             )}
@@ -373,6 +335,8 @@ export function EdiPanel({ notify, onSession }: Props) {
             </>
           )}
 
+          {pivotOut && <ErrorList title="Écarts par rapport au modèle (tolérés, non bloquants)"
+                                  errors={pivotOut.model_errors} />}
           {pivotOut?.flat && <MiniTable p={pivotOut.flat} caption="Plat" />}
           {pivotOut?.heads && <MiniTable p={pivotOut.heads} caption="Têtes" />}
           {pivotOut?.items && <MiniTable p={pivotOut.items} caption="Lignes" />}

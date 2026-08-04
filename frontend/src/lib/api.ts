@@ -22,6 +22,7 @@ import type {
   EdiInferResponse,
   EdiInspectResponse,
   EdiKb,
+  EdiModelDeviations,
   EdiPivotPreview,
   EdiValidateResponse,
   EditCellsResponse,
@@ -602,10 +603,22 @@ export const api = {
     fd.append("target", target);
     applyModel(fd, model);
     return fetch(`${BASE}/edi/pivot`, { method: "POST", body: fd, headers: authHeaders() }).then(async (r) => {
-      if (target === "session") return json<FileResponse>(r);
+      if (target === "session") return json<FileResponse & EdiModelDeviations>(r);
       if (target === "preview") return json<EdiPivotPreview>(r);
-      return json<{ files: EdiDownload[] }>(r);
+      return json<{ files: EdiDownload[] } & EdiModelDeviations>(r);
     });
+  },
+
+  /** The trip back from a session already cleaned by the normal engine,
+   * rather than a fresh upload (which is what ediGenerate below does). */
+  ediGenerateFromSession: (sid: string, model: EdiModelRef, opts: {
+    group_by?: string; sender?: string; recipient?: string; interchange_ref?: string;
+  }) => {
+    const fd = new FormData();
+    applyModel(fd, model);
+    Object.entries(opts).forEach(([k, v]) => { if (v) fd.append(k, v); });
+    return fetch(`${BASE}/files/${sid}/edi/generate`, { method: "POST", body: fd, headers: authHeaders() })
+      .then((r) => json<EdiGenerateResponse>(r));
   },
 
   ediGenerate: (file: File, model: EdiModelRef, opts: {

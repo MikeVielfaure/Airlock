@@ -6,8 +6,12 @@ golden round-trip, EDI→EDI conversion, model inference, and edi_model artefact
 in the versioned library.
 """
 
+import os
 from pathlib import Path
 
+os.environ.setdefault("FX_MASTER_KEY", "cle-maitresse-de-test-pour-la-suite")
+
+import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
@@ -16,6 +20,24 @@ from app.services import edi_lexer as lexer
 from app.services import edi_service as edi
 
 client = TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def _clean_users_and_keys():
+    """Every other test in this file relies on setup-mode (no account yet,
+    so /api/files et al. work unauthenticated) — a lingering account from
+    the confidentiality test would break all of them. Same pattern as
+    test_crypto.py/test_diff.py."""
+    from app.db import session_scope
+    from app.db_models import CryptoKey, KeyHolder, RevealEvent, User
+    def wipe():
+        with session_scope() as s:
+            for m in (RevealEvent, KeyHolder, CryptoKey, User):
+                for row in s.query(m).all():
+                    s.delete(row)
+            s.commit()
+    wipe(); yield; wipe()
+
 
 SAMPLES = Path(__file__).resolve().parents[2] / "samples" / "edi"
 ORDERS = (SAMPLES / "orders_d96a.edi").read_text(encoding="utf-8")
@@ -205,6 +227,40 @@ def test_pivot_to_csv_returns_a_download():
     assert len(files) == 1 and files[0]["filename"].endswith(".csv")
 
 
+# ── extract_records is best-effort: a segment the model doesn't expect is
+# dropped rather than blocking the pivot. Silent is the problem this closes —
+# every pivot target now also carries what validate() would have flagged. ──
+
+def test_pivot_reports_clean_stats_when_the_file_matches_its_model():
+    r = client.post("/api/edi/pivot", files=upload(ORDERS),
+                    data={"model_yaml": M_ORDERS, "mode": "flat", "target": "preview"})
+    body = r.json()
+    assert body["model_errors"] == []
+    assert body["model_stats"] == {"messages": 2, "items": 3, "errors": 0}
+
+
+def test_pivot_surfaces_a_deviation_it_silently_tolerated():
+    """The pivot itself must still succeed — extraction is best-effort — but
+    the caller now learns a segment was outside the model, instead of the
+    data simply being missing with no explanation."""
+    r = client.post("/api/edi/pivot",
+                    files=upload(ORDERS.replace("UNS+S'", "FOO+1'\nUNS+S'")),
+                    data={"model_yaml": M_ORDERS, "mode": "flat", "target": "preview"})
+    assert r.status_code == 200
+    body = r.json()
+    assert len(body["flat"]["data"]) == 3          # still pivoted normally
+    assert "SEGMENT_INATTENDU" in [e["code"] for e in body["model_errors"]]
+
+
+def test_pivot_to_session_also_carries_model_errors():
+    r = client.post("/api/edi/pivot",
+                    files=upload(ORDERS.replace("UNS+S'", "FOO+1'\nUNS+S'")),
+                    data={"model_yaml": M_ORDERS, "mode": "flat", "target": "session"})
+    body = r.json()
+    assert body["session_id"]
+    assert "SEGMENT_INATTENDU" in [e["code"] for e in body["model_errors"]]
+
+
 # ══════════════════════════════════════════════════════════════════════
 # Generation — the golden round-trip
 # ══════════════════════════════════════════════════════════════════════
@@ -258,6 +314,70 @@ def test_generate_rejects_a_table_with_no_known_column():
                     data={"model_yaml": M_ORDERS})
     assert r.status_code == 422
     assert "colonne" in r.json()["detail"].lower()
+
+
+# ══════════════════════════════════════════════════════════════════════
+# Generating from an already-cleaned session — the trip /api/edi/generate
+# couldn't make: a messy file, pivoted into a session and cleaned through
+# the normal field-rule engine, has to be able to come back out as EDI.
+# ══════════════════════════════════════════════════════════════════════
+def test_generate_edi_from_a_session_cleaned_by_the_normal_pipeline():
+    sid = client.post("/api/edi/pivot", files=upload(ORDERS),
+                      data={"model_yaml": M_ORDERS, "mode": "flat", "target": "session"}
+                      ).json()["session_id"]
+    run = client.post(f"/api/files/{sid}/process", json={
+        "visible_cols": ["numero_commande", "code_article", "quantite_commandee"],
+        "fields": {
+            "numero_commande": {"type": "string", "nullable": False, "identifiant": True},
+            "code_article": {"type": "string", "regex": r"^\\d{13}$", "nullable": False},
+            "quantite_commandee": {"type": "integer", "nullable": False},
+        }})
+    assert run.status_code == 200, run.text
+
+    r = client.post(f"/api/files/{sid}/edi/generate", data={"model_yaml": M_ORDERS})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["messages"] == 2 and body["items"] == 3
+    v = client.post("/api/edi/validate", files=upload(body["preview"]), data={"model_yaml": M_ORDERS})
+    assert v.json()["ok"] is True, v.json()
+
+
+def test_generate_from_session_rejects_when_no_column_matches_the_model():
+    sid = client.post("/api/files", files={"file": ("d.csv", b"a;b\n1;2\n", "text/csv")},
+                      data={"file_type": "CSV", "encoding": "AUTO", "delimiter": ";"}
+                      ).json()["session_id"]
+    r = client.post(f"/api/files/{sid}/edi/generate", data={"model_yaml": M_ORDERS})
+    assert r.status_code == 422
+    assert "colonne" in r.json()["detail"].lower()
+
+
+def test_generate_from_session_masks_confidential_columns():
+    """A column masked on screen must not leave in the clear the moment the
+    session is turned into an EDI file — same rule as CSV/XLSX export."""
+    client.post("/api/auth/signup", json={"email": "edikey@x.fr", "password": "motdepasse1"})
+    token = client.post("/api/auth/login",
+                        json={"email": "edikey@x.fr", "password": "motdepasse1"}).json()["token"]
+    H = {"Authorization": f"Bearer {token}"}
+    assert client.post("/api/keys", json={"name": "commandes"}, headers=H).status_code == 200
+
+    sid = client.post("/api/edi/pivot", files=upload(ORDERS),
+                      data={"model_yaml": M_ORDERS, "mode": "flat", "target": "session"},
+                      headers=H).json()["session_id"]
+    run = client.post(f"/api/files/{sid}/process", headers=H, json={
+        "visible_cols": ["numero_commande", "code_article", "quantite_commandee"],
+        "fields": {
+            "numero_commande": {"type": "string", "nullable": False, "identifiant": True,
+                                "sensitive": "commandes"},
+            "code_article": {"type": "string", "regex": r"^\\d{13}$", "nullable": False},
+            "quantite_commandee": {"type": "integer", "nullable": False},
+        }})
+    assert run.status_code == 200, run.text
+    assert run.json()["data"][0][0] == "•••••"
+
+    r = client.post(f"/api/files/{sid}/edi/generate", data={"model_yaml": M_ORDERS}, headers=H)
+    assert r.status_code == 200, r.text
+    assert "PO12345" not in r.text and "PO12346" not in r.text
+    assert "•••••" in r.json()["preview"]
 
 
 # ══════════════════════════════════════════════════════════════════════

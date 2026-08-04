@@ -156,6 +156,15 @@ async def pivot(file: UploadFile = File(...),
     piv = edi_service.pivot(records, model, mode)
     base = (file.filename or "edi").rsplit(".", 1)[0]
 
+    # `extract_records` is deliberately best-effort — a segment or qualifier
+    # the model doesn't expect is silently skipped rather than blocking the
+    # pivot. Silent is the problem: without this, nothing tells the operator
+    # that data was left out. `validate()` already computes exactly this
+    # (unexpected segments, missing mandatory ones, unknown qualifiers) at
+    # no extra parsing cost, so every pivot target carries it alongside the
+    # result instead of only the separate, rarely-used /validate endpoint.
+    model_errors, model_stats = edi_service.validate(seps, inters, model)
+
     if target == "session":
         flat = piv.get("flat")
         if flat is None:
@@ -164,29 +173,34 @@ async def pivot(file: UploadFile = File(...),
         sid = store.create(s, flat, file_type="CSV", encoding="utf-8", delimiter=";")
         return FileResponse(session_id=sid, type="CSV", encoding="utf-8",
                             delimiter=";", sheet=None, sheets=[], table_count=0,
-                            preview=_preview(flat))
+                            preview=_preview(flat)).model_dump() | {
+            "model_errors": model_errors, "model_stats": model_stats}
 
     if target == "preview":
         if mode == "flat":
-            return {"mode": "flat", "flat": _preview(piv["flat"])}
+            return {"mode": "flat", "flat": _preview(piv["flat"]),
+                    "model_errors": model_errors, "model_stats": model_stats}
         return {"mode": "linked", "heads": _preview(piv["heads"]),
-                "items": _preview(piv["items"])}
+                "items": _preview(piv["items"]),
+                "model_errors": model_errors, "model_stats": model_stats}
 
     frames = ({"flat": piv["flat"]} if mode == "flat"
               else {"heads": piv["heads"], "items": piv["items"]})
     if target == "csv":
         if mode == "flat":
             data = piv["flat"].to_csv(sep=";", index=False).encode("utf-8-sig")
-            return {"files": [_download(f"{base}_pivot.csv", data, "text/csv")]}
+            return {"files": [_download(f"{base}_pivot.csv", data, "text/csv")],
+                    "model_errors": model_errors, "model_stats": model_stats}
         return {"files": [
             _download(f"{base}_{n}.csv", f.to_csv(sep=";", index=False).encode("utf-8-sig"), "text/csv")
-            for n, f in frames.items()]}
+            for n, f in frames.items()], "model_errors": model_errors, "model_stats": model_stats}
     buf = io.BytesIO()
     with pd.ExcelWriter(buf, engine="openpyxl") as xw:
         for n, f in frames.items():
             f.to_excel(xw, sheet_name=n, index=False)
     return {"files": [_download(f"{base}_pivot.xlsx", buf.getvalue(),
-                                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")]}
+                                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")],
+            "model_errors": model_errors, "model_stats": model_stats}
 
 
 # ── generate: flat CSV/XLSX -> EDIFACT ────────────────────────────────

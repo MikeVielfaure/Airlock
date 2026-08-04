@@ -426,7 +426,13 @@ export interface EdiValidateResponse {
   ok: boolean;
 }
 
-export interface EdiPivotPreview {
+/** Mixed into every /edi/pivot response shape — see EdiPivotPreview. */
+export interface EdiModelDeviations {
+  model_errors: EdiError[];
+  model_stats: { messages: number; items: number; errors: number };
+}
+
+export interface EdiPivotPreview extends EdiModelDeviations {
   mode: "flat" | "linked";
   flat?: TablePreview;
   heads?: TablePreview;

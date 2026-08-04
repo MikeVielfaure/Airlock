@@ -1889,6 +1889,64 @@ def export_table(
         )
 
 
+@app.post("/api/files/{sid}/edi/generate")
+async def edi_generate_from_session(
+    sid: str,
+    model_yaml: Optional[str] = Form(None),
+    model_id: Optional[str] = Form(None),
+    model_version: Optional[int] = Form(None),
+    group_by: str = Form(""),
+    sender: str = Form(""),
+    recipient: str = Form(""),
+    interchange_ref: str = Form(""),
+    _cap=Depends(require_capability("file.export")),
+    s: DbSession = Depends(get_session),
+):
+    """
+    The trip back, from a session already cleaned by the normal engine
+    rather than a fresh upload. `/api/edi/generate` (edi_routes.py) only
+    ever took a raw CSV/XLSX file — a messy EDI file pivoted into a session
+    (`/api/edi/pivot`, target=session) and cleaned through Schéma & Règles
+    like any other table had no way back out to a valid EDIFACT message.
+    `records_from_flat`/`generate` already do the real work; this just
+    feeds them the session's own table instead of a re-uploaded file.
+    """
+    from app.edi_routes import _download, _resolve_model
+    from app.services import edi_service as _edi
+
+    model = _resolve_model(s, model_yaml, model_id, model_version)
+    with _session(sid, s) as sess:
+        # Unlike export, this does NOT restrict to sess.last_cols (the
+        # visible columns): records_from_flat only ever reads the columns
+        # it recognizes from the model plus group_by, so extra ones are
+        # harmless — but restricting here would silently drop `message_no`
+        # whenever an operator excludes it from visible_cols (the normal
+        # thing to do, since it isn't real data), collapsing every message
+        # into one. Found live, writing this route's own test.
+        out_df = sess.last_df if sess.last_df is not None else sess.active_df()
+
+        # Same masking as export — a confidential column must not leave in
+        # the clear here either.
+        if sess.sensitivity:
+            out_df = out_df.copy()
+            for col in out_df.columns:
+                if col in sess.sensitivity:
+                    out_df[col] = out_df[col].map(_crypto.mask_value)
+
+        known = set(sum(model.field_names().values(), []))
+        if not (set(map(str, out_df.columns)) & known):
+            raise HTTPException(422, "Aucune colonne de la session ne correspond aux champs du "
+                                     f"modèle ({', '.join(sorted(known)[:8])}…).")
+        records = _edi.records_from_flat(out_df, model, group_by=group_by)
+        text = _edi.generate(model, records, sender=sender, recipient=recipient,
+                             interchange_ref=interchange_ref)
+        fname = f"{model.message_type.lower()}_{len(records)}msg.edi"
+        return {"messages": len(records),
+                "items": sum(len(r["items"]) for r in records),
+                "file": _download(fname, text.encode("utf-8"), "application/edifact"),
+                "preview": text[:1500]}
+
+
 @app.post("/api/pipeline", response_model=PipelineResponse)
 async def run_full_pipeline(
     file: UploadFile = File(...),

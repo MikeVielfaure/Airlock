@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent } from "react";
-import type { CellStatus, FieldType, ProcessResponse, RowsMutationResponse, TablePreview } from "../lib/types";
-import { api } from "../lib/api";
+import type { ArtefactInfo, CellStatus, FieldType, ProcessResponse, RowsMutationResponse, TablePreview } from "../lib/types";
+import { api, downloadBase64 } from "../lib/api";
 import { IconMaximize, IconMinimize, IconPlay, IconReset, IconSave } from "../lib/icons";
 import { InfoTip } from "./InfoTip";
+import { ModelPicker, useModelRef } from "./EdiModelPicker";
 
 interface Props {
   preview: TablePreview | null;
@@ -151,12 +152,41 @@ export function DataTable(props: Props) {
   const validEnc = ENCODINGS.includes(originEncoding) ? originEncoding : "utf-8";
   const validDelim = originDelimiter in DELIMS ? originDelimiter : ";";
   const [name, setName] = useState(defaultName);
-  const [fmt, setFmt] = useState<"csv" | "xlsx" | "pivot">("csv");
+  const [fmt, setFmt] = useState<"csv" | "xlsx" | "pivot" | "edifact">("csv");
   const [enc, setEnc] = useState(validEnc);
   const [delim, setDelim] = useState(validDelim);
   const [onlyFiltered, setOnlyFiltered] = useState(false);
   const [includeStyle, setIncludeStyle] = useState(false);
   useEffect(() => { setName(defaultName); setEnc(validEnc); setDelim(validDelim); }, [defaultName, validEnc, validDelim]);
+
+  // ── EDIFACT: the trip back from an already-cleaned session ──
+  const [ediModels, setEdiModels] = useState<ArtefactInfo[]>([]);
+  const ediModel = useModelRef(ediModels);
+  const [ediGroupBy, setEdiGroupBy] = useState("");
+  const [ediSender, setEdiSender] = useState("");
+  const [ediRecipient, setEdiRecipient] = useState("");
+  const [ediRef, setEdiRef] = useState("");
+  const [ediBusy, setEdiBusy] = useState(false);
+  useEffect(() => {
+    if (fmt !== "edifact" || ediModels.length) return;
+    api.listArtefacts("edi_model").then(setEdiModels)
+      .catch((e) => notify(e instanceof Error ? e.message : "Impossible de charger les modèles EDI.", "err"));
+  }, [fmt, ediModels.length, notify]);
+
+  const doGenerateEdi = async () => {
+    if (!sid) return;
+    const m = ediModel.ref();
+    if (!m) { notify("Choisissez d'abord un modèle EDI (bibliothèque ou YAML inline).", "err"); return; }
+    setEdiBusy(true);
+    try {
+      const r = await api.ediGenerateFromSession(sid, m, {
+        group_by: ediGroupBy, sender: ediSender, recipient: ediRecipient, interchange_ref: ediRef,
+      });
+      downloadBase64(r.file);
+      notify(`${r.messages} message(s), ${r.items} ligne(s) générée(s).`, "ok");
+    } catch (e) { notify(e instanceof Error ? e.message : String(e), "err"); }
+    finally { setEdiBusy(false); }
+  };
 
   // ── server-side pagination (after a run) ─────────────────
   const serverMode = !!result;
@@ -723,40 +753,62 @@ export function DataTable(props: Props) {
             <div className="frow"><label>Nom du fichier</label>
               <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="export" /></div>
             <div className="frow"><label>Format</label>
-              <select value={fmt} onChange={(e) => setFmt(e.target.value as "csv" | "xlsx" | "pivot")}>
+              <select value={fmt} onChange={(e) => setFmt(e.target.value as "csv" | "xlsx" | "pivot" | "edifact")}>
                 <option value="csv">CSV</option>
                 <option value="xlsx">Excel (.xlsx)</option>
                 <option value="pivot">Pivot (.json)</option>
+                <option value="edifact">EDIFACT</option>
               </select></div>
-            <div className="frow"><label>Encodage</label>
-              <select value={enc} onChange={(e) => setEnc(e.target.value)} disabled={fmt !== "csv"}>
-                {ENCODINGS.map((x) => <option key={x} value={x}>{x}</option>)}
-              </select></div>
-            <div className="frow"><label>Délimiteur</label>
-              <select value={delim} onChange={(e) => setDelim(e.target.value)} disabled={fmt !== "csv"}>
-                {Object.entries(DELIMS).map(([v, lbl]) => <option key={v} value={v}>{lbl}</option>)}
-              </select></div>
-            <label className="check" style={{ alignSelf: "end", opacity: anyFilter ? 1 : 0.5 }}>
-              <input type="checkbox" checked={onlyFiltered} disabled={!anyFilter}
-                onChange={(e) => setOnlyFiltered(e.target.checked)} />
-              <span className="ctxt">Uniquement les lignes filtrées
-                <div className="csub">{anyFilter
-                  ? "Applique vos filtres de colonne à tout le fichier, pas seulement à l'échantillon."
-                  : "Définissez un filtre de colonne ci-dessus pour activer cette option."}</div>
-              </span>
-            </label>
-            <label className="check" style={{ alignSelf: "end", opacity: fmt === "xlsx" ? 1 : 0.5 }}>
-              <input type="checkbox" checked={includeStyle} disabled={fmt !== "xlsx"}
-                onChange={(e) => setIncludeStyle(e.target.checked)} />
-              <span className="ctxt">Inclure la mise en forme
-                <div className="csub">{fmt === "xlsx"
-                  ? "Applique les règles de « Mise en forme » comme un vrai style de cellule Excel."
-                  : "Disponible seulement pour l'export Excel (.xlsx)."}</div>
-              </span>
-            </label>
-            <button className="btn primary" onClick={doExport} disabled={!sid}>
-              <IconSave size={15} /> Exporter .{fmt}
-            </button>
+
+            {fmt === "edifact" ? (
+              <>
+                <ModelPicker label="Modèle EDI cible" models={ediModels} ctl={ediModel} />
+                <div className="frow"><label>Regrouper les lignes en messages par</label>
+                  <input value={ediGroupBy} onChange={(e) => setEdiGroupBy(e.target.value)}
+                         placeholder="nom de colonne — par défaut : message_no, sinon un seul message" /></div>
+                <div className="frow"><label>Interchange</label>
+                  <div className="edi-row">
+                    <input value={ediSender} onChange={(e) => setEdiSender(e.target.value)} placeholder="expéditeur (GLN:14)" />
+                    <input value={ediRecipient} onChange={(e) => setEdiRecipient(e.target.value)} placeholder="destinataire" />
+                    <input value={ediRef} onChange={(e) => setEdiRef(e.target.value)} placeholder="référence" />
+                  </div></div>
+                <button className="btn primary" onClick={doGenerateEdi} disabled={!sid || ediBusy}>
+                  <IconSave size={15} /> Générer EDI
+                </button>
+              </>
+            ) : (
+              <>
+                <div className="frow"><label>Encodage</label>
+                  <select value={enc} onChange={(e) => setEnc(e.target.value)} disabled={fmt !== "csv"}>
+                    {ENCODINGS.map((x) => <option key={x} value={x}>{x}</option>)}
+                  </select></div>
+                <div className="frow"><label>Délimiteur</label>
+                  <select value={delim} onChange={(e) => setDelim(e.target.value)} disabled={fmt !== "csv"}>
+                    {Object.entries(DELIMS).map(([v, lbl]) => <option key={v} value={v}>{lbl}</option>)}
+                  </select></div>
+                <label className="check" style={{ alignSelf: "end", opacity: anyFilter ? 1 : 0.5 }}>
+                  <input type="checkbox" checked={onlyFiltered} disabled={!anyFilter}
+                    onChange={(e) => setOnlyFiltered(e.target.checked)} />
+                  <span className="ctxt">Uniquement les lignes filtrées
+                    <div className="csub">{anyFilter
+                      ? "Applique vos filtres de colonne à tout le fichier, pas seulement à l'échantillon."
+                      : "Définissez un filtre de colonne ci-dessus pour activer cette option."}</div>
+                  </span>
+                </label>
+                <label className="check" style={{ alignSelf: "end", opacity: fmt === "xlsx" ? 1 : 0.5 }}>
+                  <input type="checkbox" checked={includeStyle} disabled={fmt !== "xlsx"}
+                    onChange={(e) => setIncludeStyle(e.target.checked)} />
+                  <span className="ctxt">Inclure la mise en forme
+                    <div className="csub">{fmt === "xlsx"
+                      ? "Applique les règles de « Mise en forme » comme un vrai style de cellule Excel."
+                      : "Disponible seulement pour l'export Excel (.xlsx)."}</div>
+                  </span>
+                </label>
+                <button className="btn primary" onClick={doExport} disabled={!sid}>
+                  <IconSave size={15} /> Exporter .{fmt}
+                </button>
+              </>
+            )}
           </div>
         </div>
       )}
