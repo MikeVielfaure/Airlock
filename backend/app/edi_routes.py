@@ -18,7 +18,9 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
 from app import repository as repo
+from app.auth_routes import require_capability, require_user
 from app.db import get_session
+from app.db_models import User
 from app.edi_models import EdiModel, model_from_yaml, model_to_yaml
 from app.models import FileResponse, TablePreview
 from app.services import edi_kb, edi_service
@@ -55,15 +57,22 @@ def _lex_or_422(raw: bytes):
 
 
 def _resolve_model(s: Session, model_yaml: Optional[str], model_id: Optional[str],
-                   model_version: Optional[int]) -> EdiModel:
+                   model_version: Optional[int], user: Optional[User] = None) -> EdiModel:
     if model_yaml and model_yaml.strip():
         try:
             return model_from_yaml(model_yaml)
         except ValueError as e:
             raise HTTPException(422, f"Modèle EDI invalide : {e}")
     if model_id:
+        from app.store_routes import _user_can_view_artefact
         try:
             art = repo.get_artefact(s, model_id)
+            # 404, not 409/403, and checked before anything else is revealed
+            # about it (even its kind): an artefact from an environment this
+            # caller cannot see must not even confirm it exists — same rule
+            # as the generic artefact routes (store_routes.py).
+            if user is not None and not _user_can_view_artefact(s, user, art):
+                raise HTTPException(404, f"Modèle {model_id} introuvable.")
             if art.kind != "edi_model":
                 raise HTTPException(409, f"L'artefact '{art.name}' est de type {art.kind}, pas edi_model.")
             ver = repo.resolve_ref(s, model_id, model_version)
@@ -98,7 +107,8 @@ def knowledge_base():
 
 # ── inspect: detect + decode + free syntax checks ─────────────────────
 @router.post("/inspect")
-async def inspect(file: UploadFile = File(...)):
+async def inspect(file: UploadFile = File(...),
+                  _cap=Depends(require_capability("file.upload"))):
     seps, segments, had_una = _lex_or_422(await file.read())
     inters, errors = edi_service.split_interchanges(segments)
     tree = edi_service.decode_tree(seps, inters)
@@ -108,7 +118,8 @@ async def inspect(file: UploadFile = File(...)):
 
 # ── infer a model skeleton from a sample file ─────────────────────────
 @router.post("/models/infer")
-async def infer(file: UploadFile = File(...), name: str = Form("")):
+async def infer(file: UploadFile = File(...), name: str = Form(""),
+                _cap=Depends(require_capability("file.upload"))):
     seps, segments, _ = _lex_or_422(await file.read())
     inters, _errs = edi_service.split_interchanges(segments)
     try:
@@ -124,8 +135,9 @@ async def validate(file: UploadFile = File(...),
                    model_yaml: Optional[str] = Form(None),
                    model_id: Optional[str] = Form(None),
                    model_version: Optional[int] = Form(None),
+                   user: User = Depends(require_capability("file.upload")),
                    s: Session = Depends(get_session)):
-    model = _resolve_model(s, model_yaml, model_id, model_version)
+    model = _resolve_model(s, model_yaml, model_id, model_version, user)
     seps, segments, _ = _lex_or_422(await file.read())
     inters, syntax_errors = edi_service.split_interchanges(segments)
     errors, stats = edi_service.validate(seps, inters, model)
@@ -142,12 +154,13 @@ async def pivot(file: UploadFile = File(...),
                 model_yaml: Optional[str] = Form(None),
                 model_id: Optional[str] = Form(None),
                 model_version: Optional[int] = Form(None),
+                user: User = Depends(require_capability("file.upload")),
                 s: Session = Depends(get_session)):
     if mode not in ("flat", "linked"):
         raise HTTPException(422, "mode doit être 'flat' ou 'linked'.")
     if target not in ("preview", "csv", "xlsx", "session"):
         raise HTTPException(422, "target doit être preview, csv, xlsx ou session.")
-    model = _resolve_model(s, model_yaml, model_id, model_version)
+    model = _resolve_model(s, model_yaml, model_id, model_version, user)
     seps, segments, _ = _lex_or_422(await file.read())
     inters, _errs = edi_service.split_interchanges(segments)
     records = edi_service.extract_records(inters, model)
@@ -213,8 +226,9 @@ async def generate(file: UploadFile = File(...),
                    sender: str = Form(""),
                    recipient: str = Form(""),
                    interchange_ref: str = Form(""),
+                   user: User = Depends(require_capability("file.upload")),
                    s: Session = Depends(get_session)):
-    model = _resolve_model(s, model_yaml, model_id, model_version)
+    model = _resolve_model(s, model_yaml, model_id, model_version, user)
     raw = await file.read()
     name = (file.filename or "").lower()
     try:
@@ -250,9 +264,10 @@ async def convert(file: UploadFile = File(...),
                   target_version: Optional[int] = Form(None),
                   mapping: str = Form(""),
                   sender: str = Form(""), recipient: str = Form(""),
+                  user: User = Depends(require_capability("file.upload")),
                   s: Session = Depends(get_session)):
-    source = _resolve_model(s, source_yaml, source_id, source_version)
-    target = _resolve_model(s, target_yaml, target_id, target_version)
+    source = _resolve_model(s, source_yaml, source_id, source_version, user)
+    target = _resolve_model(s, target_yaml, target_id, target_version, user)
     map_dict = {}
     if mapping.strip():
         try:
@@ -273,9 +288,13 @@ async def convert(file: UploadFile = File(...),
 
 # ── stored edi_model rendered as YAML (for the editor) ────────────────
 @router.get("/models/{artefact_id}/versions/{version_no}/yaml")
-def model_yaml(artefact_id: str, version_no: int, s: Session = Depends(get_session)):
+def model_yaml(artefact_id: str, version_no: int,
+              user: User = Depends(require_user), s: Session = Depends(get_session)):
+    from app.store_routes import _user_can_view_artefact
     try:
         art = repo.get_artefact(s, artefact_id)
+        if not _user_can_view_artefact(s, user, art):
+            raise HTTPException(404, f"Artefact {artefact_id} introuvable.")
         if art.kind != "edi_model":
             raise HTTPException(409, f"L'artefact '{art.name}' est de type {art.kind}, pas edi_model.")
         ver = repo.resolve_ref(s, artefact_id, version_no)

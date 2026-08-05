@@ -29,10 +29,10 @@ def _clean_users_and_keys():
     the confidentiality test would break all of them. Same pattern as
     test_crypto.py/test_diff.py."""
     from app.db import session_scope
-    from app.db_models import CryptoKey, KeyHolder, RevealEvent, User
+    from app.db_models import CryptoKey, KeyHolder, Membership, RevealEvent, User
     def wipe():
         with session_scope() as s:
-            for m in (RevealEvent, KeyHolder, CryptoKey, User):
+            for m in (RevealEvent, KeyHolder, CryptoKey, Membership, User):
                 for row in s.query(m).all():
                     s.delete(row)
             s.commit()
@@ -506,3 +506,77 @@ def test_invalid_edi_model_is_refused_before_storage():
     r = client.post("/api/artefacts/edi_model",
                     json={"name": "cassé", "yaml": "name: x\nmessage_type: ORDERS\nheader:\n  - tag: TOOLONG\n"})
     assert r.status_code == 422
+
+
+# ══════════════════════════════════════════════════════════════════════
+# Access control — found live, testing this module's own logic: every
+# operational route (inspect, validate, pivot, generate, convert,
+# models/infer) was reachable with zero auth, regardless of whether an
+# account existed on the install — the one thing CLAUDE.md's own "une
+# connexion obligatoire, pas d'entrée libre" is supposed to rule out
+# everywhere else. All existing tests above still pass unauthenticated
+# because they run in setup mode (no account exists — the autouse fixture
+# wipes User each test); these create real accounts to exercise the gate.
+# ══════════════════════════════════════════════════════════════════════
+def _h(t):
+    return {"Authorization": f"Bearer {t}"}
+
+
+def test_operational_routes_refuse_an_anonymous_caller_once_an_account_exists():
+    client.post("/api/auth/signup", json={"email": "chef_edi@x.fr", "password": "motdepasse1"})
+    for route, files, data in (
+        ("/api/edi/inspect", upload(ORDERS), {}),
+        ("/api/edi/validate", upload(ORDERS), {"model_yaml": M_ORDERS}),
+        ("/api/edi/pivot", upload(ORDERS), {"model_yaml": M_ORDERS, "mode": "flat", "target": "preview"}),
+        ("/api/edi/models/infer", upload(ORDERS), {}),
+        ("/api/edi/generate", {"file": ("f.csv", b"a;b\n1;2\n", "text/csv")}, {"model_yaml": M_ORDERS}),
+        ("/api/edi/convert", upload(ORDERS), {"source_yaml": M_ORDERS, "target_yaml": M_ORDERS}),
+    ):
+        r = client.post(route, files=files, data=data)
+        assert r.status_code == 401, f"{route}: {r.status_code} {r.text}"
+
+
+def test_a_viewer_cannot_run_edi_operations_operator_capability_required():
+    client.post("/api/auth/signup", json={"email": "chef_edi2@x.fr", "password": "motdepasse1"})
+    chef = client.post("/api/auth/login",
+                       json={"email": "chef_edi2@x.fr", "password": "motdepasse1"}).json()["token"]
+    client.post("/api/admin/quick-user",
+               json={"email": "spectateur@x.fr", "memberships": {"default": "viewer"}}, headers=_h(chef))
+    viewer = client.post("/api/auth/login",
+                         json={"email": "spectateur@x.fr", "password": "motdepasse1"}).json()["token"]
+    r = client.post("/api/edi/pivot", files=upload(ORDERS),
+                    data={"model_yaml": M_ORDERS, "mode": "flat", "target": "preview"}, headers=_h(viewer))
+    assert r.status_code == 403, r.text
+
+
+def test_a_model_from_another_environment_is_invisible_not_just_refused():
+    """404, not 409 (which would confirm the artefact's kind) or 403 (which
+    would confirm it exists at all) — same rule as the generic artefact
+    routes: an artefact one cannot see must not even prove it exists."""
+    client.post("/api/auth/signup", json={"email": "chef_edi3@x.fr", "password": "motdepasse1"})
+    chef = client.post("/api/auth/login",
+                       json={"email": "chef_edi3@x.fr", "password": "motdepasse1"}).json()["token"]
+    client.post("/api/admin/quick-user",
+               json={"email": "proprio@x.fr", "memberships": {"secret_env": "editor"}}, headers=_h(chef))
+    owner = client.post("/api/auth/login",
+                        json={"email": "proprio@x.fr", "password": "motdepasse1"}).json()["token"]
+    aid = client.post("/api/artefacts/edi_model",
+                      json={"name": "modele-prive", "yaml": M_ORDERS, "environment": "secret_env"},
+                      headers=_h(owner)).json()["id"]
+
+    client.post("/api/admin/quick-user",
+               json={"email": "etranger@x.fr", "memberships": {"autre_env": "operator"}}, headers=_h(chef))
+    outsider = client.post("/api/auth/login",
+                           json={"email": "etranger@x.fr", "password": "motdepasse1"}).json()["token"]
+
+    r = client.post("/api/edi/pivot?env=autre_env", files=upload(ORDERS),
+                    data={"model_id": aid, "mode": "flat", "target": "preview"}, headers=_h(outsider))
+    assert r.status_code == 404, r.text
+
+    y = client.get(f"/api/edi/models/{aid}/versions/1/yaml", headers=_h(outsider))
+    assert y.status_code == 404, y.text
+
+    # the owner, meanwhile, can use their own model normally
+    ok = client.post("/api/edi/pivot?env=secret_env", files=upload(ORDERS),
+                     data={"model_id": aid, "mode": "flat", "target": "preview"}, headers=_h(owner))
+    assert ok.status_code == 200, ok.text
