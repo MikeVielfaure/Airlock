@@ -76,21 +76,24 @@ export function Home({ me, env, profile, shows, go }: Props) {
           {profile?.config_locked && <> · Configuration imposée</>}
         </p>
         {profile?.description && <p className="home-desc">{profile.description}</p>}
-      </div>
 
-      <div className="home-kpi-grid">
-        <div className="kpi-card">
-          <span className="kpi-label">Modules ouverts</span>
-          <strong className="kpi-val">{available.length} / {MODULES.length}</strong>
-          <span className="kpi-sub">Portée du profil de « {env} »</span>
+        {/* Ces deux faits occupaient auparavant deux grandes cartes en haut de
+            page — la meilleure place de l'écran — pour une information qu'on ne
+            peut pas actionner. « DuckDB + Pandas » était même affiché en vert,
+            couleur qui signifie « c'est bon » dans cette palette, alors qu'elle
+            ne signale rien. Ils redeviennent ce qu'ils sont : le contexte de la
+            page, à côté de l'environnement et du rôle. La place libérée revient
+            aux cartes, qui sont la seule chose à faire ici. */}
+        <div className="home-meta">
+          <span className="badge" title={`Portée du profil de « ${env} »`}>
+            Modules <strong>{available.length} / {MODULES.length}</strong>
+          </span>
+          {(me?.is_superadmin || me?.setup_mode) && (
+            <span className="badge" title="SQL multi-source et colonnes calculées">
+              Moteur <strong>DuckDB + Pandas</strong>
+            </span>
+          )}
         </div>
-        {(me?.is_superadmin || me?.setup_mode) && (
-          <div className="kpi-card">
-            <span className="kpi-label">Moteur de calcul</span>
-            <strong className="kpi-val ok">DuckDB + Pandas</strong>
-            <span className="kpi-sub">SQL multi-source et colonnes calculées</span>
-          </div>
-        )}
       </div>
 
       {available.length === 0 ? (

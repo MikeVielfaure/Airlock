@@ -24,7 +24,7 @@ reconstruit : une API REST d'un côté, une interface React de l'autre.
 | Avant (Streamlit) | Après |
 |---|---|
 | UI et métier dans le même processus | **Backend FastAPI** + **frontend React** séparés |
-| État dans `st.session_state` | Sessions serveur (store en mémoire, TTL 1 h) |
+| État dans `st.session_state` | Sessions serveur (persistées en base, TTL 1 h) |
 | Pas d'API : non intégrable | **API REST** documentée, réutilisable par n'importe quel client |
 | Rendu serveur, rechargements complets | SPA réactive, appels asynchrones |
 | Coloration via `pandas.Styler` | Statut renvoyé par cellule, coloration côté client |
@@ -1988,7 +1988,7 @@ les colonnes par glisser-déposer et de filtrer par recherche.
 cd backend && python -m pytest -v
 ```
 
-La suite (324 tests) couvre l'upload, la validation (longueur, regex, type),
+La suite (738 tests) couvre l'upload, la validation (longueur, regex, type),
 le nettoyage (nombres, dates), le mapping TCO, l'aller-retour YAML, le
 traitement du header, les filtres (groupes OU compris), le pipeline one-shot,
 le mode édition (correction, colonne renommée, reset, régressions) et la
@@ -2018,11 +2018,18 @@ FX_DB_URL=postgresql+psycopg2://app:app@localhost:5432/fx_test python -m pytest
 
 ## Notes de production
 
-Deux natures de données, deux stockages. Les **sessions interactives**
-(l'exploration, l'édition à la main) restent en mémoire et mono-processus —
-volatiles par nature. Pour un déploiement multi-workers, remplacer le `dict`
-de `session.py` par Redis (DataFrames sérialisés en parquet) derrière la même
-interface `get` / `create` ; rien d'autre ne change. Les **artefacts durables**
+Deux natures de données, deux durées de vie. Les **sessions interactives**
+(l'exploration, l'édition à la main) sont volatiles par nature : elles portent
+un TTL d'une heure et une purge les efface passé ce délai. Elles ne vivent plus
+en mémoire — `session.py` les écrit en base sous forme de blob `pickle`, ce qui
+les rend visibles depuis plusieurs workers sans qu'un Redis soit nécessaire.
+
+Deux conséquences à connaître avant de monter en charge : chaque requête
+dépickle puis repickle le DataFrame entier — mesuré à 0,6 s sur 10 000 lignes,
+4,1 s sur 100 000, 12,6 s sur 250 000 — et une session de 250 000 lignes laisse
+un blob de 73 Mo en base jusqu'à sa purge. Séparer le blob des métadonnées, ou
+sortir les frames en parquet hors de la ligne, est le prochain gain
+structurel. Les **artefacts durables**
 (configs, computed, TCO, flux, runs) vivent en base : SQLite par défaut,
 PostgreSQL dès que `DATABASE_URL` est définie — le schéma est géré par Alembic
 au démarrage.
