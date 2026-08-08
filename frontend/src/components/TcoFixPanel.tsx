@@ -278,14 +278,22 @@ export function TcoFixPanel({ result, fieldTypes, tcoArtefactId, editable, notif
           </InfoTip>
         </span>
       </div>
-      <div className="filterbar">
-        <button className={`btn sm ${tcoMode === "build" ? "primary" : ""}`} onClick={() => setTcoMode("build")}>
+      {/* Un contrôle segmenté, pas trois boutons. Le style `primary` signifie
+          « l'action principale de cet écran » ; l'employer pour « le mode
+          sélectionné » faisait lire ces trois choix comme une action mise en
+          avant et deux actions secondaires, alors qu'il n'y a rien à faire
+          ici — seulement à choisir d'où viendra le tableau. */}
+      <div className="seg" role="tablist" aria-label="Origine du tableau">
+        <button role="tab" aria-selected={tcoMode === "build"}
+          className={`seg-item ${tcoMode === "build" ? "on" : ""}`} onClick={() => setTcoMode("build")}>
           Construire un tableau
         </button>
-        <button className={`btn sm ${tcoMode === "session" ? "primary" : ""}`} onClick={() => setTcoMode("session")}>
+        <button role="tab" aria-selected={tcoMode === "session"}
+          className={`seg-item ${tcoMode === "session" ? "on" : ""}`} onClick={() => setTcoMode("session")}>
           Depuis la session active
         </button>
-        <button className={`btn sm ${tcoMode === "upload" ? "primary" : ""}`} onClick={() => setTcoMode("upload")}>
+        <button role="tab" aria-selected={tcoMode === "upload"}
+          className={`seg-item ${tcoMode === "upload" ? "on" : ""}`} onClick={() => setTcoMode("upload")}>
           Importer un fichier CSV
         </button>
       </div>
@@ -293,7 +301,7 @@ export function TcoFixPanel({ result, fieldTypes, tcoArtefactId, editable, notif
       {tcoMode === "session" ? (
         <div className="flowform" style={{ marginTop: 8 }}>
           {!sid ? (
-            <p className="csub">Chargez d'abord un fichier ou une session (onglet Schéma & Règles) — peu importe le
+            <p className="empty">Chargez d'abord un fichier ou une session (onglet Schéma & Règles) — peu importe le
               moyen, fichier, saisie vierge, source SQL ou API : la session qui en résulte peut devenir un TCO.</p>
           ) : (
             <>
@@ -404,7 +412,7 @@ export function TcoFixPanel({ result, fieldTypes, tcoArtefactId, editable, notif
         </span>
       </div>
       {!tcoTarget ? (
-        <p className="csub">Choisissez un TCO existant ci-dessus (« Ajouter une version à ») pour lui configurer une contrainte.</p>
+        <p className="empty">Choisissez un TCO existant ci-dessus (« Ajouter une version à ») pour lui configurer une contrainte.</p>
       ) : (
         <div className="flowform">
           <div className="frow"><label>Type concerné</label>
@@ -439,7 +447,7 @@ export function TcoFixPanel({ result, fieldTypes, tcoArtefactId, editable, notif
         <h3 style={{ fontSize: 14 }}>Corriger les valeurs non couvertes</h3>
       </div>
       {!result ? (
-        <p className="tf-hint">Lancez d'abord le contrôle (onglet Données). {info}</p>
+        <p className="empty">Lancez d'abord le contrôle (onglet Données). {info}</p>
       ) : count === 0 && noTcoCols.length === 0 ? (
         <p className="tf-ok"><IconCheck size={14} /> Toutes les valeurs sont couvertes
           par la table de correspondance. {info}</p>

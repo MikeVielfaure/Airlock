@@ -177,10 +177,13 @@ function SqlBlock({ col, columns, sources, serverError, onChange, onRemove }: {
 
       {showAssistant && (
         <div className="sql-assistant">
-          <div className="filterbar" style={{ marginBottom: 4 }}>
-            <button className={`btn sm ${assistantMode === "join" ? "primary" : ""}`}
+          <div className="seg" role="tablist" aria-label="Type d'assistant"
+            style={{ marginBottom: 4 }}>
+            <button role="tab" aria-selected={assistantMode === "join"}
+              className={`seg-item ${assistantMode === "join" ? "on" : ""}`}
               onClick={() => setAssistantMode("join")}>Jointure</button>
-            <button className={`btn sm ${assistantMode === "aggregate" ? "primary" : ""}`}
+            <button role="tab" aria-selected={assistantMode === "aggregate"}
+              className={`seg-item ${assistantMode === "aggregate" ? "on" : ""}`}
               onClick={() => setAssistantMode("aggregate")}>Agrégat (sans jointure)</button>
           </div>
 

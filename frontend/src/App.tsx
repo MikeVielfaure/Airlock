@@ -954,21 +954,30 @@ export default function App() {
           <IconCode size={15} /> Fonctions
         </button>
       ))}
-      {gate("ops", (
-        <button className={`tab ${tab === "ops" ? "active" : ""}`} onClick={() => setTab("ops")}>
-          <IconPlay size={15} /> Exploitation
-        </button>
-      ))}
-      {gate("keys", (
-        <button className={`tab ${tab === "keys" ? "active" : ""}`} onClick={() => setTab("keys")}>
-          <IconLock size={15} /> Confidentialité
-        </button>
-      ))}
-      {(me?.is_superadmin || me?.setup_mode) && (
-        <button className={`tab ${tab === "admin" ? "active" : ""}`} onClick={() => setTab("admin")}>
-          <IconLayers size={15} /> Administration
-        </button>
-      )}
+      {/* Exploitation, Confidentialité et Administration ne sont pas des étapes
+          du travail : ce sont les écrans système. Les grouper dans un conteneur
+          plutôt que de les marquer individuellement les fait retomber à la
+          ligne *ensemble* et rester soudés à droite — une première version
+          poussait le seul troisième-avant-dernier onglet, ce qui dépendait de
+          l'endroit où la barre se coupait et séparait le groupe selon la
+          largeur de l'écran. */}
+      <span className="tabs-sys">
+        {gate("ops", (
+          <button className={`tab ${tab === "ops" ? "active" : ""}`} onClick={() => setTab("ops")}>
+            <IconPlay size={15} /> Exploitation
+          </button>
+        ))}
+        {gate("keys", (
+          <button className={`tab ${tab === "keys" ? "active" : ""}`} onClick={() => setTab("keys")}>
+            <IconLock size={15} /> Confidentialité
+          </button>
+        ))}
+        {(me?.is_superadmin || me?.setup_mode) && (
+          <button className={`tab ${tab === "admin" ? "active" : ""}`} onClick={() => setTab("admin")}>
+            <IconLayers size={15} /> Administration
+          </button>
+        )}
+      </span>
     </nav>
   );
 

@@ -271,7 +271,7 @@ export function FieldEditor({ col, field, presets, tcoLabels, keysAvailable, ava
               <span style={{ color: "var(--ink-faint)" }}> — la colonne n'est plus jamais stockée ni affichée en clair pour qui ne détient pas la clé</span>
             </label>
             {!keysAvailable ? (
-              <div className="csub">Aucune clé maîtresse configurée sur ce serveur — la confidentialité par colonne n'est pas disponible.</div>
+              <div className="empty">Aucune clé maîtresse configurée sur ce serveur — la confidentialité par colonne n'est pas disponible.</div>
             ) : (
               <select value={field.sensitive ?? ""} onChange={(e) => onChange({ sensitive: e.target.value || null })}>
                 <option value="">Aucune</option>

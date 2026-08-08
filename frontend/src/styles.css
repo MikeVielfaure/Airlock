@@ -158,7 +158,10 @@ input, select, textarea { font-family: inherit; }
 
 .topbar {
   display: flex; align-items: center; gap: 10px 16px; flex-wrap: wrap;
-  padding: 8px 20px; min-height: 58px;
+  /* 58 px pour un logo, un sous-titre et une pastille utilisateur : sur un
+     portable 768 px, l'en-tête et les onglets mangeaient près d'un quart
+     de la hauteur avant la première ligne de données. */
+  padding: 6px 20px; min-height: 50px;
   background: var(--panel);
   border-bottom: 1px solid var(--line);
   flex-shrink: 0;
@@ -239,7 +242,15 @@ input, select, textarea { font-family: inherit; }
 .frow > label { font-size: var(--fs-12); font-weight: 500; color: var(--ink-soft); }
 .fgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 
-input[type="text"], input[type="number"], select, textarea {
+/* `email`, `password`, `search`, `date`… manquaient à cette liste : sept
+   champs de l'application — dont les six mots de passe et l'email de
+   connexion — gardaient donc l'anneau de focus noir du navigateur
+   par-dessus le halo indigo posé plus bas. Visible sur l'écran de
+   création de compte, qui est le tout premier que voit un utilisateur. */
+input[type="text"], input[type="number"], input[type="email"],
+input[type="password"], input[type="search"], input[type="date"],
+input[type="tel"], input[type="url"], input:not([type]),
+select, textarea {
   width: 100%; padding: 6px 8px;
   border: 1px solid var(--line-strong); border-radius: var(--r-sm);
   background: var(--panel); color: var(--ink); font-size: var(--fs-13);
@@ -308,6 +319,57 @@ textarea { resize: vertical; min-height: 64px; }
 .btn.primary:hover { box-shadow: 0 4px 14px rgba(58, 52, 176, 0.35); }
 .btn.primary:disabled { box-shadow: none; }
 .btn.block { width: 100%; }
+
+/* ---------- contrôle segmenté ---------- */
+/* Cinq endroits rendaient un choix de mode avec trois `btn.primary` dont un
+   seul actif. Le dégradé indigo veut dire « c'est l'action de cet écran » ;
+   l'employer pour « c'est l'option cochée » brouille les deux, et un écran
+   finit avec deux actions principales qui n'en sont pas.
+
+   Ici les options sont soudées en un seul objet : on voit qu'il faut en
+   choisir une, et que le choix n'engage rien tant qu'on n'a pas agi. */
+.seg {
+  display: inline-flex; padding: 2px; gap: 2px;
+  background: var(--panel-2); border: 1px solid var(--line);
+  border-radius: var(--r); flex-wrap: wrap;
+}
+.seg-item {
+  appearance: none; border: 1px solid transparent; background: none;
+  padding: 4px 10px; border-radius: calc(var(--r) - 3px);
+  font: inherit; font-size: var(--fs-12); font-weight: 500;
+  color: var(--ink-soft); cursor: pointer; white-space: nowrap;
+  transition: background .12s, color .12s, border-color .12s;
+}
+.seg-item:hover { color: var(--ink); background: var(--panel); }
+/* L'option retenue est *posée* sur le rail, pas colorée : elle se distingue
+   par l'élévation et le contraste du texte, ce qui laisse la couleur
+   d'accent disponible pour la vraie action de l'écran. */
+.seg-item.on {
+  background: var(--panel); border-color: var(--line-strong);
+  color: var(--ink); font-weight: 600;
+  box-shadow: 0 1px 2px rgba(20, 30, 50, .06);
+}
+.seg-item:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* ---------- état vide ---------- */
+/* « Choisissez un TCO existant ci-dessus », « Chargez d'abord un fichier » :
+   ces phrases étaient rendues comme du sous-texte ordinaire, posées seules
+   au milieu d'une zone blanche. Sans contenant, elles se lisent comme un
+   reste ou comme une erreur, alors qu'elles disent exactement quoi faire.
+
+   Le cadre en pointillés dit « il y aura quelque chose ici » — la même
+   convention que la zone de dépôt de fichier plus haut, qu'un utilisateur a
+   déjà rencontrée avant d'arriver ici. */
+.home-meta { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+.home-meta .badge { font-size: var(--fs-12); color: var(--ink-soft); }
+.home-meta .badge strong { color: var(--ink); font-weight: 600; }
+
+.empty {
+  margin: 0; padding: 16px 20px;
+  border: 1px dashed var(--line-strong); border-radius: var(--r);
+  background: var(--panel-2); color: var(--ink-soft);
+  font-size: var(--fs-13); line-height: 1.5;
+}
 .btn.sm { padding: 4px 10px; font-size: var(--fs-12); }
 
 /* ---------- main ---------- */
@@ -348,16 +410,37 @@ textarea { resize: vertical; min-height: 64px; }
 }
 .session-tab-new:hover { color: var(--ink); background: var(--panel); }
 
+/* Quinze destinations de premier niveau ne tenaient pas sur 1440 px : la
+   barre passait à la ligne et « Exploitation · Confidentialité ·
+   Administration » se retrouvait seule sur une seconde rangée, alignée
+   sous l'onglet actif — donc lue comme son sous-menu, ce qu'elle n'est
+   pas. Resserrer la gouttière et le rembourrage horizontal les fait tenir
+   sur une rangée et rend 42 px à la zone de travail.
+
+   `flex-wrap: wrap` est conservé : sur un écran étroit, revenir à la
+   ligne reste préférable à couper la navigation. */
 .tabs {
-  display: flex; gap: 2px; padding: 0 20px; flex-wrap: wrap;
+  display: flex; gap: 1px; padding: 0 16px; flex-wrap: wrap;
   background: var(--panel); border-bottom: 1px solid var(--line); flex-shrink: 0;
 }
 .tab {
   appearance: none; border: none; background: none;
-  padding: 12px 12px 12px; font-size: var(--fs-13); font-weight: 500; color: var(--ink-soft);
+  padding: 9px 10px; font-size: var(--fs-13); font-weight: 500; color: var(--ink-soft);
   border-bottom: 2px solid transparent; display: inline-flex; align-items: center; gap: 6px;
   border-radius: var(--r-sm) var(--r-sm) 0 0; transition: background .12s, color .12s;
 }
+/* Les quinze onglets demandent 1671 px : ils ne tiendront jamais sur une
+   rangée à 1440, et les faire tenir voudrait dire retirer les icônes — un
+   choix produit, pas un réglage. On assume donc le retour à la ligne, mais
+   on le rend lisible.
+
+   Exploitation, Confidentialité et Administration ne sont pas des étapes du
+   travail : ce sont les écrans système. Les pousser à droite les sépare du
+   parcours de traitement au lieu de les laisser alignées sous l'onglet
+   actif, où elles se lisaient comme son sous-menu. Sur une rangée unique
+   (écran large), la même règle les met au bout — ce qui reste juste. */
+.tabs-sys { display: inline-flex; gap: 1px; margin-left: auto; }
+
 .tab:hover { color: var(--ink); background: var(--panel-2); }
 .tab.active { color: var(--ink); border-bottom-color: var(--accent); background: var(--accent-tint); }
 .tab .count {
@@ -549,7 +632,12 @@ td.cell-NO_TCO { background: var(--warn-bg); color: var(--warn); }
 pre.yaml {
   font-family: var(--mono); font-size: var(--fs-12); line-height: 1.65;
   background: var(--code-bg); color: var(--code-ink); border-radius: var(--r); padding: 16px 20px;
-  overflow: auto; margin: 0; max-height: calc(100vh - 240px);
+  /* Était `calc(100vh - 240px)` : le bloc grandissait jusqu'à occuper presque
+     toute la fenêtre et repoussait « Bibliothèque » — la seule chose
+     actionnable de cet écran — sous la ligne de flottaison. Un YAML en lecture
+     seule, qu'on ne peut que copier ou télécharger, n'a pas besoin d'être vu
+     en entier : il est défilable. Le plafonner remet l'action à l'écran. */
+  overflow: auto; margin: 0; max-height: min(46vh, 520px);
   border: 1px solid var(--code-line);
 }
 pre.yaml .k { color: var(--code-key); }
