@@ -32,11 +32,10 @@ from datetime import datetime, timezone
 
 from sqlalchemy import (
     JSON, Boolean, DateTime, ForeignKey, Index, Integer, LargeBinary, String,
-    Text, UniqueConstraint, func, text,
+    Text, UniqueConstraint, text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from sqlalchemy.types import TypeDecorator
 
 from app.db import Base
 

@@ -1,19 +1,54 @@
-fastapi>=0.110.0
-uvicorn[standard]>=0.27.0
-python-multipart>=0.0.9
-pandas>=2.0.0
-numpy>=1.24.0
-openpyxl>=3.1.0
-pydantic>=2.0.0
-pyyaml>=6.0
-python-dateutil>=2.8.0
-xlrd>=2.0.0
-sqlalchemy>=2.0.0
-alembic>=1.13.0
-psycopg2-binary>=2.9.0
-bcrypt>=4.0.0
-cryptography>=42.0.0
-pyjwt[crypto]>=2.8.0
-httpx>=0.27.0
-paramiko>=3.4.0
-duckdb>=1.1.0
+# Bornes hautes posées volontairement.
+#
+# Ce fichier n'avait que des `>=`. Constat mesuré le 5 août 2026, en demandant
+# à PyPI ce que chaque ligne installe réellement aujourd'hui :
+#
+#   pandas>=2.0.0        →  3.0.5     (saut de majeure)
+#   numpy>=1.24.0        →  2.5.1     (saut de majeure)
+#   bcrypt>=4.0.0        →  5.0.0     (saut de majeure)
+#   cryptography>=42.0.0 →  50.0.0    (huit majeures d'écart)
+#   paramiko>=3.4.0      →  5.0.0     (saut de majeure)
+#
+# Autrement dit : deux `docker compose up --build` à trois mois d'écart ne
+# donnaient pas la même application, et une CI verte ne disait rien de ce qui
+# tournerait ensuite. Une majeure a le droit de casser — c'est exactement ce
+# que le numéro annonce — donc la borne haute transforme « ça a cassé en prod
+# un mardi » en « la montée de version est un ticket qu'on ouvre quand on
+# décide ».
+#
+# La règle appliquée : **plafonner à la majeure suivant celle qui est déjà
+# publiée**, pas en dessous. Comme la CI installait le plus récent, c'est cette
+# majeure-là qu'elle exerçait déjà ; descendre plus bas reviendrait à changer
+# le comportement testé au lieu de le figer. Une inspection du code n'a
+# d'ailleurs relevé aucun appel retiré par pandas 3 (`applymap`, `iteritems`,
+# `DataFrame.append`), aucun `inplace=True` et aucune affectation chaînée —
+# les trois choses qui cassent au passage au copy-on-write.
+#
+# Ces bornes restent un filet, pas un verrou. Le verrou, c'est un lockfile :
+#
+#   pip install pip-tools
+#   pip-compile requirements.txt -o requirements.lock   # hachages inclus
+#   pip-sync requirements.lock                          # en CI et dans l'image
+#
+# La CI installe alors le .lock — exactement ce qui a été testé — et ce
+# fichier ne sert plus qu'à décrire l'intention.
+
+fastapi>=0.110.0,<1.0
+uvicorn[standard]>=0.27.0,<1.0
+python-multipart>=0.0.9,<1.0
+pandas>=2.0.0,<4.0
+numpy>=1.24.0,<3.0
+openpyxl>=3.1.0,<4.0
+pydantic>=2.0.0,<3.0
+pyyaml>=6.0,<7.0
+python-dateutil>=2.8.0,<3.0
+xlrd>=2.0.0,<3.0
+sqlalchemy>=2.0.0,<3.0
+alembic>=1.13.0,<2.0
+psycopg2-binary>=2.9.0,<3.0
+bcrypt>=4.0.0,<6.0
+cryptography>=42.0.0,<51.0
+pyjwt[crypto]>=2.8.0,<3.0
+httpx>=0.27.0,<1.0
+paramiko>=3.4.0,<6.0
+duckdb>=1.1.0,<2.0

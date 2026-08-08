@@ -1,0 +1,103 @@
+# Configuration de lint — pensée pour être verte le jour où elle arrive.
+#
+# Une porte de qualité introduite au rouge se fait désactiver au premier
+# sprint pressé, et on se retrouve avec le fichier de config *et* rien qui
+# tourne. Les règles activées ici sont donc celles que la base de code passe
+# déjà (après un `ruff check --fix` mécanique sur les imports inutilisés),
+# pas celles qu'on aimerait tenir un jour. Les autres sont listées plus bas
+# avec ce qu'elles coûteraient : les activer sera une décision, pas un oubli.
+
+line-length = 100          # la largeur réelle de ce code, mesurée
+target-version = "py312"
+extend-exclude = ["alembic/versions", "venv", ".venv"]
+
+[lint]
+select = [
+    "F",      # pyflakes : imports et variables morts, noms indéfinis
+    "E4",     # imports mal placés
+    "E711",   # `== None` au lieu de `is None`
+    "E712",   # `== True` au lieu d'un test direct
+    "E713",   # `not x in y` au lieu de `x not in y`
+    "E714",   # `not x is y` au lieu de `x is not y`
+    "E721",   # comparaison de types avec `==`
+    "E722",   # `except:` nu
+    "E731",   # lambda affectée à un nom
+    "E9",     # erreurs de syntaxe et d'exécution
+    "W",      # espaces en fin de ligne, etc.
+    "S",      # bandit : les motifs à risque de sécurité
+    "B",      # bugbear : les pièges courants
+]
+
+ignore = [
+    # ── Faux positifs propres à FastAPI ───────────────────────────────────
+    # B008 se déclenche sur `Depends(...)` en valeur par défaut : c'est la
+    # façon *documentée* de déclarer une dépendance FastAPI. 286 occurrences,
+    # zéro défaut.
+    "B008",
+
+    # B023 se déclenche sur `serie.map(lambda v: f(t, v))` dans une boucle.
+    # La règle vise la capture tardive d'une variable de boucle — mais ici la
+    # lambda est consommée par `.map()` dans la même itération et ne survit
+    # pas à la boucle. Vérifié sur les deux occurrences (`ops_routes.py`,
+    # `schema_check.py`) : faux positifs.
+    "B023",
+
+    # ── Dettes assumées, à traiter plus tard ──────────────────────────────
+    # B904 (`raise ... from`) : 204 occurrences. Purement une question de
+    # qualité de traceback, aucun changement de comportement. À faire
+    # module par module plutôt qu'en un commit de 204 lignes illisible.
+    "B904",
+
+    # B905 (`zip(..., strict=)`) : 11 occurrences. Une vraie amélioration —
+    # `strict=True` transformerait une troncature silencieuse en erreur —
+    # mais chaque cas demande de vérifier que les longueurs sont bien censées
+    # coïncider. À reprendre un par un, pas en masse.
+    "B905",
+
+    # S112 (`try/except/continue`) : 2 occurrences, toutes deux le motif
+    # délibéré « un élément illisible ne doit pas masquer les autres »,
+    # déjà annoté `# noqa: BLE001` avec sa raison sur place.
+    "S112",
+
+    # E501 : la longueur de ligne est laissée au jugement. 62 dépassements
+    # subsistent même à 120 caractères, essentiellement des tables de
+    # données (`edi_kb.py`) que couper rendrait moins lisibles, pas plus.
+    "E501",
+]
+
+# E741 (`l` comme nom), E701 et E702 (`;` et `:` en ligne compacte) ne sont
+# pas sélectionnés : 41 occurrences de pure forme, aucune ambiguïté réelle à
+# la lecture. C'est pour cette raison que la catégorie `E7` est prise règle
+# par règle ci-dessus — celles qui restent (`== None`, `except:` nu,
+# comparaison de types) signalent de vrais défauts, pas une préférence.
+
+[lint.per-file-ignores]
+# Un test *est* fait d'assertions, et ses données d'exemple ressemblent
+# forcément à des secrets en dur.
+# Un test *est* fait d'assertions, ses données d'exemple ressemblent
+# forcément à des secrets en dur, et les tests de `net_guard` et du blob de
+# session manipulent exprès les motifs que `S` signale — c'est leur sujet.
+"tests/**" = [
+    "S101",   # assert : c'est l'outil du test
+    "S105", "S106", "S107",   # mots de passe d'exemple
+    "S110",   # try/except/pass dans une mise en place de test
+    "S301",   # pickle : test_session_blob_compat en fait son sujet
+    "S310",   # urlopen : test_net_guard en fait son sujet
+    "B011",   # `assert False` comme marqueur d'inatteignable
+    "E402",   # import tardif pour isoler un cas
+]
+
+# La configuration de journalisation d'Alembic est optionnelle : un `.ini`
+# minimal sans section `loggers` doit passer, et l'échec est déjà annoté
+# sur place.
+"alembic/env.py" = ["S110"]
+
+# ─────────────────────────────────────────────────────────────────────────
+# Pour aller plus loin, quand l'envie viendra — dans cet ordre :
+#   "I"   isort            : réordonne les imports partout. Diff large mais
+#                            entièrement mécanique et vérifiable.
+#   "UP"  pyupgrade        : modernise la syntaxe pour la version cible.
+#   "RUF" règles ruff      : dont RUF012 sur les attributs de classe mutables.
+#   "ANN" annotations      : le plus coûteux, et le plus payant sur les
+#                            services métier (`process_service`, `flow_runner`).
+# ─────────────────────────────────────────────────────────────────────────

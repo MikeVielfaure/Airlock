@@ -17,6 +17,7 @@ changes only this file's URL — nothing else.
 
 from __future__ import annotations
 
+import logging
 import os
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -77,7 +78,13 @@ def init_db() -> str:
             command.upgrade(cfg, "head")
             return "alembic"
         except Exception:  # noqa: BLE001
-            pass
+            # Le repli sur `create_all` est voulu, mais il doit être dit :
+            # démarrer sur un schéma construit hors Alembic pendant qu'on
+            # croit tourner sur les migrations est exactement le genre
+            # d'écart qu'on découvre trois semaines plus tard.
+            logging.getLogger("app.db").warning(
+                "Alembic n'a pas pu amener le schéma à head — repli sur "
+                "create_all.", exc_info=True)
     Base.metadata.create_all(bind=engine)
     return "create_all"
 

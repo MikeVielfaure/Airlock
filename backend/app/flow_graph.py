@@ -23,7 +23,7 @@ parameters come from the request.
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal
 
 import yaml
 from pydantic import BaseModel, Field, field_validator, model_validator

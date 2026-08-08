@@ -24,7 +24,7 @@ from sqlalchemy.orm import Session
 
 from app.db_models import (
     Artefact, ArtefactGrant, ArtefactVersion, Dataset, DatasetRow, DatasetWrite,
-    Flow, FlowRun, DatasetGrant, FlowRunStep, Run, Variable, VariableRestriction, VariableSchema,
+    Flow, DatasetGrant, Run, Variable, VariableRestriction, VariableSchema,
 )
 
 

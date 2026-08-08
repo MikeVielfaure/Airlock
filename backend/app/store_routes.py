@@ -39,7 +39,7 @@ from sqlalchemy.orm import Session
 
 from app import repository as repo
 from app.db import commit, get_session
-from app.auth_routes import current_env, require_capability, require_user
+from app.auth_routes import current_env, require_user
 from app.db_models import KINDS
 from app.models import (
     PipelineErrorCell, PipelineErrorRow, PipelineResponse, PipelineStructure, ProcessStats,

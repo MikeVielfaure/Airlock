@@ -58,7 +58,7 @@ def test_an_unknown_flow_says_so_plainly(flow):
 
 def test_a_version_can_be_pinned_in_the_call(flow):
     """Artefacts are versioned, so an address can serve one version forever."""
-    listing = client.get("/api/artefacts/config").json()  # warm the store
+    client.get("/api/artefacts/config").json()  # warm the store
     aid = [a for a in client.get("/api/artefacts/graph").json() if a["name"] == flow][0]["id"]
     client.post(f"/api/artefacts/graph/{aid}/versions",
                 json={"yaml": FLOW.replace("A1", "A2")})

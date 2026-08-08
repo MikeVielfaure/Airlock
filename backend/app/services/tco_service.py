@@ -149,7 +149,7 @@ class TcoService:
         :return: (ok: bool, message: str)
         """
         if not source_value or source_value.strip() == "":
-            return False, f"MAPPING KO — valeur source vide"
+            return False, "MAPPING KO — valeur source vide"
 
         tco_df = self._scoped(tco_df, type_)
         matches = tco_df[
@@ -159,7 +159,7 @@ class TcoService:
 
         if not matches.empty:
             return True, "MAPPING OK"
-        
+
         # Chercher si la source existe au moins (pour un message plus précis)
         source_exists = not tco_df[
             tco_df[_COL_SOURCE].str.strip() == source_value.strip()

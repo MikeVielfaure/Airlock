@@ -13,7 +13,6 @@ import os
 
 os.environ.setdefault("FX_MASTER_KEY", "cle-maitresse-de-test-pour-la-suite")
 
-import pytest
 from fastapi.testclient import TestClient
 
 from app.main import _MaxBodySizeMiddleware, _parse_cors_origins, app

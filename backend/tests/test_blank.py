@@ -4,7 +4,6 @@ truth, data comes later (or never). Two paths — explicit columns, or seeded
 from a library artefact — feeding the three uses the user named: trying a config
 on hand-typed rows, building a small reference by hand, seeding an empty table.
 """
-import io
 
 from fastapi.testclient import TestClient
 

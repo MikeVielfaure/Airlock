@@ -13,7 +13,6 @@ from typing import Optional
 
 import io
 import json
-import base64
 import logging
 import os
 import time
@@ -25,11 +24,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 from app.models import (
-    AddRowsRequest, BlankSessionRequest, CellEdit, DeleteRowsRequest, EditCellsRequest, EditCellsResponse,
+    AddRowsRequest, BlankSessionRequest, DeleteRowsRequest, EditCellsRequest, EditCellsResponse,
     RowsMutationResponse,
     ExportRequest, ExportResponse, ExpressionCheck, ExpressionResult,
     FieldConfig, FileResponse, HeaderRequest, ImportRequest, ImportResponse,
-    MatchInfo, Presets, ProcessRequest, ProcessResponse, ProcessStats, RowsResponse, TablePreview, TcoResponse,
+    MatchInfo, Presets, ProcessRequest, ProcessResponse, RowsResponse, TablePreview, TcoResponse,
     PipelineResponse, SourceInfo, AttachDatasetSource, AttachSessionSource, ReorderRowRequest,
     AttachExternalDbSource, AttachApiSource, AttachFlowSource, SetSourceKey,
     ExternalDbSessionRequest, ApiSessionRequest, DiffRequest,
@@ -40,7 +39,7 @@ from app.services import crypto_service as _crypto
 from app.services import dataset_service as _ds
 from app.services import auth_service as _auth
 from app.services.function_service import (
-    REGEX_PRESETS, UI_DATE_FORMATS, FunctionService,
+    REGEX_PRESETS, UI_DATE_FORMATS,
 )
 from app.services.process_service import ProcessService
 from app.services.tco_service import TcoService
@@ -1723,7 +1722,6 @@ def get_report(
             keep = [c.strip() for c in columns.split(",") if c.strip()]
             df = df[df["colonne"].isin(keep)]
 
-        multi_id = bool(sess.identifier_fields and len(sess.identifier_fields) > 1)
         id_label = " | ".join(sess.identifier_fields) if sess.identifier_fields else "row"
 
         # ── shape ─────────────────────────────────────────────────────

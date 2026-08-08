@@ -9,3 +9,4 @@ dist/
 CLAUDE.local.md
 backups/
 v2/
+.ruff_cache/

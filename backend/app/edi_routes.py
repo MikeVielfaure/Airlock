@@ -272,8 +272,13 @@ async def convert(file: UploadFile = File(...),
     if mapping.strip():
         try:
             map_dict = json.loads(mapping)
-            assert isinstance(map_dict, dict)
         except Exception:  # noqa: BLE001
+            raise HTTPException(422, "`mapping` doit être un objet JSON {champ_cible: champ_source}.")
+        # Test explicite plutôt qu'`assert` : `python -O` retire les assertions,
+        # et un interpréteur optimisé laisserait alors passer une liste JSON
+        # jusqu'à un `.items()` bien plus loin, sur une erreur d'appelant que
+        # cette route existe justement pour nommer ici.
+        if not isinstance(map_dict, dict):
             raise HTTPException(422, "`mapping` doit être un objet JSON {champ_cible: champ_source}.")
     seps, segments, _ = _lex_or_422(await file.read())
     inters, _errs = edi_service.split_interchanges(segments)

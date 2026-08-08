@@ -16,7 +16,6 @@ bridge.
 """
 from __future__ import annotations
 
-import io
 from typing import Optional
 
 import pandas as pd
@@ -24,7 +23,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
 from app import repository as repo
-from app.db import commit, get_session
+from app.db import get_session
 from app.mapping_models import Mapping, mapping_from_yaml
 from app.services import edi_service, pivot_service
 from app.services.file_service import FileService

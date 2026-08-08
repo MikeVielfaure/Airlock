@@ -6,7 +6,6 @@ judges the result.
 """
 import os
 
-import pytest
 from fastapi.testclient import TestClient
 
 os.environ.setdefault("FX_MASTER_KEY", "cle-test-brique")

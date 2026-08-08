@@ -2,7 +2,6 @@
 Environment profiles: deploying the same application to different audiences.
 Scoping decided what an environment owns; a profile decides what it exposes.
 """
-import io
 
 from fastapi.testclient import TestClient
 

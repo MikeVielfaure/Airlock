@@ -5,7 +5,6 @@ process, report — plus YAML round-trip and TCO mapping.
 
 import io
 
-import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
@@ -315,7 +314,7 @@ def test_computed_sees_renamed_column():
 def test_rename_target_recognized_as_source_on_import():
     # A config field SIRET renamed to IDENTIFIANT should match a file that
     # already has a column named IDENTIFIANT.
-    sid = _upload("IDENTIFIANT;X\n12345678901234;a\n")["session_id"]
+    _upload("IDENTIFIANT;X\n12345678901234;a\n")["session_id"]
     cfg = (
         'type: CSV\ndelimiter: ";"\nFields:\n'
         '  - name: [SIRET]\n    type: string\n    mapping: IDENTIFIANT\n'
@@ -985,7 +984,7 @@ def test_report_id_with_empty_identifier_value():
 
 def test_rows_and_process_return_index():
     sid = _upload("A;B\n1;x\n2;y\n3;z\n")["session_id"]
-    up_idx = client.get(f"/api/files/{sid}/rows")   # before run -> 409, index comes from upload
+    client.get(f"/api/files/{sid}/rows")   # before run -> 409, index comes from upload
     pr = client.post(f"/api/files/{sid}/process", json={
         "visible_cols": ["A", "B"], "fields": {"A": {"name": ["A"]}, "B": {"name": ["B"]}}})
     assert pr.json()["index"] == [0, 1, 2]

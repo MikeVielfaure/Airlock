@@ -160,7 +160,7 @@ def test_export_masks_confidential_columns():
 def test_the_unmapped_values_list_stops_quoting_confidential_data():
     """That list prints values verbatim — on a confidential column it would hand
     them over in the clear, which is exactly the leak being closed."""
-    masked = client.post("/api/files/x/process", json={}) if False else None
+    client.post("/api/files/x/process", json={}) if False else None
     from app.main import _mask_uncovered
     out = _mask_uncovered({"SALAIRE": [{"value": "3000", "count": 4}]}, {"SALAIRE": "paie"})
     assert out["SALAIRE"][0]["value"] == cs.MASK

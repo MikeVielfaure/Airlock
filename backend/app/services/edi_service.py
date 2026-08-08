@@ -34,7 +34,7 @@ import pandas as pd
 from app.edi_models import (EdiEnvelope, EdiField, EdiItems, EdiModel,
                             EdiSegmentDef, EdiVariant)
 from app.services import edi_kb as kb
-from app.services.edi_lexer import (Segment, Separators, get, parse, render)
+from app.services.edi_lexer import (Segment, Separators, get, render)
 
 _NUM_RE = re.compile(r"^-?\d+(\.\d+)?$")
 

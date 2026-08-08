@@ -11,7 +11,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.mapping_models import Mapping, mapping_from_yaml
+from app.mapping_models import mapping_from_yaml
 from app.services import pivot_service
 
 client = TestClient(app)

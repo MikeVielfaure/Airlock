@@ -6,7 +6,7 @@ answers as an API.
 """
 from fastapi.testclient import TestClient
 
-from app.flow_graph import FlowGraph, graph_from_yaml
+from app.flow_graph import graph_from_yaml
 from app.main import app
 
 client = TestClient(app)
