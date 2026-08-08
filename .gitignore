@@ -8,3 +8,4 @@ dist/
 .env
 CLAUDE.local.md
 backups/
+v2/
