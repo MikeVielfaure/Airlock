@@ -32,7 +32,7 @@ import pandas as pd
 
 from app.flow_graph import SOURCE_TYPES, FlowGraph, FlowNode
 from app.mapping_models import Mapping
-from app.services import pivot_service
+from app.services import net_guard, pivot_service
 
 MAX_DEPTH = 5          # a graph calling a graph calling… must stop somewhere
 MAX_ROWS = 200_000     # a runaway source must not eat the process
@@ -691,7 +691,6 @@ def _brick_config(node: FlowNode, inputs: List[dict], ctx: RunContext) -> NodeRe
     keeping them and reporting is safe, dropping them silently is how a flow
     quietly loses a tenth of its input.
     """
-    from app.models import FieldConfig
     from app.services.compute_service import ComputeService
     from app.services.config_service import ConfigService
     from app.services.process_service import ProcessService
@@ -737,8 +736,6 @@ def _brick_config(node: FlowNode, inputs: List[dict], ctx: RunContext) -> NodeRe
     tco_df = None
     tco_ref = cfg.get("tco_id") or cfg.get("tco") or ""
     if tco_ref:
-        import io as _io
-        import pandas as _pd
         try:
             tco_body = ctx.load_artefact(tco_ref, cfg.get("tco_version"))
             csv_text = (tco_body or {}).get("csv", "")
@@ -866,11 +863,13 @@ def _brick_http(node: FlowNode, inputs: List[dict], ctx: RunContext) -> NodeResu
     sent, statuses = 0, []
     for i, chunk in enumerate(chunks, start=1):
         payload = {field: chunk} if field else chunk
-        req = urllib.request.Request(
+        req = urllib.request.Request(  # noqa: S310 — validé par net_guard.urlopen
             url, data=json.dumps(payload).encode(), method=method, headers=headers)
         try:
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
+            with net_guard.urlopen(req, timeout=timeout) as resp:
                 statuses.append(resp.status)
+        except net_guard.BlockedUrl as e:
+            raise FlowError(node.id, str(e))
         except urllib.error.HTTPError as e:
             raise FlowError(node.id, f"HTTP {e.code} on batch {i}/{len(chunks)} "
                                      f"({sent} row(s) already accepted)")

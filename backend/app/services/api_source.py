@@ -11,6 +11,8 @@ import json
 import urllib.error
 import urllib.request
 
+from app.services import net_guard
+
 
 class ApiCallError(Exception):
     """The call failed, or the payload doesn't fit the shape asked of it."""
@@ -24,11 +26,16 @@ def call(url: str, method: str, headers: dict, body, timeout: float) -> tuple[by
     if body is not None:
         data = (body if isinstance(body, str) else json.dumps(body)).encode()
         headers.setdefault("Content-Type", "application/json")
-    req = urllib.request.Request(url, data=data, method=method,
+    # noqa S310 : l'URL est validée par `net_guard.urlopen` juste en dessous —
+    # schéma, adresse résolue et redirections. C'est précisément le contrôle
+    # dont l'absence rendait `file:///etc/passwd` lisible depuis un flux.
+    req = urllib.request.Request(url, data=data, method=method,  # noqa: S310
                                  headers={str(k): str(v) for k, v in headers.items()})
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with net_guard.urlopen(req, timeout=timeout) as resp:
             return resp.read(), resp.status
+    except net_guard.BlockedUrl as e:
+        raise ApiCallError(str(e))
     except urllib.error.HTTPError as e:
         raise ApiCallError(f"HTTP {e.code} en appelant {url}")
     except Exception as e:  # noqa: BLE001 — a network failure must name the url

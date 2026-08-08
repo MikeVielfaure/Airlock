@@ -53,14 +53,18 @@ def test_external_db_bad_url_is_a_clean_failure():
 
 
 def test_api_reports_the_http_status(monkeypatch):
-    import urllib.request
+    from app.services import net_guard
 
     class FakeResp:
         status = 204
         def __enter__(self): return self
         def __exit__(self, *a): return False
 
-    monkeypatch.setattr(urllib.request, "urlopen", lambda req, timeout=0: FakeResp())
+    # La sonde ne passe plus par `urllib.request.urlopen` mais par
+    # `net_guard.urlopen`, qui valide l'URL puis ouvre sans FileHandler.
+    # Intercepter le vrai collaborateur garde ce test sur son sujet — le
+    # statut rapporté — au lieu de le faire porter sur la plomberie.
+    monkeypatch.setattr(net_guard, "urlopen", lambda req, timeout=0: FakeResp())
     r = ct.test_connection("api", {"base_url": "https://exemple.fr"})
     assert r["ok"] is True and "204" in r["message"]
 
@@ -72,12 +76,13 @@ def test_api_missing_base_url_is_a_clean_failure():
 
 def test_api_an_http_error_is_still_reachability(monkeypatch):
     import urllib.error
-    import urllib.request
+
+    from app.services import net_guard
 
     def boom(req, timeout=0):
         raise urllib.error.HTTPError("https://exemple.fr", 404, "Not Found", {}, None)
 
-    monkeypatch.setattr(urllib.request, "urlopen", boom)
+    monkeypatch.setattr(net_guard, "urlopen", boom)
     r = ct.test_connection("api", {"base_url": "https://exemple.fr"})
     assert r["ok"] is True and "404" in r["message"]
 

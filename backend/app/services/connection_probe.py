@@ -113,10 +113,16 @@ def _test_api(data: Dict[str, Any]) -> Dict[str, Any]:
     headers = {}
     if data.get("token"):
         headers[str(data.get("auth_header") or "Authorization")] = str(data["token"])
-    req = urllib.request.Request(base_url, headers=headers, method="GET")
+    from app.services import net_guard
+
+    req = urllib.request.Request(base_url, headers=headers, method="GET")  # noqa: S310 — validé par net_guard.urlopen
     try:
-        with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
+        with net_guard.urlopen(req, timeout=TIMEOUT) as resp:
             status = resp.status
+    except net_guard.BlockedUrl as e:
+        # Une sonde est justement l'endroit où quelqu'un essaie une adresse
+        # pour voir : elle doit répondre « refusé », pas la joindre.
+        return {"ok": False, "message": str(e)}
     except urllib.error.HTTPError as e:
         # The server answered — that IS reachability, even for a 404/401
         # that a bare ping-style check would otherwise call a failure.
