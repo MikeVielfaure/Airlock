@@ -475,23 +475,18 @@ def _finalize_sftp_file(conn_value: str, remote_path: str, dest_dir: str) -> str
         transport.close()
 
 
-def run_and_record(s: Session, graph: FlowGraph, *, params: Dict[str, str],
-                   environment: str, graph_id: str = "",
-                   snapshot: Optional[dict] = None, replay_mode: str = "",
-                   replay_of: str = "", loaders=(None, None)) -> tuple[dict, FlowRun]:
-    """
-    Execute a flow and journal it, whatever the outcome.
+def open_run(s: Session, graph: FlowGraph, *, params: Dict[str, str],
+             environment: str, graph_id: str = "", replay_mode: str = "",
+             replay_of: str = "") -> FlowRun:
+    """Ouvre la ligne de journal et la rend immédiatement, sans rien exécuter.
 
-    The row is written *before* the run starts, with status "running": a flow
-    that hangs or dies mid-way is still visible in the table rather than
-    vanishing without trace.
+    Séparé de l'exécution parce que c'est ce qui rend un lancement asynchrone
+    possible : l'appelant obtient un identifiant de run à montrer et à
+    interroger *avant* que le premier octet ne soit lu. La ligne est committée
+    tout de suite — elle existe donc dans la table d'exploitation même si le
+    processus meurt à la seconde suivante, ce que le statut « running » dit
+    déjà correctement.
     """
-    load_graph, load_artefact = loaders
-    variables = repo.resolve_variables(s, environment=environment, graph_id=graph_id)
-    variable_kinds = repo.resolve_variable_kinds(s, environment=environment, graph_id=graph_id)
-    secrets = {v.name: v.value for v in repo.list_variables(s, environment=environment,
-                                                            graph_id=graph_id) if v.secret}
-
     run = FlowRun(graph_id=graph_id, graph_name=graph.name, environment=environment or "default",
                   status="running", params_json=dict(params),
                   graph_json=graph.model_dump(by_alias=True), snapshot_json={},
@@ -499,6 +494,21 @@ def run_and_record(s: Session, graph: FlowGraph, *, params: Dict[str, str],
     s.add(run)
     s.flush()
     commit(s)                      # visible immediately, not only once finished
+    return run
+
+
+def execute_run(s: Session, run: FlowRun, graph: FlowGraph, *, params: Dict[str, str],
+                environment: str, graph_id: str = "", snapshot: Optional[dict] = None,
+                replay_mode: str = "", loaders=(None, None)) -> dict:
+    """Exécute un flux dans une ligne de journal déjà ouverte, et la referme —
+    succès ou échec. Lève `HTTPException(422)` sur échec métier, **après** avoir
+    journalisé : un appelant en tâche de fond peut donc l'avaler sans rien
+    perdre, le verdict est déjà en base."""
+    load_graph, load_artefact = loaders
+    variables = repo.resolve_variables(s, environment=environment, graph_id=graph_id)
+    variable_kinds = repo.resolve_variable_kinds(s, environment=environment, graph_id=graph_id)
+    secrets = {v.name: v.value for v in repo.list_variables(s, environment=environment,
+                                                            graph_id=graph_id) if v.secret}
 
     ctx = RunContext(params=params, session=s, environment=environment or "default",
                      graph_id=graph_id, variables=variables, variable_kinds=variable_kinds,
@@ -569,6 +579,28 @@ def run_and_record(s: Session, graph: FlowGraph, *, params: Dict[str, str],
     run.status = "success"
     run.rows_out = sum(len(r.get("items") or []) for r in result.get("records", []))
     commit(s)
+    return result
+
+
+def run_and_record(s: Session, graph: FlowGraph, *, params: Dict[str, str],
+                   environment: str, graph_id: str = "",
+                   snapshot: Optional[dict] = None, replay_mode: str = "",
+                   replay_of: str = "", loaders=(None, None)) -> tuple[dict, FlowRun]:
+    """
+    Execute a flow and journal it, whatever the outcome.
+
+    The row is written *before* the run starts, with status "running": a flow
+    that hangs or dies mid-way is still visible in the table rather than
+    vanishing without trace.
+
+    Ouvre la ligne puis exécute, d'un seul tenant — le chemin synchrone, celui
+    de l'éditeur, où l'appelant attend le résultat.
+    """
+    run = open_run(s, graph, params=params, environment=environment, graph_id=graph_id,
+                   replay_mode=replay_mode, replay_of=replay_of)
+    result = execute_run(s, run, graph, params=params, environment=environment,
+                         graph_id=graph_id, snapshot=snapshot, replay_mode=replay_mode,
+                         loaders=loaders)
     return result, run
 
 

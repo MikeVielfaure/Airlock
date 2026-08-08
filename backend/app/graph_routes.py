@@ -10,14 +10,15 @@ editor uses, which is what keeps what you test and what you serve identical.
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Body, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app import repository as repo
-from app.db import get_session
+from app.db import commit, get_session
 from app.auth_routes import require_user
 from app.flow_graph import FlowGraph, graph_from_yaml
 from app.services import pivot_service
@@ -144,6 +145,82 @@ def run(req: RunRequest, s: Session = Depends(get_session),
     return {"ok": True, "output": result["output"], "meta": result["meta"],
             "trace": result["trace"], "run_id": run.id,
             "preview": _preview(result["records"], req.limit)}
+
+
+@router.post("/run-async")
+def run_async(req: RunRequest, tasks: BackgroundTasks,
+              s: Session = Depends(get_session), user=Depends(require_user)):
+    """Lance un flux et rend la main tout de suite, avec l'identifiant du run.
+
+    `POST /run` tient la connexion HTTP du début à la fin. C'est ce qu'il faut
+    dans l'éditeur, où l'on regarde le résultat arriver. C'est le mauvais
+    contrat pour un traitement de volume déclenché par une machine : un flux de
+    plusieurs minutes dépend alors de la survie d'une connexion, ne dit rien de
+    son avancement, et ne s'annule pas.
+
+    Ici, tout ce qui peut échouer *avant* l'exécution échoue encore de façon
+    synchrone — droits, graphe introuvable, paramètre manquant — parce qu'un
+    appelant doit apprendre qu'il s'est trompé maintenant, pas dans un journal
+    trois minutes plus tard. Seule l'exécution part en tâche de fond.
+
+    Le suivi ne demande rien de neuf : la ligne de journal existe déjà avec le
+    statut « running », et `GET /api/ops/runs/{run_id}` la rend. C'est la même
+    table qui alimente l'écran Exploitation, donc un run lancé par l'API y
+    apparaît exactement comme les autres.
+
+    Limite à connaître : si le processus est arrêté pendant l'exécution, le run
+    reste « running » indéfiniment — personne ne le repassera en « error ».
+    C'était déjà vrai du chemin synchrone ; le rendre asynchrone rend seulement
+    la situation plus visible. Un balayage au démarrage qui referme les runs
+    orphelins serait la réponse, et il n'existe pas encore.
+    """
+    _check_run_capability(s, user, req.environment)
+    graph = _resolve_graph(s, req)
+    params = _bind_params(graph, req.params)
+
+    from app.ops_routes import open_run
+    run = open_run(s, graph, params=params, environment=req.environment or "default",
+                   graph_id=req.graph_id or "")
+
+    tasks.add_task(_execute_detached, run.id, graph, params,
+                   req.environment or "default", req.graph_id or "")
+    return {"ok": True, "run_id": run.id, "status": "running",
+            "poll": f"/api/ops/runs/{run.id}"}
+
+
+def _execute_detached(run_id: str, graph, params: dict, environment: str, graph_id: str) -> None:
+    """Le corps de l'exécution, hors du cycle de la requête.
+
+    Sa propre session de base : celle de la requête est fermée dès la réponse
+    envoyée, et une `Session` SQLAlchemy ne se partage pas entre threads.
+
+    Trois sorties possibles, et aucune ne doit laisser la ligne en « running » :
+    l'échec métier est déjà journalisé par `execute_run` avant qu'il ne lève, et
+    le `HTTPException` qu'il lève n'a plus de sens ici — personne ne l'attend.
+    Un échec inattendu, lui, n'a rien journalisé du tout : on referme la ligne à
+    la main, sinon un run mort resterait « en cours » pour toujours dans l'écran
+    Exploitation, ce qui est pire que d'afficher l'erreur.
+    """
+    from fastapi import HTTPException as _HTTPException
+
+    from app.db import commit, session_scope
+    from app.db_models import FlowRun
+    from app.ops_routes import execute_run
+
+    with session_scope() as s:
+        run = s.get(FlowRun, run_id)
+        if run is None:                       # supprimé entre-temps : rien à faire
+            return
+        try:
+            execute_run(s, run, graph, params=params, environment=environment,
+                        graph_id=graph_id, loaders=_loaders(s))
+        except _HTTPException:
+            pass                              # déjà journalisé en « error »
+        except Exception as e:                # noqa: BLE001 — voir la docstring
+            run.status = "error"
+            run.error = f"Échec inattendu pendant l'exécution détachée : {e}"
+            run.finished_at = datetime.now(timezone.utc)
+            commit(s)
 
 
 def _open_as_session(s: Session, records: list) -> "FileResponse":  # noqa: F821 — imported at call site
