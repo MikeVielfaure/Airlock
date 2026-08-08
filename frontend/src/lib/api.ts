@@ -131,18 +131,99 @@ function authHeaders(extra: Record<string, string> = {}): Record<string, string>
   return tok ? { ...extra, Authorization: `Bearer ${tok}` } : extra;
 }
 
+/**
+ * Turns whatever the API put in `detail` into a sentence a person can read.
+ *
+ * FastAPI uses that field for two different shapes. `HTTPException(422,
+ * "message")` puts a string there — which is what this code assumed. But a
+ * body that fails Pydantic validation produces a *list* of objects
+ * (`[{loc, msg, type, input}, ...]`), and `new Error(thatList)` stringifies
+ * to `"[object Object]"`. So every validation failure — a missing field, a
+ * number where a string was expected — reached the user as `[object Object]`
+ * instead of naming what was wrong. Two failures gave
+ * `"[object Object],[object Object]"`.
+ *
+ * The field path is kept because it's the useful half: "password : Field
+ * required" says where to look, "Field required" alone does not. `body` and
+ * `query` are dropped from the path — the person filling a form doesn't
+ * think in terms of where the value travelled.
+ */
+export function errorDetail(detail: unknown, fallback: string): string {
+  if (typeof detail === "string" && detail) return detail;
+
+  if (Array.isArray(detail)) {
+    const lignes = detail
+      .map((e) => {
+        if (typeof e === "string") return e;
+        if (!e || typeof e !== "object") return "";
+        const { loc, msg } = e as { loc?: unknown[]; msg?: string };
+        if (!msg) return "";
+        const champ = Array.isArray(loc)
+          ? loc.filter((s) => s !== "body" && s !== "query" && s !== "path").join(".")
+          : "";
+        return champ ? `${champ} : ${msg}` : msg;
+      })
+      .filter(Boolean);
+    if (lignes.length) return lignes.join(" — ");
+  }
+
+  // Un objet seul, ou tout ce qui n'entre dans aucun de ces cas : mieux vaut
+  // le statut HTTP qu'un "[object Object]" qui n'apprend rien.
+  return fallback;
+}
+
 async function json<T>(res: Response): Promise<T> {
   if (!res.ok) {
     let detail = res.statusText;
     try {
       const body = await res.json();
-      detail = body.detail ?? detail;
+      detail = errorDetail(body?.detail, res.statusText);
     } catch {
       /* keep statusText */
     }
     throw new Error(detail);
   }
   return res.json() as Promise<T>;
+}
+
+/**
+ * The filename a `Content-Disposition` header asks for, or the fallback.
+ *
+ * `filename*=UTF-8''...` is read first: it's the form that carries accents,
+ * and this interface is French. The plain `filename=` is the ASCII fallback
+ * the same header usually also provides.
+ *
+ * The unquoted branch stops at `;` rather than running to the end of the
+ * string. The previous pattern (`filename="?([^"]+)"?`) was greedy: on
+ * `attachment; filename=export.csv; filename*=UTF-8''r%C3%A9sum%C3%A9.csv`
+ * it captured everything after the first `=`, and the browser was handed a
+ * "filename" containing a second header parameter.
+ */
+export function filenameFromDisposition(
+  disposition: string | null, fallback: string,
+): string {
+  const d = disposition || "";
+
+  const etoile = /filename\*=\s*([^']*)'[^']*'([^;]+)/i.exec(d);
+  if (etoile) {
+    try { return decodeURIComponent(etoile[2].trim()); }
+    catch { /* encodage douteux : on retombe sur les autres formes */ }
+  }
+
+  const cite = /filename\s*=\s*"([^"]*)"/i.exec(d);
+  if (cite && cite[1].trim()) return cite[1].trim();
+
+  /* Les guillemets sont retirés ici aussi : `filename=""` tombe dans cette
+     branche une fois la précédente écartée pour cause de nom vide, et sans
+     ce nettoyage la fonction rendait la paire de guillemets comme nom de
+     fichier. C'est un test qui l'a montré, pas une relecture. */
+  const nu = /filename\s*=\s*([^;]+)/i.exec(d);
+  if (nu) {
+    const nom = nu[1].trim().replace(/^"|"$/g, "").trim();
+    if (nom) return nom;
+  }
+
+  return fallback;
 }
 
 /** A file download that needs the bearer token, so it can't be a plain
@@ -152,12 +233,12 @@ async function downloadBlob(url: string, fallbackName: string): Promise<void> {
   const res = await fetch(url, { headers: authHeaders() });
   if (!res.ok) {
     let detail = res.statusText;
-    try { detail = (await res.json()).detail ?? detail; } catch { /* keep statusText */ }
+    try { detail = errorDetail((await res.json())?.detail, res.statusText); }
+    catch { /* keep statusText */ }
     throw new Error(detail);
   }
-  const disposition = res.headers.get("Content-Disposition") || "";
-  const match = /filename="?([^"]+)"?/.exec(disposition);
-  const filename = match ? match[1] : fallbackName;
+  const filename = filenameFromDisposition(
+    res.headers.get("Content-Disposition"), fallbackName);
   const blob = await res.blob();
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
