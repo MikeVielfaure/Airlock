@@ -389,6 +389,17 @@ async def upload_file(
     if not raw:
         raise HTTPException(400, "Empty file.")
 
+    # Le plafond en mégaoctets (middleware, plus haut) ne dit rien du nombre de
+    # lignes, et c'est le nombre de lignes qui tue le processus : 200 Mo de CSV
+    # font 1,6 million de lignes, soit ~4 Go de pic. DuckDB les compte sans rien
+    # charger en mémoire — voir services/size_guard.py pour les mesures.
+    if (file_type or "CSV").upper() == "CSV":
+        from app.services.size_guard import TooManyRows, check_csv
+        try:
+            check_csv(raw, delimiter if delimiter != _AUTO else ",")
+        except TooManyRows as e:
+            raise HTTPException(413, str(e))
+
     sheets: list[str] = []
     sheet_used: str | None = None
     table_count = 0
