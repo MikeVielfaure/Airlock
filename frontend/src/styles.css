@@ -59,9 +59,59 @@
   --sp-6: 32px;
 
   /* type */
-  --sans: "Inter", system-ui, sans-serif;
-  --display: "Space Grotesk", "Inter", sans-serif;
-  --mono: "JetBrains Mono", ui-monospace, "SF Mono", monospace;
+  /* Les fontes variables sont servies par l'application (voir fonts.css).
+     Les noms non variables restent en repli : un poste où la police est
+     installée localement, ou un cache navigateur d'une version antérieure. */
+  --sans: "Inter Variable", "Inter", system-ui, sans-serif;
+  --display: "Space Grotesk Variable", "Space Grotesk", "Inter Variable", sans-serif;
+  --mono: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, "SF Mono", monospace;
+
+  /* ── Couleurs promues en variables ───────────────────────────────────
+     Ces valeurs étaient écrites en dur au fil de la feuille. Les nommer ne
+     change rien au rendu clair — c'est ce que vérifie la comparaison du CSS
+     compilé — mais c'est la condition pour qu'un thème sombre existe : une
+     couleur en dur ne peut pas être redéfinie ailleurs. Elles gardent leurs
+     valeurs exactes. */
+
+  /* texte posé sur une surface colorée */
+  --on-accent:    #fff;
+  --on-ink:       #fff;
+
+  /* le vocabulaire des types — la langue du schéma, en couleur */
+  --t-string:     #475569;
+  --t-number:     #1e5fa8;
+  --t-number-bg:  #eaf2fb;
+  --t-number-line:#cfe0f3;
+  --t-date:       #7a3fb0;
+  --t-date-bg:    #f3ecfb;
+  --t-date-line:  #e1d0f2;
+  --t-bool:       #a85d08;
+
+  /* le bloc de code : déjà sombre en thème clair, c'est son identité */
+  --code-bg:      #1b2230;
+  --code-ink:     #e7ecf3;
+  --code-line:    #2a3344;
+  --code-key:     #8db4ff;
+
+  /* cellules modifiées — une famille ambre distincte de --warn, parce
+     qu'« édité par quelqu'un » et « attention » ne sont pas la même chose */
+  --edit:         #9a3412;
+  --edit-bg:      #fff7ed;
+  --edit-bg-2:    #ffedd5;
+  --edit-line:    #fdba74;
+  --edit-mark:    #f59e0b;
+
+  /* survol de ligne : les fonds de validation, un cran plus soutenus */
+  --err-bg-hover: #fbddd9;
+  --ok-bg-hover:  #d8efe0;
+
+  /* liserés sur fond teinté accent */
+  --accent-tint-line:   #d6d3f5;
+  --accent-tint-line-2: #cdc9f2;
+
+  /* barre de défilement */
+  --scroll:       #d6dbe4;
+  --scroll-hover: #c2c9d4;
 }
 
 * { box-sizing: border-box; }
@@ -82,8 +132,8 @@ button { font-family: inherit; cursor: pointer; }
 input, select, textarea { font-family: inherit; }
 
 ::-webkit-scrollbar { width: 10px; height: 10px; }
-::-webkit-scrollbar-thumb { background: #d6dbe4; border-radius: 6px; border: 2px solid var(--bg); }
-::-webkit-scrollbar-thumb:hover { background: #c2c9d4; }
+::-webkit-scrollbar-thumb { background: var(--scroll); border-radius: 6px; border: 2px solid var(--bg); }
+::-webkit-scrollbar-thumb:hover { background: var(--scroll-hover); }
 
 /* ---------- shell ---------- */
 
@@ -99,7 +149,7 @@ input, select, textarea { font-family: inherit; }
 .brand { display: flex; align-items: center; gap: 11px; flex-shrink: 0; white-space: nowrap; }
 .brand-mark {
   width: 30px; height: 30px; border-radius: 8px;
-  background: var(--accent-grad); color: #fff;
+  background: var(--accent-grad); color: var(--on-accent);
   display: grid; place-items: center; flex-shrink: 0;
   box-shadow: 0 1px 3px rgba(58, 52, 176, 0.3);
 }
@@ -181,6 +231,37 @@ input[type="text"], input[type="number"], select, textarea {
 input:focus, select:focus, textarea:focus {
   border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-tint);
 }
+
+/* ---------- anneau de focus clavier ---------- */
+/* Les champs de saisie avaient déjà leur traitement (ci-dessus) ; les
+   boutons, onglets et puces cliquables s'en remettaient à l'anneau par
+   défaut du navigateur — bleu sous Chrome, plus discret sous Safari, et
+   dans les deux cas étranger à une interface bâtie sur l'indigo. Le même
+   halo est réutilisé ici pour que « j'ai le focus » se lise partout de la
+   même façon.
+
+   `:focus-visible` et non `:focus` : le halo apparaît à la navigation au
+   clavier, pas au clic à la souris, où il ne dit rien que le curseur ne
+   disait déjà.
+
+   La table de données est volontairement absente de cette liste. Elle
+   fonctionne en focus glissant — le conteneur porte le `tabIndex` et c'est
+   `.vtd.focused` qui montre la cellule active. Un anneau autour du
+   conteneur entier ajouterait du bruit là où l'indicateur précis existe
+   déjà. */
+.btn:focus-visible,
+.chip:focus-visible, .blank-chip:focus-visible, .ds-chip:focus-visible,
+.tab:focus-visible, .ad-link:focus-visible, .chip-edit:focus-visible,
+a:focus-visible, [role="button"]:focus-visible, summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--r-sm);
+}
+
+/* Sur fond accentué, l'anneau indigo se perdrait dans le bouton lui-même. */
+.btn.primary:focus-visible {
+  outline-color: var(--ink);
+}
 .mono-input { font-family: var(--mono); font-size: 12.5px; }
 textarea { resize: vertical; min-height: 64px; }
 
@@ -204,7 +285,7 @@ textarea { resize: vertical; min-height: 64px; }
 .btn:active { transform: translateY(1px); }
 .btn:disabled { opacity: .5; cursor: not-allowed; }
 .btn.primary {
-  background: var(--accent-grad); border-color: var(--accent-press); color: #fff;
+  background: var(--accent-grad); border-color: var(--accent-press); color: var(--on-accent);
   box-shadow: 0 1px 2px rgba(58, 52, 176, 0.25);
 }
 .btn.primary:hover { box-shadow: 0 4px 14px rgba(58, 52, 176, 0.35); }
@@ -319,7 +400,7 @@ textarea { resize: vertical; min-height: 64px; }
   border: 1px solid var(--line-strong); background: var(--panel); color: var(--ink-soft);
   transition: all .12s;
 }
-.pill.on { background: var(--ink); border-color: var(--ink); color: #fff; }
+.pill.on { background: var(--ink); border-color: var(--ink); color: var(--on-ink); }
 .pill.unmapped { border-style: dashed; color: var(--ink-faint); opacity: .6; background: transparent; }
 .pill.unmapped:hover { opacity: 1; border-color: var(--accent); color: var(--accent); }
 
@@ -357,11 +438,11 @@ textarea { resize: vertical; min-height: 64px; }
   letter-spacing: .03em; padding: 2px 6px; border-radius: 4px;
   background: var(--panel-2); border: 1px solid var(--line); color: var(--ink-soft);
 }
-.tchip.string  { color: #475569; }
-.tchip.integer { color: #1e5fa8; background: #eaf2fb; border-color: #cfe0f3; }
-.tchip.float   { color: #1e5fa8; background: #eaf2fb; border-color: #cfe0f3; }
-.tchip.date    { color: #7a3fb0; background: #f3ecfb; border-color: #e1d0f2; }
-.tchip.boolean { color: #a85d08; background: var(--warn-bg); border-color: var(--warn-line); }
+.tchip.string  { color: var(--t-string); }
+.tchip.integer { color: var(--t-number); background: var(--t-number-bg); border-color: var(--t-number-line); }
+.tchip.float   { color: var(--t-number); background: var(--t-number-bg); border-color: var(--t-number-line); }
+.tchip.date    { color: var(--t-date); background: var(--t-date-bg); border-color: var(--t-date-line); }
+.tchip.boolean { color: var(--t-bool); background: var(--warn-bg); border-color: var(--warn-line); }
 
 /* editor card */
 .editor { border: 1px solid var(--line); border-radius: var(--r); background: var(--panel); }
@@ -434,7 +515,7 @@ td.cell-NO_TCO { background: var(--warn-bg); color: var(--warn); }
   display: inline-flex; align-items: center; gap: 7px; padding: 5px 11px; border-radius: 999px;
   border: 1px solid var(--line-strong); background: var(--panel); font-size: 12.5px; color: var(--ink-soft);
 }
-.statpill.on { background: var(--ink); border-color: var(--ink); color: #fff; }
+.statpill.on { background: var(--ink); border-color: var(--ink); color: var(--on-ink); }
 .statpill .n { font-family: var(--mono); font-size: 11px; opacity: .85; }
 
 .statustag {
@@ -450,18 +531,18 @@ td.cell-NO_TCO { background: var(--warn-bg); color: var(--warn); }
 .yaml-actions { display: flex; gap: 8px; margin-bottom: 12px; }
 pre.yaml {
   font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
-  background: #1b2230; color: #e7ecf3; border-radius: var(--r); padding: 18px 20px;
+  background: var(--code-bg); color: var(--code-ink); border-radius: var(--r); padding: 18px 20px;
   overflow: auto; margin: 0; max-height: calc(100vh - 240px);
-  border: 1px solid #2a3344;
+  border: 1px solid var(--code-line);
 }
-pre.yaml .k { color: #8db4ff; }
+pre.yaml .k { color: var(--code-key); }
 
 /* ---------- toast ---------- */
 
 .toasts { position: fixed; bottom: 22px; right: 22px; display: flex; flex-direction: column; gap: 9px; z-index: 50; }
 .toast {
   display: flex; align-items: center; gap: 10px; padding: 11px 15px;
-  background: var(--ink); color: #fff; border-radius: var(--r); box-shadow: var(--shadow-pop);
+  background: var(--ink); color: var(--on-ink); border-radius: var(--r); box-shadow: var(--shadow-pop);
   font-size: 13px; max-width: 340px; animation: slide .2s ease;
 }
 .toast.err { background: var(--err); }
@@ -488,7 +569,7 @@ pre.yaml .k { color: #8db4ff; }
   border: 1px solid var(--line-strong); border-radius: 999px; background: var(--panel);
   transition: all .12s; cursor: pointer; user-select: none;
 }
-.fieldchip.on { background: var(--accent-tint); border-color: #cdc9f2; }
+.fieldchip.on { background: var(--accent-tint); border-color: var(--accent-tint-line-2); }
 .fieldchip.off { border-style: dashed; opacity: .55; }
 .fieldchip.off:hover { opacity: 1; border-color: var(--accent); }
 .fieldchip.editing { box-shadow: 0 0 0 2px var(--accent); border-color: var(--accent); }
@@ -552,7 +633,7 @@ pre.yaml .k { color: #8db4ff; }
 /* ---------- virtualized data table (div grid) ---------- */
 .tabletools { display: flex; align-items: center; gap: 10px; margin: 14px 0 10px; flex-wrap: wrap; }
 .toolnote { font-size: 12px; color: var(--ink-faint); }
-.legend .swatch.comp { background: var(--accent-tint); border-color: #d6d3f5; }
+.legend .swatch.comp { background: var(--accent-tint); border-color: var(--accent-tint-line); }
 
 .vtable {
   border: 1px solid var(--line); border-radius: var(--r); background: var(--panel);
@@ -589,7 +670,7 @@ pre.yaml .k { color: #8db4ff; }
 .vth.rownum { align-items: flex-end; justify-content: flex-end; cursor: default; color: var(--ink-faint); }
 .hclear { border: none; background: none; color: var(--ink-faint); font-size: 15px; cursor: pointer; line-height: 1; padding: 0 2px; }
 .hclear:hover { color: var(--err); }
-.vth .fx { font-size: 9px; background: var(--accent); color: #fff; padding: 1px 4px; border-radius: 4px; font-weight: 700; }
+.vth .fx { font-size: 9px; background: var(--accent); color: var(--on-accent); padding: 1px 4px; border-radius: 4px; font-weight: 700; }
 .sortarrow { font-size: 9px; color: var(--accent); }
 
 .vtr { display: grid; }
@@ -606,10 +687,10 @@ pre.yaml .k { color: #8db4ff; }
 .vtd.cell-CLEANED, .vtd.cell-MAPPING_OK { background: var(--ok-bg); color: var(--ok); }
 .vtd.cell-NO_TCO { background: var(--warn-bg); color: var(--warn); }
 .vtd.cell-COMPUTED { background: var(--accent-tint); color: var(--accent); }
-.vtr:hover .vtd.cell-ERROR, .vtr:hover .vtd.cell-MAPPING_KO { background: #fbddd9; }
-.vtr:hover .vtd.cell-CLEANED, .vtr:hover .vtd.cell-MAPPING_OK { background: #d8efe0; }
+.vtr:hover .vtd.cell-ERROR, .vtr:hover .vtd.cell-MAPPING_KO { background: var(--err-bg-hover); }
+.vtr:hover .vtd.cell-CLEANED, .vtr:hover .vtd.cell-MAPPING_OK { background: var(--ok-bg-hover); }
 
-.statustag.COMPUTED { color: var(--accent); background: var(--accent-tint); border: 1px solid #d6d3f5; }
+.statustag.COMPUTED { color: var(--accent); background: var(--accent-tint); border: 1px solid var(--accent-tint-line); }
 
 /* ---------- computed panel ---------- */
 .computed-wrap { display: grid; grid-template-columns: 1fr 280px; gap: 22px; margin-top: 14px; align-items: start; }
@@ -669,29 +750,29 @@ pre.yaml .k { color: #8db4ff; }
 .editbar {
   display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
   margin-bottom: 12px; padding: 8px 12px; font-size: 12.5px;
-  background: #fff7ed; border: 1px solid #fdba74; border-radius: 8px; color: #9a3412;
+  background: var(--edit-bg); border: 1px solid var(--edit-line); border-radius: 8px; color: var(--edit);
 }
 .editbar kbd {
   font-family: var(--mono); font-size: 11px; padding: 1px 5px;
-  background: #fff; border: 1px solid #fdba74; border-bottom-width: 2px; border-radius: 4px;
+  background: var(--panel); border: 1px solid var(--edit-line); border-bottom-width: 2px; border-radius: 4px;
 }
 .editbar-actions { margin-left: auto; display: inline-flex; gap: 8px; }
 
-.swatch.edited { background: #fff7ed; border-color: #f59e0b; }
+.swatch.edited { background: var(--edit-bg); border-color: var(--edit-mark); }
 
 .vtd.editable { cursor: cell; }
 .vtd.editable:hover { outline: 1.5px dashed var(--accent); outline-offset: -1.5px; }
 .vtd.focused { outline: 2px solid var(--accent); outline-offset: -2px; z-index: 1; }
 .vtd.cell-EDITED {
-  background: #fff7ed; color: #9a3412;
-  outline: 1.5px dashed #f59e0b; outline-offset: -1.5px;
+  background: var(--edit-bg); color: var(--edit);
+  outline: 1.5px dashed var(--edit-mark); outline-offset: -1.5px;
 }
-.vtr:hover .vtd.cell-EDITED { background: #ffedd5; }
+.vtr:hover .vtd.cell-EDITED { background: var(--edit-bg-2); }
 
 .vtd.cell-editing { padding: 0; }
 .celledit {
   width: 100%; height: 100%; box-sizing: border-box; border: none; outline: 2px solid var(--accent);
-  outline-offset: -2px; padding: 0 9px; font: inherit; font-family: var(--mono); background: #fff;
+  outline-offset: -2px; padding: 0 9px; font: inherit; font-family: var(--mono); background: var(--panel);
 }
 
 /* ── v12: library & flows ───────────────────────────────────── */
@@ -1545,7 +1626,7 @@ pre.yaml .k { color: #8db4ff; }
   color: var(--accent); background: var(--accent-tint); width: 34px; height: 34px;
   border-radius: var(--r-sm); display: inline-flex; align-items: center; justify-content: center;
 }
-.home-card.first .home-icon { background: #fff; }
+.home-card.first .home-icon { background: var(--panel); }
 .home-blurb { font-size: 12.5px; line-height: 1.55; color: var(--ink-soft); }
 
 .home-admin { display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
@@ -1586,7 +1667,7 @@ pre.yaml .k { color: #8db4ff; }
   width: 42px; height: 42px; border-radius: 10px; background: var(--panel-2);
   display: grid; place-items: center; color: var(--accent); flex-shrink: 0;
 }
-.source-mode-btn.active .mode-icon { background: var(--accent); color: #fff; }
+.source-mode-btn.active .mode-icon { background: var(--accent); color: var(--on-accent); }
 .mode-text { display: flex; flex-direction: column; gap: 2px; }
 .mode-text strong { font-size: 13.5px; color: var(--ink); }
 .mode-text span { font-size: 11.5px; color: var(--ink-soft); }
@@ -1634,3 +1715,183 @@ pre.yaml .k { color: #8db4ff; }
 .kpi-val.ok { color: var(--ok); }
 .kpi-sub { font-size: 11.5px; color: var(--ink-soft); }
 
+
+/* ============================================================
+   Thème sombre
+
+   Deux portes d'entrée, un seul jeu de valeurs :
+
+   - `prefers-color-scheme` suit le réglage du système, sans rien demander
+     à personne. C'est le comportement par défaut.
+   - `data-theme="dark"` ou `"light"` sur <html> force un choix, et gagne
+     contre le système. Poser cet attribut suffit à câbler un interrupteur
+     dans l'interface — le CSS est prêt, rien d'autre à changer ici.
+
+   `color-scheme: dark` fait suivre ce que le CSS ne contrôle pas : les
+   ascenseurs natifs, les sélecteurs de date, l'arrière-plan par défaut des
+   champs. Sans lui, un `<select>` reste blanc au milieu d'une page sombre.
+   ============================================================ */
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+  /* surfaces — dérivées du bloc YAML, seule surface sombre que cette
+     interface possédait déjà : #1b2230 devient le panneau, le fond passe
+     en dessous pour que le code reste une surface distincte, et les
+     liserés reprennent le #2a3344 d'origine. Le thème sombre n'invente
+     donc pas une palette, il étend celle qui existait. */
+  --bg:           #131824;
+  --panel:        #1b2230;
+  --panel-2:      #171d29;
+  --line:         #2a3344;
+  --line-strong:  #3a4459;
+
+  --ink:          #e7ecf3;
+  --ink-soft:     #9aa5b8;
+  --ink-faint:    #6d7889;
+
+  /* L'indigo est remonté en clarté : #4a43d4 sur un fond sombre tombe
+     sous le seuil de lisibilité pour du texte. La teinte ne bouge pas. */
+  --accent:       #8f87f5;
+  --accent-press: #a9a2ff;
+  --accent-tint:  #252344;
+  --accent-grad:  linear-gradient(135deg, #6b62e7, #5b52d2);
+
+  /* Bascule à ne pas manquer : --ink est désormais clair, donc le texte
+     posé dessus doit être sombre. Un `color: #fff` en dur ici aurait donné
+     du blanc sur blanc — c'est précisément ce que la promotion en tokens
+     a rendu possible de corriger. */
+  --on-accent:    #fff;
+  --on-ink:       #131824;
+
+  --err:          #ff9d92;
+  --err-bg:       #33191a;
+  --err-line:     #5d2b2a;
+
+  --ok:           #6bdba2;
+  --ok-bg:        #132a20;
+  --ok-line:      #255540;
+
+  --warn:         #f2b866;
+  --warn-bg:      #2e2314;
+  --warn-line:    #574222;
+
+  --err-bg-hover: #421f20;
+  --ok-bg-hover:  #1a3a2b;
+
+  --t-string:     #9fb0c4;
+  --t-number:     #8db4ff;
+  --t-number-bg:  #17263c;
+  --t-number-line:#2b415f;
+  --t-date:       #c9a4ee;
+  --t-date-bg:    #291f3a;
+  --t-date-line:  #453258;
+  --t-bool:       #f2b866;
+
+  /* Le bloc de code descend encore d'un cran pour rester lisible comme
+     une surface à part, maintenant que le panneau est sombre lui aussi. */
+  --code-bg:      #10151e;
+  --code-ink:     #e7ecf3;
+  --code-line:    #2a3344;
+  --code-key:     #8db4ff;
+
+  --edit:         #f0b57a;
+  --edit-bg:      #2e2114;
+  --edit-bg-2:    #3a2917;
+  --edit-line:    #7a5330;
+  --edit-mark:    #e0913a;
+
+  --accent-tint-line:   #3b3768;
+  --accent-tint-line-2: #443f75;
+
+  --scroll:       #333d4f;
+  --scroll-hover: #43506a;
+
+  /* Une ombre portée ne se voit pas sur du sombre : elle est remplacée par
+     un contraste de surface, et ce qui reste est nettement plus opaque. */
+  --shadow:     0 1px 2px rgba(0, 0, 0, .32), 0 2px 8px rgba(0, 0, 0, .38);
+  --shadow-pop: 0 8px 28px rgba(0, 0, 0, .55);
+
+  color-scheme: dark;
+  }
+}
+
+:root[data-theme="dark"] {
+  /* surfaces — dérivées du bloc YAML, seule surface sombre que cette
+     interface possédait déjà : #1b2230 devient le panneau, le fond passe
+     en dessous pour que le code reste une surface distincte, et les
+     liserés reprennent le #2a3344 d'origine. Le thème sombre n'invente
+     donc pas une palette, il étend celle qui existait. */
+  --bg:           #131824;
+  --panel:        #1b2230;
+  --panel-2:      #171d29;
+  --line:         #2a3344;
+  --line-strong:  #3a4459;
+
+  --ink:          #e7ecf3;
+  --ink-soft:     #9aa5b8;
+  --ink-faint:    #6d7889;
+
+  /* L'indigo est remonté en clarté : #4a43d4 sur un fond sombre tombe
+     sous le seuil de lisibilité pour du texte. La teinte ne bouge pas. */
+  --accent:       #8f87f5;
+  --accent-press: #a9a2ff;
+  --accent-tint:  #252344;
+  --accent-grad:  linear-gradient(135deg, #6b62e7, #5b52d2);
+
+  /* Bascule à ne pas manquer : --ink est désormais clair, donc le texte
+     posé dessus doit être sombre. Un `color: #fff` en dur ici aurait donné
+     du blanc sur blanc — c'est précisément ce que la promotion en tokens
+     a rendu possible de corriger. */
+  --on-accent:    #fff;
+  --on-ink:       #131824;
+
+  --err:          #ff9d92;
+  --err-bg:       #33191a;
+  --err-line:     #5d2b2a;
+
+  --ok:           #6bdba2;
+  --ok-bg:        #132a20;
+  --ok-line:      #255540;
+
+  --warn:         #f2b866;
+  --warn-bg:      #2e2314;
+  --warn-line:    #574222;
+
+  --err-bg-hover: #421f20;
+  --ok-bg-hover:  #1a3a2b;
+
+  --t-string:     #9fb0c4;
+  --t-number:     #8db4ff;
+  --t-number-bg:  #17263c;
+  --t-number-line:#2b415f;
+  --t-date:       #c9a4ee;
+  --t-date-bg:    #291f3a;
+  --t-date-line:  #453258;
+  --t-bool:       #f2b866;
+
+  /* Le bloc de code descend encore d'un cran pour rester lisible comme
+     une surface à part, maintenant que le panneau est sombre lui aussi. */
+  --code-bg:      #10151e;
+  --code-ink:     #e7ecf3;
+  --code-line:    #2a3344;
+  --code-key:     #8db4ff;
+
+  --edit:         #f0b57a;
+  --edit-bg:      #2e2114;
+  --edit-bg-2:    #3a2917;
+  --edit-line:    #7a5330;
+  --edit-mark:    #e0913a;
+
+  --accent-tint-line:   #3b3768;
+  --accent-tint-line-2: #443f75;
+
+  --scroll:       #333d4f;
+  --scroll-hover: #43506a;
+
+  /* Une ombre portée ne se voit pas sur du sombre : elle est remplacée par
+     un contraste de surface, et ce qui reste est nettement plus opaque. */
+  --shadow:     0 1px 2px rgba(0, 0, 0, .32), 0 2px 8px rgba(0, 0, 0, .38);
+  --shadow-pop: 0 8px 28px rgba(0, 0, 0, .55);
+
+  color-scheme: dark;
+}

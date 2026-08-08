@@ -1,0 +1,112 @@
+/* ============================================================
+   Polices — servies par l'application, pas par Google
+
+   Le README listait ceci en limite assumée :
+
+     « Les polices viennent de Google Fonts : derrière un proxy
+       d'entreprise, la typographie retombera sur les polices système. »
+
+   Ce n'était pas un détail cosmétique. `--mono` est appelé 56 fois dans
+   la feuille de style : JetBrains Mono porte tout le vocabulaire de
+   schéma — noms de colonnes, types, valeurs, YAML, EDI — donc l'élément
+   le plus caractéristique de cette interface. Sur un réseau d'entreprise
+   sans sortie vers `fonts.gstatic.com`, il disparaissait silencieusement.
+   Le déploiement sur site qui justifie tout le reste de l'architecture
+   était exactement celui qui perdait le design.
+
+   Trois gains en plus de la robustesse :
+
+   - **Plus de requête tierce sur le chemin critique.** Deux `preconnect`
+     et une feuille externe en moins ; les `@font-face` sont disponibles
+     dès le premier octet de CSS.
+   - **Plus de dépendance à un tiers** pour une application qui traite des
+     données RH et comptables : `fonts.gstatic.com` voyait jusqu'ici
+     l'adresse IP de chaque poste ouvrant l'outil.
+   - **La graisse 450 fonctionne enfin.** La feuille de style l'utilise ;
+     elle n'existe que dans une fonte variable, et un repli système
+     l'arrondissait à 400 ou 500.
+
+   ── Pourquoi des @font-face écrits à la main plutôt qu'un `@import`
+
+   Importer `@fontsource-variable/inter/wght.css` fonctionne, mais amène
+   les treize sous-ensembles du paquet — cyrillique, grec, vietnamien.
+   Le navigateur ne télécharge que ce dont la page a besoin (chaque règle
+   porte son `unicode-range`), donc l'utilisateur ne paie rien de plus ;
+   en revanche l'image Docker embarquait 27 fichiers pour 1,3 Mo. Ici :
+   6 fichiers, latin et latin étendu, ce que cette interface écrit
+   réellement en français et en anglais.
+
+   Une seule italique est chargée, celle de JetBrains Mono : `.nullv`
+   affiche les valeurs nulles en mono italique dans chaque table de
+   données, donc elle est à l'écran en permanence. Les `<em>` du corps de
+   texte sont assez rares pour laisser le navigateur incliner Inter
+   lui-même, ce qui évite 140 Ko pour une dizaine de balises.
+   ============================================================ */
+
+/* Les plages Unicode sont celles des paquets @fontsource-variable, reprises
+   telles quelles : c'est ce qui permet au navigateur de ne télécharger le
+   latin étendu que si la page contient réellement un de ses caractères. */
+
+/* ── Corps de texte — Inter ─────────────────────────────────────────── */
+@font-face {
+  font-family: "Inter Variable";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url("@fontsource-variable/inter/files/inter-latin-wght-normal.woff2") format("woff2-variations");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Inter Variable";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url("@fontsource-variable/inter/files/inter-latin-ext-wght-normal.woff2") format("woff2-variations");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+/* ── Structure et titres — Space Grotesk ────────────────────────────── */
+@font-face {
+  font-family: "Space Grotesk Variable";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 300 700;
+  src: url("@fontsource-variable/space-grotesk/files/space-grotesk-latin-wght-normal.woff2") format("woff2-variations");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Space Grotesk Variable";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 300 700;
+  src: url("@fontsource-variable/space-grotesk/files/space-grotesk-latin-ext-wght-normal.woff2") format("woff2-variations");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+/* ── Vocabulaire de schéma — JetBrains Mono ─────────────────────────── */
+@font-face {
+  font-family: "JetBrains Mono Variable";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 800;
+  src: url("@fontsource-variable/jetbrains-mono/files/jetbrains-mono-latin-wght-normal.woff2") format("woff2-variations");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "JetBrains Mono Variable";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 800;
+  src: url("@fontsource-variable/jetbrains-mono/files/jetbrains-mono-latin-ext-wght-normal.woff2") format("woff2-variations");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+/* L'italique mono est à l'écran en permanence : c'est elle qui distingue
+   une valeur nulle d'une chaîne vide dans chaque table. */
+@font-face {
+  font-family: "JetBrains Mono Variable";
+  font-style: italic;
+  font-display: swap;
+  font-weight: 100 800;
+  src: url("@fontsource-variable/jetbrains-mono/files/jetbrains-mono-latin-wght-italic.woff2") format("woff2-variations");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
