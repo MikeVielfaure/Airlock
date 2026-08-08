@@ -136,7 +136,7 @@ def test_versioning_a_tco_owned_by_another_environment_is_refused():
     aid = made.json()["artefact_id"]
 
     client.post("/api/admin/quick-user",
-                json={"email": "tco-adv-editor@x.fr", "memberships": {"adv": "editor"}},
+                json={"password": "motdepasse1", "email": "tco-adv-editor@x.fr", "memberships": {"adv": "editor"}},
                 headers=_h(chef))
     adv_editor, _ = _login("tco-adv-editor@x.fr")
 
@@ -156,7 +156,7 @@ def test_the_route_needs_the_tco_replace_capability():
     _signup("tco-chef@boite.fr")
     chef, _ = _login("tco-chef@boite.fr")
     client.post("/api/admin/quick-user",
-                json={"email": "tco-op@rh.fr", "memberships": {"rh": "operator"}},
+                json={"password": "motdepasse1", "email": "tco-op@rh.fr", "memberships": {"rh": "operator"}},
                 headers=_h(chef))
     op, _ = _login("tco-op@rh.fr")
 

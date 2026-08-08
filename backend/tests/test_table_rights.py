@@ -147,7 +147,7 @@ def test_a_grant_can_target_a_whole_other_environment(team):
     dsid = made["dataset"]["id"]
 
     client.post("/api/admin/quick-user",
-                json={"email": "sat@y.fr", "memberships": {"satellite": "viewer"}},
+                json={"password": "motdepasse1", "email": "sat@y.fr", "memberships": {"satellite": "viewer"}},
                 headers=_h(team["chef"]))
     sat = client.post("/api/auth/login",
                       json={"email": "sat@y.fr", "password": "motdepasse1"}).json()["token"]

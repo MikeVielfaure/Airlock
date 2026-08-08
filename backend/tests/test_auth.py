@@ -254,7 +254,7 @@ def test_a_superadmin_can_borrow_an_identity_and_it_is_visible():
     _signup("chef@boite.fr")
     chef, _ = _login("chef@boite.fr")
     client.post("/api/admin/quick-user",
-                json={"email": "marie@rh.fr", "memberships": {"rh": "operator"}},
+                json={"password": "motdepasse1", "email": "marie@rh.fr", "memberships": {"rh": "operator"}},
                 headers=_h(chef))
 
     r = client.post("/api/admin/impersonate", json={"email": "marie@rh.fr"},
@@ -277,7 +277,7 @@ def test_borrowing_is_refused_to_non_superadmins_and_onto_superadmins():
     _signup("chef@boite.fr")
     chef, _ = _login("chef@boite.fr")
     client.post("/api/admin/quick-user",
-                json={"email": "rh@x.fr", "memberships": {"rh": "admin"}}, headers=_h(chef))
+                json={"password": "motdepasse1", "email": "rh@x.fr", "memberships": {"rh": "admin"}}, headers=_h(chef))
     rh, _ = _login("rh@x.fr")
 
     assert client.post("/api/admin/impersonate", json={"email": "chef@boite.fr"},
@@ -291,7 +291,7 @@ def test_a_test_account_and_its_roles_are_created_in_one_call():
     _signup("chef@boite.fr")
     chef, _ = _login("chef@boite.fr")
     r = client.post("/api/admin/quick-user",
-                    json={"email": "essai@x.fr",
+                    json={"password": "motdepasse1", "email": "essai@x.fr",
                           "memberships": {"rh": "operator", "adv": "viewer"}},
                     headers=_h(chef))
     assert r.status_code == 200
@@ -299,7 +299,7 @@ def test_a_test_account_and_its_roles_are_created_in_one_call():
 
     # iterating on a design means changing the same person's role repeatedly
     again = client.post("/api/admin/quick-user",
-                        json={"email": "essai@x.fr", "memberships": {"rh": "editor"}},
+                        json={"password": "motdepasse1", "email": "essai@x.fr", "memberships": {"rh": "editor"}},
                         headers=_h(chef))
     assert again.json()["environments"]["rh"] == "editor"
 
@@ -307,9 +307,17 @@ def test_a_test_account_and_its_roles_are_created_in_one_call():
 def test_a_superadmin_can_reset_anyones_password():
     _signup("chef@boite.fr")
     chef, _ = _login("chef@boite.fr")
-    client.post("/api/admin/quick-user",
-                json={"email": "marie@rh.fr", "memberships": {"rh": "operator"}},
-                headers=_h(chef))
+    created = client.post("/api/admin/quick-user",
+                          json={"email": "marie@rh.fr", "memberships": {"rh": "operator"}},
+                          headers=_h(chef))
+    # quick-user tire un mot de passe aléatoire et ne le montre qu'ici : le
+    # lire depuis la réponse est ce qui garde ce test parlant. L'écrire en dur
+    # le rendrait vide de sens — « un mot de passe qui n'a jamais été celui de
+    # Marie ne marche pas » n'apprend rien sur la réinitialisation.
+    ancien = created.json()["password"]
+    assert ancien, "la création doit renvoyer le mot de passe tiré"
+    assert _login("marie@rh.fr", ancien)[1].status_code == 200
+
     marie_id = [u for u in client.get("/api/admin/users", headers=_h(chef)).json()
                if u["email"] == "marie@rh.fr"][0]["id"]
 
@@ -318,7 +326,7 @@ def test_a_superadmin_can_reset_anyones_password():
     assert r.status_code == 200, r.text
 
     # the old password no longer works, the new one does
-    assert _login("marie@rh.fr", "motdepasse1")[1].status_code == 401
+    assert _login("marie@rh.fr", ancien)[1].status_code == 401
     assert _login("marie@rh.fr", "nouveaumdp1")[1].status_code == 200
 
 
@@ -326,7 +334,7 @@ def test_resetting_a_password_is_superadmin_only():
     _signup("chef@boite.fr")
     chef, _ = _login("chef@boite.fr")
     client.post("/api/admin/quick-user",
-                json={"email": "op@rh.fr", "memberships": {"rh": "operator"}}, headers=_h(chef))
+                json={"password": "motdepasse1", "email": "op@rh.fr", "memberships": {"rh": "operator"}}, headers=_h(chef))
     op, _ = _login("op@rh.fr")
     marie_id = [u for u in client.get("/api/admin/users", headers=_h(chef)).json()
                if u["email"] == "op@rh.fr"][0]["id"]
@@ -348,7 +356,7 @@ def test_deactivating_an_account_blocks_sign_in_without_erasing_it():
     _signup("chef@boite.fr")
     chef, _ = _login("chef@boite.fr")
     client.post("/api/admin/quick-user",
-                json={"email": "marie@rh.fr", "memberships": {"rh": "operator"}},
+                json={"password": "motdepasse1", "email": "marie@rh.fr", "memberships": {"rh": "operator"}},
                 headers=_h(chef))
     marie_tok, _ = _login("marie@rh.fr")
     marie_id = [u for u in client.get("/api/admin/users", headers=_h(chef)).json()
@@ -403,7 +411,7 @@ def test_deleting_an_account_needs_the_email_typed_and_is_irreversible():
     _signup("chef@boite.fr")
     chef, _ = _login("chef@boite.fr")
     client.post("/api/admin/quick-user",
-                json={"email": "paul@rh.fr", "memberships": {"rh": "viewer"}}, headers=_h(chef))
+                json={"password": "motdepasse1", "email": "paul@rh.fr", "memberships": {"rh": "viewer"}}, headers=_h(chef))
     paul_id = [u for u in client.get("/api/admin/users", headers=_h(chef)).json()
               if u["email"] == "paul@rh.fr"][0]["id"]
 
@@ -423,9 +431,9 @@ def test_deleting_users_is_superadmin_only():
     _signup("chef@boite.fr")
     chef, _ = _login("chef@boite.fr")
     client.post("/api/admin/quick-user",
-                json={"email": "op@rh.fr", "memberships": {"rh": "operator"}}, headers=_h(chef))
+                json={"password": "motdepasse1", "email": "op@rh.fr", "memberships": {"rh": "operator"}}, headers=_h(chef))
     client.post("/api/admin/quick-user",
-                json={"email": "cible@rh.fr", "memberships": {"rh": "viewer"}}, headers=_h(chef))
+                json={"password": "motdepasse1", "email": "cible@rh.fr", "memberships": {"rh": "viewer"}}, headers=_h(chef))
     op, _ = _login("op@rh.fr")
     cible_id = [u for u in client.get("/api/admin/users", headers=_h(chef)).json()
                if u["email"] == "cible@rh.fr"][0]["id"]
@@ -436,7 +444,7 @@ def test_the_state_endpoint_says_what_the_caller_may_do():
     _signup("chef@boite.fr")
     chef, _ = _login("chef@boite.fr")
     client.post("/api/admin/quick-user",
-                json={"email": "op@x.fr", "memberships": {"rh": "operator"}},
+                json={"password": "motdepasse1", "email": "op@x.fr", "memberships": {"rh": "operator"}},
                 headers=_h(chef))
     op, _ = _login("op@x.fr")
     caps = client.get("/api/auth/state", headers=_h(op)).json()["user"]["capabilities"]["rh"]
@@ -448,10 +456,10 @@ def test_the_overview_assembles_the_whole_picture():
     _signup("chef@boite.fr")
     chef, _ = _login("chef@boite.fr")
     client.post("/api/admin/quick-user",
-                json={"email": "marie@rh.fr", "memberships": {"apercu-rh": "operator"}},
+                json={"password": "motdepasse1", "email": "marie@rh.fr", "memberships": {"apercu-rh": "operator"}},
                 headers=_h(chef))
     client.post("/api/admin/quick-user",
-                json={"email": "paul@rh.fr", "memberships": {"apercu-rh": "viewer"}},
+                json={"password": "motdepasse1", "email": "paul@rh.fr", "memberships": {"apercu-rh": "viewer"}},
                 headers=_h(chef))
     client.post("/api/environments/apercu-rh/profile",
                 json={"modules": ["data", "report", "tco"]}, headers=_h(chef))
@@ -476,7 +484,7 @@ def test_the_environment_detail_reports_each_members_last_login():
     _signup("chef@boite.fr")
     chef, _ = _login("chef@boite.fr")
     client.post("/api/admin/quick-user",
-                json={"email": "marie@rh.fr", "memberships": {"apercu-rh": "operator"}},
+                json={"password": "motdepasse1", "email": "marie@rh.fr", "memberships": {"apercu-rh": "operator"}},
                 headers=_h(chef))
     marie, _ = _login("marie@rh.fr")
 
@@ -502,7 +510,7 @@ def test_an_environment_without_a_profile_reports_every_module():
     _signup("chef@boite.fr")
     chef, _ = _login("chef@boite.fr")
     client.post("/api/admin/quick-user",
-                json={"email": "x@y.fr", "memberships": {"libre": "editor"}},
+                json={"password": "motdepasse1", "email": "x@y.fr", "memberships": {"libre": "editor"}},
                 headers=_h(chef))
     e = [x for x in client.get("/api/admin/overview", headers=_h(chef)).json()["environments"]
          if x["name"] == "libre"][0]
@@ -514,6 +522,37 @@ def test_the_overview_is_superadmin_only():
     _signup("chef@boite.fr")
     chef, _ = _login("chef@boite.fr")
     client.post("/api/admin/quick-user",
-                json={"email": "op@x.fr", "memberships": {"rh": "admin"}}, headers=_h(chef))
+                json={"password": "motdepasse1", "email": "op@x.fr", "memberships": {"rh": "admin"}}, headers=_h(chef))
     op, _ = _login("op@x.fr")
     assert client.get("/api/admin/overview", headers=_h(op)).status_code == 403
+
+
+def test_quick_user_tire_un_mot_de_passe_quand_on_ne_lui_en_donne_pas():
+    """Le défaut constant `"motdepasse1"` qui vivait dans `QuickUserIn`
+    fabriquait un compte réel — avec ses rôles réels — protégé par un secret
+    lisible dans le dépôt. Deux comptes créés sans mot de passe doivent donc
+    en recevoir deux différents, et l'ancien défaut ne doit plus ouvrir
+    aucune porte."""
+    _signup("chef@boite.fr")
+    chef, _ = _login("chef@boite.fr")
+
+    a = client.post("/api/admin/quick-user", json={"email": "a@x.fr"}, headers=_h(chef)).json()
+    b = client.post("/api/admin/quick-user", json={"email": "b@x.fr"}, headers=_h(chef)).json()
+
+    assert a["password"] and b["password"]
+    assert a["password"] != b["password"]
+    assert _login("a@x.fr", a["password"])[1].status_code == 200
+    assert _login("a@x.fr", "motdepasse1")[1].status_code == 401
+
+
+def test_quick_user_ne_reaffiche_pas_le_mot_de_passe_d_un_compte_existant():
+    """Il n'est stocké que haché : le renvoyer une seconde fois voudrait dire
+    qu'on l'a gardé quelque part."""
+    _signup("chef@boite.fr")
+    chef, _ = _login("chef@boite.fr")
+    client.post("/api/admin/quick-user", json={"email": "c@x.fr"}, headers=_h(chef))
+    encore = client.post("/api/admin/quick-user",
+                         json={"email": "c@x.fr", "memberships": {"rh": "editor"}},
+                         headers=_h(chef)).json()
+    assert encore["password"] == ""
+    assert encore["environments"]["rh"] == "editor"

@@ -10,6 +10,7 @@ what turns a display convention into a boundary.
 """
 from __future__ import annotations
 
+import secrets
 from typing import Any, Dict, List, Optional
 
 import httpx
@@ -20,7 +21,7 @@ from sqlalchemy.orm import Session
 
 from app import repository as repo
 from app.db import commit, get_session
-from app.db_models import AuthProvider, AuthSession, Membership, User, UserIdentity
+from app.db_models import AuthProvider, AuthSession, Membership, User
 from app.services import auth_service as auth
 from app.services import permissions as perms
 
@@ -40,7 +41,12 @@ def _token(request: Request, authorization: Any = "") -> str:
     header = request.headers.get("authorization", "")
     if header.lower().startswith("bearer "):
         return header[7:].strip()
-    return request.cookies.get("fx_session", "")
+    # Pas de repli sur un cookie : le front envoie un Bearer depuis
+    # `sessionStorage` et rien dans ce projet n'a jamais appelé `set_cookie`.
+    # Le repli `request.cookies.get("fx_session")` qui vivait ici acceptait
+    # donc une authentification par cookie que personne n'émettait — un
+    # canal d'entrée sans protection CSRF, pour zéro usage.
+    return ""
 
 
 def current_user(request: Request, authorization: str = Header(default=""),
@@ -600,9 +606,19 @@ def impersonate(req: ImpersonateIn, request: Request,
 
 
 class QuickUserIn(BaseModel):
-    """Everything needed to conjure a test account in one call."""
+    """Everything needed to conjure a test account in one call.
+
+    `password` omis fait tirer un mot de passe aléatoire, renvoyé dans la
+    réponse. Le défaut constant qui vivait ici (`"motdepasse1"`) fabriquait
+    exactement ce que ce projet refuse ailleurs : un compte réel, avec ses
+    rôles réels, protégé par un secret connu d'avance. Un compte de test
+    créé pour vérifier un rôle et oublié ensuite est un compte ordinaire du
+    point de vue de la table `users` — « les mots de passe par défaut
+    survivent au déploiement qui les a posés », comme le dit le README à
+    propos de l'amorçage.
+    """
     email: str
-    password: str = "motdepasse1"
+    password: Optional[str] = None
     display_name: str = ""
     memberships: Dict[str, str] = Field(default_factory=dict)   # environment -> role
 
@@ -621,12 +637,14 @@ def quick_user(req: QuickUserIn, user: User = Depends(require_user),
     """
     if getattr(user, "id", "") and not user.is_superadmin:
         raise HTTPException(403, "Superadmin only.")
+    password = req.password or secrets.token_urlsafe(12)
     existing = auth.find_user(s, req.email)
+    created = existing is None
     if existing is None:
         try:
             existing = auth.create_user(s, email=req.email,
                                         display_name=req.display_name,
-                                        password=req.password)
+                                        password=password)
         except auth.AuthError as e:
             raise HTTPException(422, str(e))
     for env, role in (req.memberships or {}).items():
@@ -637,7 +655,9 @@ def quick_user(req: QuickUserIn, user: User = Depends(require_user),
     commit(s)
     return {"id": existing.id, "email": existing.email,
             "environments": auth.memberships_of(s, existing.id),
-            "password": req.password if existing else ""}
+            # Le mot de passe n'est lisible qu'ici, à la création : il n'est
+            # stocké que haché, donc un compte préexistant n'a rien à renvoyer.
+            "password": password if created else ""}
 
 
 @admin_router.get("/overview")

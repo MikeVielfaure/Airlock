@@ -32,7 +32,8 @@ import pickle
 import time
 import uuid
 from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import MISSING, dataclass, field
+from dataclasses import fields as dataclass_fields
 from datetime import datetime, timedelta, timezone
 from typing import Iterator, Optional
 
@@ -91,6 +92,32 @@ class Session:
     created: float = field(default_factory=time.time)
     touched: float = field(default_factory=time.time)
 
+    def __setstate__(self, state: dict) -> None:
+        """Un blob relu a été écrit par la version du code qui tournait
+        *avant* le déploiement en cours. Or `pickle` restaure un dataclass
+        en réinjectant son `__dict__` sans jamais appeler `__init__` : un
+        champ ajouté depuis n'existe donc pas sur les blobs d'hier, et le
+        premier accès lève `AttributeError`.
+
+        Concrètement, sans ce crochet : on déploie une version qui ajoute un
+        champ à `Session`, et toutes les sessions ouvertes — quelqu'un au
+        milieu de la correction d'un fichier de 20 000 lignes — cassent
+        jusqu'à l'expiration du TTL. Le champ manquant reprend donc sa
+        valeur par défaut, ce qui est exactement le sens de « ce blob est
+        antérieur à ce champ ».
+
+        L'inverse est gratuit : un champ *supprimé* du dataclass reste dans
+        le `__dict__` relu et n'y gêne personne.
+        """
+        restored = {}
+        for f in dataclass_fields(self):
+            if f.default_factory is not MISSING:      # type: ignore[misc]
+                restored[f.name] = f.default_factory()  # type: ignore[misc]
+            elif f.default is not MISSING:
+                restored[f.name] = f.default
+        restored.update(state)                         # le blob a toujours le dernier mot
+        self.__dict__.update(restored)
+
     def active_df(self) -> pd.DataFrame:
         """The working table minus logically deleted rows — what the pipeline
         reads and what gets written to a dataset. Deletions stay reversible
@@ -132,7 +159,12 @@ class SessionStore:
             raise KeyError(sid)
         row.touched_at = _now()
         s.commit()
-        return pickle.loads(row.blob)
+        # noqa S301 : le blob n'est jamais accepté d'un appelant externe — il
+        # n'est écrit et relu que par ce backend, donc c'est la même frontière
+        # de confiance que le reste des données de l'app. Un accès en écriture
+        # à la table `work_sessions` vaut déjà exécution de code : c'est ce
+        # constat, pas l'absence de risque, qui rend le choix acceptable.
+        return pickle.loads(row.blob)  # noqa: S301
 
     def save(self, s: DbSession, sid: str, sess: Session) -> None:
         row = s.get(WorkSessionRow, sid)

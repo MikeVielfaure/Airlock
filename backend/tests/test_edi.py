@@ -541,7 +541,8 @@ def test_a_viewer_cannot_run_edi_operations_operator_capability_required():
     chef = client.post("/api/auth/login",
                        json={"email": "chef_edi2@x.fr", "password": "motdepasse1"}).json()["token"]
     client.post("/api/admin/quick-user",
-               json={"email": "spectateur@x.fr", "memberships": {"default": "viewer"}}, headers=_h(chef))
+               json={"email": "spectateur@x.fr", "password": "motdepasse1",
+                     "memberships": {"default": "viewer"}}, headers=_h(chef))
     viewer = client.post("/api/auth/login",
                          json={"email": "spectateur@x.fr", "password": "motdepasse1"}).json()["token"]
     r = client.post("/api/edi/pivot", files=upload(ORDERS),
@@ -557,7 +558,8 @@ def test_a_model_from_another_environment_is_invisible_not_just_refused():
     chef = client.post("/api/auth/login",
                        json={"email": "chef_edi3@x.fr", "password": "motdepasse1"}).json()["token"]
     client.post("/api/admin/quick-user",
-               json={"email": "proprio@x.fr", "memberships": {"secret_env": "editor"}}, headers=_h(chef))
+               json={"email": "proprio@x.fr", "password": "motdepasse1",
+                     "memberships": {"secret_env": "editor"}}, headers=_h(chef))
     owner = client.post("/api/auth/login",
                         json={"email": "proprio@x.fr", "password": "motdepasse1"}).json()["token"]
     aid = client.post("/api/artefacts/edi_model",
@@ -565,7 +567,8 @@ def test_a_model_from_another_environment_is_invisible_not_just_refused():
                       headers=_h(owner)).json()["id"]
 
     client.post("/api/admin/quick-user",
-               json={"email": "etranger@x.fr", "memberships": {"autre_env": "operator"}}, headers=_h(chef))
+               json={"email": "etranger@x.fr", "password": "motdepasse1",
+                     "memberships": {"autre_env": "operator"}}, headers=_h(chef))
     outsider = client.post("/api/auth/login",
                            json={"email": "etranger@x.fr", "password": "motdepasse1"}).json()["token"]
 

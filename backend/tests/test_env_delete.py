@@ -57,7 +57,7 @@ def test_default_cannot_be_deleted(chef):
 
 def test_a_non_superadmin_cannot_delete_an_environment(chef):
     client.post("/api/admin/quick-user",
-               json={"email": "op@x.fr", "memberships": {"jetable": "admin"}},
+               json={"password": "motdepasse1", "email": "op@x.fr", "memberships": {"jetable": "admin"}},
                headers=_h(chef))
     op = client.post("/api/auth/login",
                      json={"email": "op@x.fr", "password": "motdepasse1"}).json()["token"]

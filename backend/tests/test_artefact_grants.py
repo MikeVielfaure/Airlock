@@ -37,12 +37,12 @@ def team():
     chef = client.post("/api/auth/login",
                        json={"email": "chef@x.fr", "password": "motdepasse1"}).json()["token"]
     client.post("/api/admin/quick-user",
-               json={"email": "emma@x.fr", "memberships": {"source": "admin"}},
+               json={"password": "motdepasse1", "email": "emma@x.fr", "memberships": {"source": "admin"}},
                headers=_h(chef))
     emma = client.post("/api/auth/login",
                        json={"email": "emma@x.fr", "password": "motdepasse1"}).json()["token"]
     client.post("/api/admin/quick-user",
-               json={"email": "paul@x.fr", "memberships": {"target": "viewer"}},
+               json={"password": "motdepasse1", "email": "paul@x.fr", "memberships": {"target": "viewer"}},
                headers=_h(chef))
     paul = client.post("/api/auth/login",
                        json={"email": "paul@x.fr", "password": "motdepasse1"}).json()["token"]
@@ -107,7 +107,7 @@ def test_an_outsider_cannot_read_an_artefact_by_guessing_its_id(team):
     any granted one must be refused, and not merely told 'no'."""
     cid = _cfg(team["emma"])
     client.post("/api/admin/quick-user",
-               json={"email": "dehors@x.fr", "memberships": {"ailleurs": "viewer"}},
+               json={"password": "motdepasse1", "email": "dehors@x.fr", "memberships": {"ailleurs": "viewer"}},
                headers=_h(team["chef"]))
     dehors = client.post("/api/auth/login",
                          json={"email": "dehors@x.fr", "password": "motdepasse1"}).json()["token"]
