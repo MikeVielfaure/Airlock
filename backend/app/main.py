@@ -1099,6 +1099,27 @@ def session_to_flow(sid: str, req: ToFlowRequest, s: DbSession = Depends(get_ses
     **data** — true of this file and no other. Materialising them as flow steps
     would produce a flow that silently corrupts the next file it touches, so
     they are reported as skipped instead, with their count.
+
+    Trois choses ont changé ici, chacune parce que la version précédente
+    trahissait cette promesse plutôt qu'elle ne la tenait :
+
+    **L'ordre suit le traitement, pas l'ordre d'insertion.** Les étapes étaient
+    parcourues dans l'ordre de `sess.history`, où `validate` est ajouté avant
+    `compute`. Le flux produit validait donc *avant* de calculer, alors que la
+    session fait l'inverse : les colonnes dérivées existent quand les règles
+    s'appliquent, et certaines règles portent sur elles. Les étapes sont
+    désormais lues par nom d'opération et posées dans l'ordre qui a du sens.
+
+    **Les expressions sont reprises.** Avec la seule liste des noms, la seule
+    configuration possible était `{"total": "[total]"}` — une colonne calculée
+    à partir d'elle-même. L'historique porte maintenant les expressions.
+
+    **Ce qui ne peut pas être rejoué est nommé.** Une colonne SQL passe par
+    DuckDB (`duck_compute`), et aucune brique de flux n'expose ce moteur : elle
+    est donc irrécupérable aujourd'hui. Elle disparaissait sans un mot, ce qui
+    est exactement le contraire de l'intention de cette fonction. Idem pour une
+    session enregistrée avant que les expressions ne soient journalisées :
+    plutôt que de produire un flux muet et faux, on dit ce qui manque.
     """
     with _session(sid, s) as sess:
         nodes: list[dict] = []
@@ -1111,25 +1132,70 @@ def session_to_flow(sid: str, req: ToFlowRequest, s: DbSession = Depends(get_ses
         else:
             nodes.append({"id": "src", "type": "session", "config": {"session_id": sid}})
 
+        par_op = {h.get("op"): h for h in sess.history if h.get("op")}
         prev = "src"
-        for step in sess.history:
-            if step.get("op") == "compute":
+
+        # 1. Calculer, puis 2. valider — l'ordre du traitement réel.
+        calc = par_op.get("compute")
+        if calc:
+            expressions = calc.get("expressions") or {}
+            connues = {c: expressions[c] for c in calc.get("columns", []) if c in expressions}
+            perdues = [c for c in calc.get("columns", []) if c not in expressions]
+            if connues:
                 nodes.append({"id": "calc", "type": "compute",
                               "label": "colonnes calculées",
-                              "config": {"columns": {c: f"[{c}]" for c in step["columns"]}}})
+                              "config": {"columns": connues}})
                 edges.append({"from": prev, "to": "calc"})
                 prev = "calc"
-            elif step.get("op") == "validate":
-                rules = {c: {k: v for k, v in r.items()
-                             if k in ("type", "regex", "nullable", "length")}
-                         for c, r in step.get("rules", {}).items()}
-                rules = {c: r for c, r in rules.items() if r}
-                if rules:
-                    nodes.append({"id": "check", "type": "validate",
-                                  "label": "règles de validation",
-                                  "config": {"rules": rules}})
-                    edges.append({"from": prev, "to": "check"})
-                    prev = "check"
+            if perdues:
+                skipped.append(
+                    f"{len(perdues)} colonne(s) calculée(s) sans expression enregistrée "
+                    f"({', '.join(sorted(perdues))}) — session antérieure au journal "
+                    f"des expressions ; relancez la validation pour les capturer")
+
+        sql = par_op.get("sql_compute")
+        if sql:
+            noms = sql.get("columns", [])
+            skipped.append(
+                f"{len(noms)} colonne(s) calculée(s) en SQL ({', '.join(sorted(noms))}) — "
+                f"aucune brique de flux n'exécute de SQL sur la table courante, "
+                f"à refaire en expression ou en amont de la source")
+
+        check = par_op.get("validate")
+        types_declares = {c: (r or {}).get("type")
+                          for c, r in (check or {}).get("rules", {}).items()}
+        if check:
+            rules = {c: {k: v for k, v in r.items()
+                         if k in ("type", "regex", "nullable", "length")}
+                     for c, r in check.get("rules", {}).items()}
+            rules = {c: r for c, r in rules.items() if r}
+            if rules:
+                nodes.append({"id": "check", "type": "validate",
+                              "label": "règles de validation",
+                              "config": {"rules": rules}})
+                edges.append({"from": prev, "to": "check"})
+                prev = "check"
+
+        # Le nettoyage n'est pas repris, et c'est structurel : la brique
+        # `validate` *contrôle* sans transformer — « the verdict travels in the
+        # node's meta », dit sa docstring — alors qu'appuyer sur Valider dans
+        # l'interface nettoie d'abord et calcule sur les valeurs nettoyées. Un
+        # `[QTE] * [PRIX]` promu tel quel s'exécute donc sur des chaînes et
+        # renvoie `#ERR`. Ce n'est signalé que quand ça peut mordre : une
+        # expression à rejouer et au moins une colonne d'un type autre que
+        # texte. La vraie réponse est un nœud `config` — la brique qui fait
+        # « exactement ce que fait Valider », nettoyage compris — mais elle
+        # suppose que la configuration de la session ait été enregistrée comme
+        # artefact, ce que cette route ne fait pas encore.
+        if calc and any(ty and ty != "string" for ty in types_declares.values()):
+            a_nettoyer = sorted(c for c, ty in types_declares.items()
+                                if ty and ty != "string")
+            skipped.append(
+                f"le nettoyage des colonnes {', '.join(a_nettoyer)} n'est pas repris — "
+                f"la brique de validation contrôle sans transformer, donc une "
+                f"expression qui compte sur des valeurs nettoyées s'exécutera sur "
+                f"le texte brut ; enregistrez la configuration et posez un nœud "
+                f"`config` en amont du calcul")
 
         edits = int(getattr(sess, "edits_count", 0) or 0)
         if edits:
@@ -1518,20 +1584,37 @@ def process(sid: str, req: ProcessRequest, env: str = "",
             # records a real schema instead of defaulting every column to string.
             sess.last_field_types = {c: getattr(fields[c], "type", "string")
                                      for c in cols if c in fields}
-            # Replayable logic: the rules that were applied, and the derived columns.
+            # ── Logique rejouable ────────────────────────────────────────
+            # L'historique porte désormais les *expressions*, pas seulement les
+            # noms de colonnes. C'était le maillon manquant de `session_to_flow` :
+            # avec la seule liste `["total"]`, la promotion ne pouvait écrire que
+            # `total = [total]` — une colonne qui se calcule à partir d'elle-même,
+            # c'est-à-dire la formule perdue. Un historique qui résume ne permet
+            # pas de rejouer ; il faut qu'il journalise.
             sess.history = [h for h in sess.history if h.get("op") != "validate"]
             sess.history.append({"op": "validate", "columns": list(cols),
                                  "rules": {c: fields[c].model_dump(exclude_none=True)
                                            for c in cols if c in fields}})
-            sql_names = [n for n in computed_names
-                        if n in {c.name for c in req.sql_computed}]
-            plain_names = [n for n in computed_names if n not in sql_names]
+            sql_by_name = {c.name: c for c in req.sql_computed}
+            plain_by_name = {c.name: c for c in (req.computed or [])}
+            sql_names = [n for n in computed_names if n in sql_by_name]
+            plain_names = [n for n in computed_names if n not in sql_by_name]
             if plain_names:
                 sess.history = [h for h in sess.history if h.get("op") != "compute"]
-                sess.history.append({"op": "compute", "columns": list(plain_names)})
+                sess.history.append({
+                    "op": "compute",
+                    "columns": list(plain_names),
+                    "expressions": {n: plain_by_name[n].expression
+                                    for n in plain_names if n in plain_by_name},
+                })
             if sql_names:
                 sess.history = [h for h in sess.history if h.get("op") != "sql_compute"]
-                sess.history.append({"op": "sql_compute", "columns": list(sql_names)})
+                sess.history.append({
+                    "op": "sql_compute",
+                    "columns": list(sql_names),
+                    "expressions": {n: sql_by_name[n].expression for n in sql_names},
+                    "modes": {n: sql_by_name[n].mode for n in sql_names},
+                })
             head = df_post[cols].head(req.preview_limit) if cols else df_post.head(0)
 
             styles_by_col = result.get("styles") or {}
